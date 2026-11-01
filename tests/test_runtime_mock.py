@@ -1747,6 +1747,79 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 self.assertIn("Ake_Wep_Explosions.Ak_Play_Wep_Explosion_Gyrojet", world.played_ak)
                 self.assertIn("Anim_CameraAnimations.Explosions.Canim_Explosion_Medium", world.played_canims)
 
+                # 4D. Defensive Blade Guard: the held Melee Weapon's rolled 50-70% Damage Reduction
+                # blocks the incoming `WillowPlayerPawn:TakeDamage` and re-calls it with reduced damage!
+                world.pawn.Weapon = sabre
+                _, sabre_dr_card = resolver.resolve_melee_weapon(sabre, sync_weapon_props=False)
+                dr_pct = sabre_dr_card.damage_reduction_pct
+                self.assertTrue(50 <= dr_pct <= 70, f"Damage Reduction {dr_pct}% outside 50-70%!")
+                self.assertIn(
+                    melee_arsenal.runtime.hook_player_take_damage, melee_arsenal.runtime.ALL_HOOKS
+                )
+
+                td_re_calls = []
+                td_args = FakeWrappedStruct("WillowPlayerPawn.TakeDamage", Damage=1000.0)
+                expected_reduced = 1000.0 * (1.0 - dr_pct / 100.0)
+
+                res_dr = combat.on_player_take_damage_pre(
+                    world.pawn,
+                    td_args,
+                    None,
+                    lambda *a, **k: td_re_calls.append((a, k)),
+                )
+                self.assertEqual(res_dr, world.block_sentinel)
+                self.assertEqual(len(td_re_calls), 1)
+                # `func(args)` re-call received the SAME args struct, now carrying reduced damage
+                self.assertIs(td_re_calls[0][0][0], td_args)
+                self.assertAlmostEqual(td_args.Damage, expected_reduced, places=3)
+
+                # A vanilla gun in hand (or no weapon) must never reduce incoming damage
+                vanilla_wpn = types.SimpleNamespace(
+                    Name="WillowWeapon_VanillaPistol",
+                    ObjectFlags=0,
+                    DefinitionData=FakeWrappedStruct(
+                        "WeaponDefinitionData",
+                        WeaponTypeDefinition=None,
+                        BarrelPartDefinition=None,
+                        BalanceDefinition=None,
+                    ),
+                )
+                for held in (vanilla_wpn, None):
+                    world.pawn.Weapon = held
+                    td_re_calls.clear()
+                    self.assertIsNone(
+                        combat.on_player_take_damage_pre(
+                            world.pawn, td_args, None, lambda *a: td_re_calls.append(a)
+                        )
+                    )
+                    self.assertEqual(td_re_calls, [])
+
+                # Co-op safety: only the LOCAL player's own pawn is ever modified
+                co_op_pawn = types.SimpleNamespace(
+                    Name="WillowPlayerPawn_CoOp", ObjectFlags=0, Weapon=sabre
+                )
+                td_re_calls.clear()
+                self.assertIsNone(
+                    combat.on_player_take_damage_pre(
+                        co_op_pawn, td_args, None, lambda *a: td_re_calls.append(a)
+                    )
+                )
+                self.assertEqual(td_re_calls, [])
+
+                # The Mod Menu toggle turns the whole defensive perk off
+                world.pawn.Weapon = sabre
+                state.STATE.damage_reduction_enabled = False
+                td_re_calls.clear()
+                try:
+                    self.assertIsNone(
+                        combat.on_player_take_damage_pre(
+                            world.pawn, td_args, None, lambda *a: td_re_calls.append(a)
+                        )
+                    )
+                    self.assertEqual(td_re_calls, [])
+                finally:
+                    state.STATE.damage_reduction_enabled = True
+
                 # 5. Item Card GFx Hooks — MUST NOT call AdjustHeight()!
                 top_rows_written: dict[int, tuple] = {}
                 gfx_card = types.SimpleNamespace(
@@ -1831,7 +1904,7 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 from melee_arsenal.core.schemas import MeleeWeaponInstance, MeleeWeaponParts
                 from melee_arsenal.runtime import commands, custom_assets, definitions, resolver, state
 
-                self.assertEqual(melee_arsenal.__version__, "0.3.3")
+                self.assertEqual(melee_arsenal.__version__, "0.3.4")
                 self.assertTrue(definitions.ensure_definitions_built())
                 self.assertTrue(state.STATE.custom_assets_active)
                 self.assertEqual(state.STATE.custom_kit_revision, "bold_ink_visual_revision_of_r4")

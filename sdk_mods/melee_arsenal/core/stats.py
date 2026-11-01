@@ -1,6 +1,7 @@
 """Gun-scaled card stat evaluation & melee-bonus-stacked attack damage math."""
 from __future__ import annotations
 
+import zlib
 from dataclasses import dataclass
 from typing import Iterable
 
@@ -16,6 +17,10 @@ GUN_DAMAGE_L0_CONSTANT: float = 18.0
 MELEE_WEAPON_TYPE_DAMAGE_SCALAR: float = 2.65
 UU_PER_METER: float = 100.0
 ROID_REFERENCE_SWING_SPEED: float = 1.50  # Normalizes flat Roid shield bonuses across fast/slow blades
+
+# Every Melee Arsenal weapon rolls a flat incoming-damage reduction in this range while equipped.
+DAMAGE_REDUCTION_MIN_PCT: int = 50
+DAMAGE_REDUCTION_MAX_PCT: int = 70
 
 RARITY_DAMAGE_GRADE_BONUS: dict[Rarity, float] = {
     Rarity.COMMON: 0.00,
@@ -95,6 +100,9 @@ class ComputedCardStats:
     matching_grip: bool
     momentum_scale: float
 
+    # Defensive perk: incoming damage reduction while this weapon is equipped (50-70%)
+    damage_reduction_pct: int
+
 
 @dataclass(frozen=True, slots=True)
 class AttackDamageBreakdown:
@@ -112,6 +120,40 @@ class AttackDamageBreakdown:
     splash_hit_damage: int
     effective_proc_chance: float
     effective_dot_dps: float
+
+
+def compute_damage_reduction_pct(weapon: MeleeWeaponInstance) -> int:
+    """Roll this weapon's flat incoming-damage reduction (deterministic, 50-70%).
+
+    Derived only from the weapon's construction (parts + rarity) — never from `unique_id` or
+    `game_stage`, both of which BL2 can hand back as `0`/`1` for freshly re-assembled items. That
+    keeps the item card, `melee_dump_held`, and the live `WillowPlayerPawn:TakeDamage` hook in exact
+    agreement for the same blade across save/load and map transitions.
+    """
+    seed = "|".join(
+        (
+            weapon.parts.blade_id,
+            weapon.parts.grip_id,
+            weapon.parts.accessory_id,
+            weapon.parts.element_id,
+            weapon.rarity.name,
+        )
+    )
+    digest = zlib.crc32(seed.encode("utf-8"))
+    span = DAMAGE_REDUCTION_MAX_PCT - DAMAGE_REDUCTION_MIN_PCT + 1
+    return DAMAGE_REDUCTION_MIN_PCT + (digest % span)
+
+
+def apply_incoming_damage_reduction(damage: float, damage_reduction_pct: float) -> float:
+    """Apply a Melee Weapon's flat damage reduction to an incoming damage amount.
+
+    `damage_reduction_pct` is the percentage of the hit removed (50-70), so 100 damage with 60%
+    reduction becomes 40. Non-positive damage or reduction is returned untouched.
+    """
+    if damage <= 0.0 or damage_reduction_pct <= 0.0:
+        return damage
+    pct = min(100.0, float(damage_reduction_pct))
+    return damage * (1.0 - pct / 100.0)
 
 
 def compute_card_stats(weapon: MeleeWeaponInstance) -> ComputedCardStats:
@@ -242,6 +284,7 @@ def compute_card_stats(weapon: MeleeWeaponInstance) -> ComputedCardStats:
         splash_damage=splash_damage,
         matching_grip=matching_grip,
         momentum_scale=round(momentum_scale, 2),
+        damage_reduction_pct=compute_damage_reduction_pct(weapon),
     )
 
 

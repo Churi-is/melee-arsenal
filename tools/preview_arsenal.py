@@ -1,6 +1,7 @@
 """Pure-CPython CLI simulator to inspect rolled Melee Arsenal weapons & item cards offline."""
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -12,11 +13,17 @@ from melee_arsenal.core import (  # noqa: E402
     Manufacturer,
     PlayerMeleeContext,
     Rarity,
+    apply_incoming_damage_reduction,
     build_item_card_payload,
     compute_attack_damage,
     compute_card_stats,
     roll_melee_weapon,
 )
+
+
+def _strip_font_tags(line: str) -> str:
+    """Render a Scaleform FunStats HTML line as plain console text."""
+    return re.sub(r"</?font[^>]*>", "", line)
 
 
 def main() -> None:
@@ -50,6 +57,11 @@ def main() -> None:
                 f"  Elemental  : [{es.element.value}] {es.dps_label}: {es.dps_formatted} | "
                 f"{es.chance_label}: {es.chance_formatted}"
             )
+        print(
+            f"  Defense    : {stats.damage_reduction_pct}% Damage Reduction while equipped"
+            f" (1,000 incoming -> {apply_incoming_damage_reduction(1000.0, stats.damage_reduction_pct):,.0f})"
+        )
+        print(f"  Fun Stats  : {_strip_font_tags(card.fun_stats_lines[0])}")
         print(
             f"  On-Attack  : BaseCard={stats.card_damage:,} -> With +120% Melee, 12k Roid"
             f"{', Crit' if stats.can_weakspot_crit else ''} & UVHM Slag = {hit.final_hit_damage:,} dmg"

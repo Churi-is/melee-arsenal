@@ -175,8 +175,11 @@ def build_item_card_payload(
                 chance_arrow=_compare_values(card.elemental_chance_pct, other_echance, eps=0.1),
             )
 
-    # Bottom white/colored FunStats modifier lines
-    lines: list[str] = []
+    # Bottom white/colored FunStats modifier lines.
+    # Keep the defensive line first and short: long trailing lines clip into the manufacturer logo.
+    lines: list[str] = [
+        f"<font color='#7fd4ff'>Damage Reduction {card.damage_reduction_pct}% (Equipped)</font>"
+    ]
     if card.targeting_mode == TargetingMode.SINGLE_TARGET:
         lines.append("<font color='#d8e6ff'>Single-Target Precision Strike</font>")
     else:
@@ -196,8 +199,6 @@ def build_item_card_payload(
         )
     elif card.element == Element.SLAG:
         lines.append("<font color='#b84dff'>Slagged targets take amplified damage</font>")
-
-    lines.append("<font color='#9be7a8'>Stacks with Player Melee &amp; Roid Bonuses</font>")
 
     return ItemCardPayload(
         title=card.full_name,

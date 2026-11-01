@@ -118,6 +118,7 @@ class RuntimeRegistry:
     slash_motion_scale: float = 1.0
     stack_player_melee_bonuses: bool = True
     stack_roid_shields: bool = True
+    damage_reduction_enabled: bool = True
     debug_attack_log: bool = False
 
     # Re-entrancy guard during melee strike dispatch
