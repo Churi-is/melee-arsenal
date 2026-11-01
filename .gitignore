@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.DS_Store
+sdk_mods/melee_arsenal_probe/reports/
+dist/

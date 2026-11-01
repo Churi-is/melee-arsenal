@@ -1,0 +1,1231 @@
+{
+  "schema": "inkblade.socket-kit/1.0",
+  "units": "meters",
+  "coordinates": {
+    "working": "right-handed; +Z blade tip, -Y display/front face, +X guard right",
+    "gltf": "standard glTF right-handed Y-up; Blender exporter applies coordinate conversion",
+    "socket_rule": "world_child = world_socket @ inverse(child_mount) ; exported child mounts are identity"
+  },
+  "parts": {
+    "blade_hyperion": {
+      "file": "models/parts/blade_hyperion.glb",
+      "slot": "BarrelPartDefinition",
+      "manufacturer": "Hyperion",
+      "texture": "textures/blade_hyperion_basecolor.png",
+      "vertices": 864,
+      "triangles": 288,
+      "sockets_blender_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ],
+        "SOCKET_GRIP": [
+          0,
+          0,
+          0
+        ],
+        "SOCKET_ACCESSORY": [
+          0,
+          0,
+          0.16
+        ],
+        "SOCKET_ELEMENT": [
+          -0.065,
+          0,
+          0.12
+        ]
+      },
+      "sockets_gltf_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ],
+        "SOCKET_GRIP": [
+          0,
+          0,
+          0
+        ],
+        "SOCKET_ACCESSORY": [
+          0,
+          0.16,
+          0
+        ],
+        "SOCKET_ELEMENT": [
+          -0.065,
+          0.12,
+          0
+        ]
+      },
+      "materials": [
+        "SURFACE",
+        "ELEMENT_ACCENT"
+      ],
+      "uv_layout": "textures/blade_hyperion_uv_layout.json",
+      "pixels_per_meter": 768.0,
+      "archetype": "Precision tanto",
+      "targeting_mode": "SINGLE_TARGET",
+      "base_reach_m": 1.45,
+      "base_damage": 82,
+      "base_swings_per_second": 1.65,
+      "element_policy": {
+        "mode": "OPTIONAL",
+        "allowed": [
+          "Shock"
+        ]
+      },
+      "signature_title": "Ronin",
+      "core_thickness_m": 0.0375,
+      "accessory_face_gap_m": 0.017249999999999998,
+      "element_face_gap_m": 0.042749999999999996,
+      "bifacial_fit": false,
+      "texture_notes": "R4 UVs retained; atlas enhanced with heavy procedural ink and shadow detail."
+    },
+    "grip_hyperion": {
+      "file": "models/parts/grip_hyperion.glb",
+      "slot": "GripPartDefinition",
+      "manufacturer": "Hyperion",
+      "texture": "textures/grip_hyperion_basecolor.png",
+      "vertices": 612,
+      "triangles": 204,
+      "sockets_blender_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ],
+        "SOCKET_POMMEL": [
+          0,
+          0,
+          -0.5
+        ]
+      },
+      "sockets_gltf_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ],
+        "SOCKET_POMMEL": [
+          0,
+          -0.5,
+          0
+        ]
+      },
+      "materials": [
+        "SURFACE"
+      ],
+      "uv_layout": "textures/grip_hyperion_uv_layout.json",
+      "pixels_per_meter": 768.0,
+      "stat_modifiers_fraction": {
+        "damage": -0.04,
+        "speed": 0.1,
+        "reach": 0,
+        "crit": 0.12,
+        "elemental": 0
+      },
+      "compatible_blades": "ALL",
+      "bifacial_fit": false,
+      "texture_notes": "R4 UVs retained; atlas enhanced with heavy procedural ink and shadow detail."
+    },
+    "blade_bandit": {
+      "file": "models/parts/blade_bandit.glb",
+      "slot": "BarrelPartDefinition",
+      "manufacturer": "Bandit",
+      "texture": "textures/blade_bandit_basecolor.png",
+      "vertices": 1368,
+      "triangles": 456,
+      "sockets_blender_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ],
+        "SOCKET_GRIP": [
+          0,
+          0,
+          0
+        ],
+        "SOCKET_ACCESSORY": [
+          0,
+          0,
+          0.16
+        ],
+        "SOCKET_ELEMENT": [
+          -0.065,
+          0,
+          0.12
+        ]
+      },
+      "sockets_gltf_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ],
+        "SOCKET_GRIP": [
+          0,
+          0,
+          0
+        ],
+        "SOCKET_ACCESSORY": [
+          0,
+          0.16,
+          0
+        ],
+        "SOCKET_ELEMENT": [
+          -0.065,
+          0.12,
+          0
+        ]
+      },
+      "materials": [
+        "SURFACE"
+      ],
+      "uv_layout": "textures/blade_bandit_uv_layout.json",
+      "pixels_per_meter": 768.0,
+      "archetype": "Scrap cleaver",
+      "targeting_mode": "FRONTAL_CLEAVE",
+      "base_reach_m": 1.25,
+      "base_damage": 106,
+      "base_swings_per_second": 1.05,
+      "element_policy": {
+        "mode": "OPTIONAL",
+        "allowed": [
+          "Fire",
+          "Corrosive",
+          "Slag"
+        ]
+      },
+      "signature_title": "Chopper",
+      "core_thickness_m": 0.055,
+      "accessory_face_gap_m": 0.026,
+      "element_face_gap_m": 0.042749999999999996,
+      "bifacial_fit": false,
+      "texture_notes": "R4 UVs retained; atlas enhanced with heavy procedural ink and shadow detail."
+    },
+    "grip_bandit": {
+      "file": "models/parts/grip_bandit.glb",
+      "slot": "GripPartDefinition",
+      "manufacturer": "Bandit",
+      "texture": "textures/grip_bandit_basecolor.png",
+      "vertices": 612,
+      "triangles": 204,
+      "sockets_blender_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ],
+        "SOCKET_POMMEL": [
+          0,
+          0,
+          -0.5
+        ]
+      },
+      "sockets_gltf_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ],
+        "SOCKET_POMMEL": [
+          0,
+          -0.5,
+          0
+        ]
+      },
+      "materials": [
+        "SURFACE"
+      ],
+      "uv_layout": "textures/grip_bandit_uv_layout.json",
+      "pixels_per_meter": 768.0,
+      "stat_modifiers_fraction": {
+        "damage": 0.12,
+        "speed": -0.08,
+        "reach": 0.05,
+        "crit": -0.06,
+        "elemental": 0
+      },
+      "compatible_blades": "ALL",
+      "bifacial_fit": false,
+      "texture_notes": "R4 UVs retained; atlas enhanced with heavy procedural ink and shadow detail."
+    },
+    "blade_jakobs": {
+      "file": "models/parts/blade_jakobs.glb",
+      "slot": "BarrelPartDefinition",
+      "manufacturer": "Jakobs",
+      "texture": "textures/blade_jakobs_basecolor.png",
+      "vertices": 864,
+      "triangles": 288,
+      "sockets_blender_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ],
+        "SOCKET_GRIP": [
+          0,
+          0,
+          0
+        ],
+        "SOCKET_ACCESSORY": [
+          0,
+          0,
+          0.16
+        ],
+        "SOCKET_ELEMENT": [
+          -0.065,
+          0,
+          0.12
+        ]
+      },
+      "sockets_gltf_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ],
+        "SOCKET_GRIP": [
+          0,
+          0,
+          0
+        ],
+        "SOCKET_ACCESSORY": [
+          0,
+          0.16,
+          0
+        ],
+        "SOCKET_ELEMENT": [
+          -0.065,
+          0.12,
+          0
+        ]
+      },
+      "materials": [
+        "SURFACE"
+      ],
+      "uv_layout": "textures/blade_jakobs_uv_layout.json",
+      "pixels_per_meter": 768.0,
+      "archetype": "Frontier sabre",
+      "targeting_mode": "SINGLE_TARGET",
+      "base_reach_m": 1.39,
+      "base_damage": 98,
+      "base_swings_per_second": 1.4,
+      "element_policy": {
+        "mode": "FORBIDDEN",
+        "allowed": []
+      },
+      "signature_title": "Cavalier",
+      "core_thickness_m": 0.0325,
+      "accessory_face_gap_m": 0.014750000000000001,
+      "element_face_gap_m": 0.042749999999999996,
+      "bifacial_fit": false,
+      "texture_notes": "R4 UVs retained; atlas enhanced with heavy procedural ink and shadow detail."
+    },
+    "grip_jakobs": {
+      "file": "models/parts/grip_jakobs.glb",
+      "slot": "GripPartDefinition",
+      "manufacturer": "Jakobs",
+      "texture": "textures/grip_jakobs_basecolor.png",
+      "vertices": 840,
+      "triangles": 280,
+      "sockets_blender_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ],
+        "SOCKET_POMMEL": [
+          0,
+          0,
+          -0.5
+        ]
+      },
+      "sockets_gltf_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ],
+        "SOCKET_POMMEL": [
+          0,
+          -0.5,
+          0
+        ]
+      },
+      "materials": [
+        "SURFACE"
+      ],
+      "uv_layout": "textures/grip_jakobs_uv_layout.json",
+      "pixels_per_meter": 768.0,
+      "stat_modifiers_fraction": {
+        "damage": 0.08,
+        "speed": 0.02,
+        "reach": 0,
+        "crit": 0.16,
+        "elemental": -0.1
+      },
+      "compatible_blades": "ALL",
+      "bifacial_fit": false,
+      "texture_notes": "R4 UVs retained; atlas enhanced with heavy procedural ink and shadow detail."
+    },
+    "blade_maliwan": {
+      "file": "models/parts/blade_maliwan.glb",
+      "slot": "BarrelPartDefinition",
+      "manufacturer": "Maliwan",
+      "texture": "textures/blade_maliwan_basecolor.png",
+      "vertices": 912,
+      "triangles": 304,
+      "sockets_blender_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ],
+        "SOCKET_GRIP": [
+          0,
+          0,
+          0
+        ],
+        "SOCKET_ACCESSORY": [
+          0,
+          0,
+          0.16
+        ],
+        "SOCKET_ELEMENT": [
+          -0.065,
+          0,
+          0.12
+        ]
+      },
+      "sockets_gltf_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ],
+        "SOCKET_GRIP": [
+          0,
+          0,
+          0
+        ],
+        "SOCKET_ACCESSORY": [
+          0,
+          0.16,
+          0
+        ],
+        "SOCKET_ELEMENT": [
+          -0.065,
+          0.12,
+          0
+        ]
+      },
+      "materials": [
+        "SURFACE",
+        "ELEMENT_ACCENT"
+      ],
+      "uv_layout": "textures/blade_maliwan_uv_layout.json",
+      "pixels_per_meter": 768.0,
+      "archetype": "Ion falchion",
+      "targeting_mode": "FRONTAL_CLEAVE",
+      "base_reach_m": 1.38,
+      "base_damage": 72,
+      "base_swings_per_second": 1.5,
+      "element_policy": {
+        "mode": "REQUIRED",
+        "allowed": [
+          "Fire",
+          "Shock",
+          "Corrosive",
+          "Slag"
+        ]
+      },
+      "signature_title": "Seraphim",
+      "core_thickness_m": 0.0475,
+      "accessory_face_gap_m": 0.02225,
+      "element_face_gap_m": 0.042749999999999996,
+      "bifacial_fit": false,
+      "texture_notes": "R4 UVs retained; atlas enhanced with heavy procedural ink and shadow detail."
+    },
+    "grip_maliwan": {
+      "file": "models/parts/grip_maliwan.glb",
+      "slot": "GripPartDefinition",
+      "manufacturer": "Maliwan",
+      "texture": "textures/grip_maliwan_basecolor.png",
+      "vertices": 432,
+      "triangles": 144,
+      "sockets_blender_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ],
+        "SOCKET_POMMEL": [
+          0,
+          0,
+          -0.5
+        ]
+      },
+      "sockets_gltf_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ],
+        "SOCKET_POMMEL": [
+          0,
+          -0.5,
+          0
+        ]
+      },
+      "materials": [
+        "SURFACE",
+        "ELEMENT_ACCENT"
+      ],
+      "uv_layout": "textures/grip_maliwan_uv_layout.json",
+      "pixels_per_meter": 768.0,
+      "stat_modifiers_fraction": {
+        "damage": -0.06,
+        "speed": 0.06,
+        "reach": 0.02,
+        "crit": 0,
+        "elemental": 0.2
+      },
+      "compatible_blades": "ALL",
+      "bifacial_fit": false,
+      "texture_notes": "R4 UVs retained; atlas enhanced with heavy procedural ink and shadow detail."
+    },
+    "blade_torgue": {
+      "file": "models/parts/blade_torgue.glb",
+      "slot": "BarrelPartDefinition",
+      "manufacturer": "Torgue",
+      "texture": "textures/blade_torgue_basecolor.png",
+      "vertices": 1296,
+      "triangles": 432,
+      "sockets_blender_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ],
+        "SOCKET_GRIP": [
+          0,
+          0,
+          0
+        ],
+        "SOCKET_ACCESSORY": [
+          0,
+          0,
+          0.16
+        ],
+        "SOCKET_ELEMENT": [
+          -0.065,
+          0,
+          0.12
+        ]
+      },
+      "sockets_gltf_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ],
+        "SOCKET_GRIP": [
+          0,
+          0,
+          0
+        ],
+        "SOCKET_ACCESSORY": [
+          0,
+          0.16,
+          0
+        ],
+        "SOCKET_ELEMENT": [
+          -0.065,
+          0.12,
+          0
+        ]
+      },
+      "materials": [
+        "SURFACE"
+      ],
+      "uv_layout": "textures/blade_torgue_uv_layout.json",
+      "pixels_per_meter": 768.0,
+      "archetype": "Breach cutter",
+      "targeting_mode": "FRONTAL_CLEAVE",
+      "base_reach_m": 1.19,
+      "base_damage": 132,
+      "base_swings_per_second": 0.82,
+      "element_policy": {
+        "mode": "OPTIONAL",
+        "allowed": [
+          "Explosive"
+        ]
+      },
+      "signature_title": "Detonator",
+      "core_thickness_m": 0.08,
+      "accessory_face_gap_m": 0.0385,
+      "element_face_gap_m": 0.042749999999999996,
+      "bifacial_fit": false,
+      "texture_notes": "R4 UVs retained; atlas enhanced with heavy procedural ink and shadow detail."
+    },
+    "grip_torgue": {
+      "file": "models/parts/grip_torgue.glb",
+      "slot": "GripPartDefinition",
+      "manufacturer": "Torgue",
+      "texture": "textures/grip_torgue_basecolor.png",
+      "vertices": 888,
+      "triangles": 296,
+      "sockets_blender_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ],
+        "SOCKET_POMMEL": [
+          0,
+          0,
+          -0.5
+        ]
+      },
+      "sockets_gltf_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ],
+        "SOCKET_POMMEL": [
+          0,
+          -0.5,
+          0
+        ]
+      },
+      "materials": [
+        "SURFACE"
+      ],
+      "uv_layout": "textures/grip_torgue_uv_layout.json",
+      "pixels_per_meter": 768.0,
+      "stat_modifiers_fraction": {
+        "damage": 0.16,
+        "speed": -0.12,
+        "reach": 0.04,
+        "crit": -0.08,
+        "elemental": 0.05
+      },
+      "compatible_blades": "ALL",
+      "bifacial_fit": false,
+      "shell_sides": 6,
+      "rib_count": 4,
+      "rib_wrap_degrees": 360,
+      "shell_radius_m": 0.094,
+      "rib_radius_m": 0.104,
+      "texture_notes": "R4 UVs retained; atlas enhanced with heavy procedural ink and shadow detail."
+    },
+    "accessory_serrated_edge": {
+      "file": "models/parts/accessory_serrated_edge.glb",
+      "slot": "Accessory1PartDefinition",
+      "manufacturer": "Universal",
+      "texture": "textures/accessory_serrated_edge_basecolor.png",
+      "vertices": 396,
+      "triangles": 264,
+      "sockets_blender_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ]
+      },
+      "sockets_gltf_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ]
+      },
+      "materials": [
+        "SURFACE"
+      ],
+      "uv_layout": "textures/accessory_serrated_edge_uv_layout.json",
+      "pixels_per_meter": 768.0,
+      "name": "Serrated Edge",
+      "modifier": {
+        "damage": 0.12
+      },
+      "restriction": "ANY",
+      "target_socket": "SOCKET_ACCESSORY",
+      "bifacial_fit": true,
+      "fit_inner_shift_m": -0.0225,
+      "texture_notes": "R4 UVs retained; atlas enhanced with heavy procedural ink and shadow detail."
+    },
+    "accessory_balanced_pommel": {
+      "file": "models/parts/accessory_balanced_pommel.glb",
+      "slot": "Accessory1PartDefinition",
+      "manufacturer": "Universal",
+      "texture": "textures/accessory_balanced_pommel_basecolor.png",
+      "vertices": 216,
+      "triangles": 72,
+      "sockets_blender_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ]
+      },
+      "sockets_gltf_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ]
+      },
+      "materials": [
+        "SURFACE"
+      ],
+      "uv_layout": "textures/accessory_balanced_pommel_uv_layout.json",
+      "pixels_per_meter": 768.0,
+      "name": "Balanced Pommel",
+      "modifier": {
+        "speed": 0.12
+      },
+      "restriction": "ANY",
+      "target_socket": "SOCKET_POMMEL",
+      "bifacial_fit": false,
+      "texture_notes": "R4 UVs retained; atlas enhanced with heavy procedural ink and shadow detail."
+    },
+    "accessory_extended_blade_fuller": {
+      "file": "models/parts/accessory_extended_blade_fuller.glb",
+      "slot": "Accessory1PartDefinition",
+      "manufacturer": "Universal",
+      "texture": "textures/accessory_extended_blade_fuller_basecolor.png",
+      "vertices": 216,
+      "triangles": 144,
+      "sockets_blender_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ]
+      },
+      "sockets_gltf_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ]
+      },
+      "materials": [
+        "SURFACE"
+      ],
+      "uv_layout": "textures/accessory_extended_blade_fuller_uv_layout.json",
+      "pixels_per_meter": 768.0,
+      "name": "Extended Blade Fuller",
+      "modifier": {
+        "reach": 0.14
+      },
+      "restriction": "ANY",
+      "target_socket": "SOCKET_ACCESSORY",
+      "bifacial_fit": true,
+      "fit_inner_shift_m": -0.030000000000000002,
+      "texture_notes": "R4 UVs retained; atlas enhanced with heavy procedural ink and shadow detail."
+    },
+    "accessory_monofilament_honing": {
+      "file": "models/parts/accessory_monofilament_honing.glb",
+      "slot": "Accessory1PartDefinition",
+      "manufacturer": "Universal",
+      "texture": "textures/accessory_monofilament_honing_basecolor.png",
+      "vertices": 300,
+      "triangles": 200,
+      "sockets_blender_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ]
+      },
+      "sockets_gltf_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ]
+      },
+      "materials": [
+        "SURFACE",
+        "ELEMENT_ACCENT"
+      ],
+      "uv_layout": "textures/accessory_monofilament_honing_uv_layout.json",
+      "pixels_per_meter": 768.0,
+      "name": "Monofilament Honing",
+      "modifier": {
+        "crit": 0.22
+      },
+      "restriction": "SINGLE_TARGET",
+      "target_socket": "SOCKET_ACCESSORY",
+      "bifacial_fit": true,
+      "fit_inner_shift_m": -0.02987564434701786,
+      "texture_notes": "R4 UVs retained; atlas enhanced with heavy procedural ink and shadow detail."
+    },
+    "accessory_flared_cleave_guard": {
+      "file": "models/parts/accessory_flared_cleave_guard.glb",
+      "slot": "Accessory1PartDefinition",
+      "manufacturer": "Universal",
+      "texture": "textures/accessory_flared_cleave_guard_basecolor.png",
+      "vertices": 516,
+      "triangles": 172,
+      "sockets_blender_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ]
+      },
+      "sockets_gltf_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ]
+      },
+      "materials": [
+        "SURFACE"
+      ],
+      "uv_layout": "textures/accessory_flared_cleave_guard_uv_layout.json",
+      "pixels_per_meter": 768.0,
+      "name": "Flared Cleave Guard",
+      "modifier": {
+        "cleave_arc_degrees": 20
+      },
+      "restriction": "FRONTAL_CLEAVE",
+      "target_socket": "SOCKET_ACCESSORY",
+      "bifacial_fit": false,
+      "texture_notes": "R4 UVs retained; atlas enhanced with heavy procedural ink and shadow detail."
+    },
+    "accessory_reinforced_heavy_spine": {
+      "file": "models/parts/accessory_reinforced_heavy_spine.glb",
+      "slot": "Accessory1PartDefinition",
+      "manufacturer": "Universal",
+      "texture": "textures/accessory_reinforced_heavy_spine_basecolor.png",
+      "vertices": 492,
+      "triangles": 328,
+      "sockets_blender_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ]
+      },
+      "sockets_gltf_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ]
+      },
+      "materials": [
+        "SURFACE"
+      ],
+      "uv_layout": "textures/accessory_reinforced_heavy_spine_uv_layout.json",
+      "pixels_per_meter": 768.0,
+      "name": "Reinforced Heavy Spine",
+      "modifier": {
+        "damage": 0.22,
+        "speed": -0.12
+      },
+      "restriction": "ANY",
+      "target_socket": "SOCKET_ACCESSORY",
+      "bifacial_fit": true,
+      "fit_inner_shift_m": 0.001666666666666668,
+      "depth_multiplier_vs_r4_initial": 0.3333333333333333,
+      "texture_notes": "R4 UVs retained; atlas enhanced with heavy procedural ink and shadow detail."
+    },
+    "accessory_overclocked_elemental_coil": {
+      "file": "models/parts/accessory_overclocked_elemental_coil.glb",
+      "slot": "Accessory1PartDefinition",
+      "manufacturer": "Universal",
+      "texture": "textures/accessory_overclocked_elemental_coil_basecolor.png",
+      "vertices": 480,
+      "triangles": 320,
+      "sockets_blender_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ]
+      },
+      "sockets_gltf_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ]
+      },
+      "materials": [
+        "SURFACE",
+        "ELEMENT_ACCENT"
+      ],
+      "uv_layout": "textures/accessory_overclocked_elemental_coil_uv_layout.json",
+      "pixels_per_meter": 768.0,
+      "name": "Overclocked Elemental Coil",
+      "modifier": {
+        "status_chance": 0.18,
+        "dot": 0.2
+      },
+      "restriction": "ELEMENT_REQUIRED",
+      "target_socket": "SOCKET_ACCESSORY",
+      "bifacial_fit": true,
+      "fit_inner_shift_m": 0.0049999999999999975,
+      "texture_notes": "R4 UVs retained; atlas enhanced with heavy procedural ink and shadow detail."
+    },
+    "element_fire": {
+      "file": "models/parts/element_fire.glb",
+      "slot": "ElementalPartDefinition",
+      "manufacturer": "Universal",
+      "texture": "textures/element_fire_basecolor.png",
+      "vertices": 180,
+      "triangles": 120,
+      "sockets_blender_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ]
+      },
+      "sockets_gltf_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ]
+      },
+      "materials": [
+        "SURFACE",
+        "ELEMENT_ACCENT"
+      ],
+      "uv_layout": "textures/element_fire_uv_layout.json",
+      "pixels_per_meter": 768.0,
+      "element": "Fire",
+      "target_socket": "SOCKET_ELEMENT",
+      "bifacial_fit": true,
+      "fit_inner_shift_m": 0.003999999999999998,
+      "texture_notes": "R4 UVs retained; atlas enhanced with heavy procedural ink and shadow detail."
+    },
+    "element_shock": {
+      "file": "models/parts/element_shock.glb",
+      "slot": "ElementalPartDefinition",
+      "manufacturer": "Universal",
+      "texture": "textures/element_shock_basecolor.png",
+      "vertices": 180,
+      "triangles": 120,
+      "sockets_blender_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ]
+      },
+      "sockets_gltf_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ]
+      },
+      "materials": [
+        "SURFACE",
+        "ELEMENT_ACCENT"
+      ],
+      "uv_layout": "textures/element_shock_uv_layout.json",
+      "pixels_per_meter": 768.0,
+      "element": "Shock",
+      "target_socket": "SOCKET_ELEMENT",
+      "bifacial_fit": true,
+      "fit_inner_shift_m": 0.003999999999999998,
+      "texture_notes": "R4 UVs retained; atlas enhanced with heavy procedural ink and shadow detail."
+    },
+    "element_corrosive": {
+      "file": "models/parts/element_corrosive.glb",
+      "slot": "ElementalPartDefinition",
+      "manufacturer": "Universal",
+      "texture": "textures/element_corrosive_basecolor.png",
+      "vertices": 180,
+      "triangles": 120,
+      "sockets_blender_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ]
+      },
+      "sockets_gltf_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ]
+      },
+      "materials": [
+        "SURFACE",
+        "ELEMENT_ACCENT"
+      ],
+      "uv_layout": "textures/element_corrosive_uv_layout.json",
+      "pixels_per_meter": 768.0,
+      "element": "Corrosive",
+      "target_socket": "SOCKET_ELEMENT",
+      "bifacial_fit": true,
+      "fit_inner_shift_m": 0.003999999999999998,
+      "texture_notes": "R4 UVs retained; atlas enhanced with heavy procedural ink and shadow detail."
+    },
+    "element_slag": {
+      "file": "models/parts/element_slag.glb",
+      "slot": "ElementalPartDefinition",
+      "manufacturer": "Universal",
+      "texture": "textures/element_slag_basecolor.png",
+      "vertices": 180,
+      "triangles": 120,
+      "sockets_blender_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ]
+      },
+      "sockets_gltf_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ]
+      },
+      "materials": [
+        "SURFACE",
+        "ELEMENT_ACCENT"
+      ],
+      "uv_layout": "textures/element_slag_uv_layout.json",
+      "pixels_per_meter": 768.0,
+      "element": "Slag",
+      "target_socket": "SOCKET_ELEMENT",
+      "bifacial_fit": true,
+      "fit_inner_shift_m": 0.003999999999999998,
+      "texture_notes": "R4 UVs retained; atlas enhanced with heavy procedural ink and shadow detail."
+    },
+    "element_explosive": {
+      "file": "models/parts/element_explosive.glb",
+      "slot": "ElementalPartDefinition",
+      "manufacturer": "Universal",
+      "texture": "textures/element_explosive_basecolor.png",
+      "vertices": 180,
+      "triangles": 120,
+      "sockets_blender_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ]
+      },
+      "sockets_gltf_m": {
+        "MOUNT": [
+          0,
+          0,
+          0
+        ]
+      },
+      "materials": [
+        "SURFACE",
+        "ELEMENT_ACCENT"
+      ],
+      "uv_layout": "textures/element_explosive_uv_layout.json",
+      "pixels_per_meter": 768.0,
+      "element": "Explosive",
+      "target_socket": "SOCKET_ELEMENT",
+      "bifacial_fit": true,
+      "fit_inner_shift_m": 0.003999999999999998,
+      "texture_notes": "R4 UVs retained; atlas enhanced with heavy procedural ink and shadow detail."
+    }
+  },
+  "elements": {
+    "Fire": "#ff622b",
+    "Shock": "#40baff",
+    "Corrosive": "#a0ed32",
+    "Slag": "#bc53f3",
+    "Explosive": "#ffce36"
+  },
+  "combinations": [
+    {
+      "id": "01_Ronin",
+      "blade": "Hyperion",
+      "grip": "Hyperion",
+      "accessory": "monofilament_honing",
+      "element": "Shock",
+      "matching": true,
+      "file": "models/combinations/01_Ronin.glb"
+    },
+    {
+      "id": "02_Chopper",
+      "blade": "Bandit",
+      "grip": "Bandit",
+      "accessory": "serrated_edge",
+      "element": "Fire",
+      "matching": true,
+      "file": "models/combinations/02_Chopper.glb"
+    },
+    {
+      "id": "03_Cavalier",
+      "blade": "Jakobs",
+      "grip": "Jakobs",
+      "accessory": "balanced_pommel",
+      "element": null,
+      "matching": true,
+      "file": "models/combinations/03_Cavalier.glb"
+    },
+    {
+      "id": "04_Seraphim",
+      "blade": "Maliwan",
+      "grip": "Maliwan",
+      "accessory": "overclocked_elemental_coil",
+      "element": "Corrosive",
+      "matching": true,
+      "file": "models/combinations/04_Seraphim.glb"
+    },
+    {
+      "id": "05_Detonator",
+      "blade": "Torgue",
+      "grip": "Torgue",
+      "accessory": "reinforced_heavy_spine",
+      "element": "Explosive",
+      "matching": true,
+      "file": "models/combinations/05_Detonator.glb"
+    },
+    {
+      "id": "06_Crossbrand",
+      "blade": "Hyperion",
+      "grip": "Bandit",
+      "accessory": "extended_blade_fuller",
+      "element": null,
+      "matching": false,
+      "file": "models/combinations/06_Crossbrand.glb"
+    },
+    {
+      "id": "07_Slag_Cleaver",
+      "blade": "Bandit",
+      "grip": "Maliwan",
+      "accessory": "flared_cleave_guard",
+      "element": "Slag",
+      "matching": false,
+      "file": "models/combinations/07_Slag_Cleaver.glb"
+    }
+  ],
+  "rarity": {
+    "accessory_probability": {
+      "Common": 0.2,
+      "Uncommon": 0.55,
+      "Rare": 0.85,
+      "Very Rare": 1.0
+    },
+    "material_slot": "MaterialPartDefinition",
+    "rarity_tints": {
+      "Common": "#bbc2c7",
+      "Uncommon": "#63b65c",
+      "Rare": "#4f8bcc",
+      "Very Rare": "#9d64c5"
+    }
+  },
+  "locked_slots": {
+    "BodyPartDefinition": "LOGICAL_HOST_MATCHES_BLADE_MANUFACTURER_NO_EXTRA_MESH",
+    "SightPartDefinition": null,
+    "StockPartDefinition": null
+  },
+  "matching_bonus": {
+    "Hyperion": {
+      "base_damage": 0.1,
+      "swing_speed": 0.12,
+      "signature_title": "Ronin"
+    },
+    "Bandit": {
+      "base_damage": 0.14,
+      "swing_speed": 0.08,
+      "signature_title": "Chopper"
+    },
+    "Jakobs": {
+      "base_damage": 0.12,
+      "swing_speed": 0.1,
+      "signature_title": "Cavalier"
+    },
+    "Maliwan": {
+      "base_damage": 0.1,
+      "swing_speed": 0.12,
+      "signature_title": "Seraphim"
+    },
+    "Torgue": {
+      "base_damage": 0.16,
+      "swing_speed": 0.08,
+      "signature_title": "Detonator"
+    }
+  },
+  "naming": {
+    "unmatched_title": {
+      "Hyperion": "Precision tanto",
+      "Bandit": "Scrap cleaver",
+      "Jakobs": "Frontier sabre",
+      "Maliwan": "Ion falchion",
+      "Torgue": "Breach cutter"
+    },
+    "prefixes": {
+      "Hyperion": {
+        "serrated_edge": "Indexed",
+        "balanced_pommel": "Gyroscopic",
+        "extended_blade_fuller": "Telescopic",
+        "monofilament_honing": "Calibrated",
+        "flared_cleave_guard": "Panoramic",
+        "reinforced_heavy_spine": "Armored",
+        "overclocked_elemental_coil": "Overdriven"
+      },
+      "Bandit": {
+        "serrated_edge": "Bitey",
+        "balanced_pommel": "Quickn",
+        "extended_blade_fuller": "Longboi",
+        "monofilament_honing": "Eye Poker",
+        "flared_cleave_guard": "Wide Swing",
+        "reinforced_heavy_spine": "Bigboned",
+        "overclocked_elemental_coil": "Zappy"
+      },
+      "Jakobs": {
+        "serrated_edge": "Sawtooth",
+        "balanced_pommel": "Quickdraw",
+        "extended_blade_fuller": "Longreach",
+        "monofilament_honing": "Deadeye",
+        "flared_cleave_guard": "Sweeping",
+        "reinforced_heavy_spine": "Ironbound",
+        "overclocked_elemental_coil": "Stormbound"
+      },
+      "Maliwan": {
+        "serrated_edge": "Lacerating",
+        "balanced_pommel": "Harmonic",
+        "extended_blade_fuller": "Elongated",
+        "monofilament_honing": "Focused",
+        "flared_cleave_guard": "Radiant",
+        "reinforced_heavy_spine": "Fortified",
+        "overclocked_elemental_coil": "Catalytic"
+      },
+      "Torgue": {
+        "serrated_edge": "RIPPER",
+        "balanced_pommel": "FAST HANDS",
+        "extended_blade_fuller": "LONG SHOT",
+        "monofilament_honing": "CRIT MACHINE",
+        "flared_cleave_guard": "WIDE LOAD",
+        "reinforced_heavy_spine": "HEAVY METAL",
+        "overclocked_elemental_coil": "HOT WIRED"
+      }
+    }
+  },
+  "revision": "bold_ink_visual_revision_of_r4",
+  "revision_notes": {
+    "blade_core_depth_multiplier": 0.5,
+    "accessory_clip_m": 0.0015,
+    "element_center_x_m": -0.065,
+    "heavy_spine_depth_multiplier": 0.3333333333333333,
+    "torgue_grip": "hexagonal shell with four continuous six-sided ribs",
+    "textures": "R4 UVs retained; enhanced with bold painted contours, layered polygonal shadows, ink hatch clusters and scratches. RGB PNG, both embedded and standalone."
+  }
+}
