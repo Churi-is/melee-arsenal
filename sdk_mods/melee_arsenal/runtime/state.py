@@ -72,6 +72,8 @@ class RuntimeRegistry:
     all_extra_part_objects: list[Any] = field(default_factory=list)
     custom_melee_pools: dict[str, Any] = field(default_factory=dict)
     injected_pool_count: int = 0
+    # (world_drops_enabled, world_drop_weight) the live vending machines were last re-rolled for
+    vendor_refresh_signature: tuple[bool, float] | None = None
 
     part_path_to_blade_id: dict[str, str] = field(default_factory=dict)
     part_path_to_grip_id: dict[str, str] = field(default_factory=dict)

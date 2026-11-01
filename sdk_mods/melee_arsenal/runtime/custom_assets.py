@@ -188,6 +188,69 @@ def set_part_gestalt_fragment(part: Any, fragment_name: str) -> None:
                 pass
 
 
+def set_part_rarity(part: Any, rarity: Rarity | int | float) -> None:
+    """Pin `WeaponPartDefinition.Rarity` to an exact BL2 rarity level (`1` White … `4` Purple).
+
+    BL2 no longer sums rarity from every part: one specific part — the **Material** part — decides
+    the rarity of the finished item. That single float drives the item-card title colour, the ground
+    loot-beam colour (`WillowPickup.InventoryRarityLevel` via `GlobalsDefinition.GetRarityColorForLevel`)
+    and the rarity-scaled sell value. A clone whose `Rarity` was inherited from a Common donor (or left
+    at `0`) renders every Melee Weapon white no matter which tier rolled, so we stamp it explicitly.
+    """
+    if part is None or not hasattr(part, "Rarity"):
+        return
+    level = float(int(rarity))
+    try:
+        data = copy.copy(part.Rarity)
+        data.BaseValueConstant = level
+        data.BaseValueAttribute = None
+        data.InitializationDefinition = None
+        data.BaseValueScaleConstant = 1.0
+        part.Rarity = data
+    except Exception:
+        pass
+
+
+def get_part_rarity(part: Any) -> float:
+    """Read a part's `Rarity` level (`0.0` when unset/unreadable).
+
+    Vanilla parts frequently resolve their rarity through a `BaseValueAttribute` resolver chain
+    instead of a flat `BaseValueConstant`, so both shapes are decoded here.
+    """
+    try:
+        data = part.Rarity
+    except Exception:
+        return 0.0
+    value = 0.0
+    resolver_chain = getattr(getattr(data, "BaseValueAttribute", None), "ValueResolverChain", None)
+    if resolver_chain:
+        try:
+            value = float(getattr(resolver_chain[0], "ConstantValue", 0.0) or 0.0)
+        except Exception:
+            value = 0.0
+    if not value:
+        try:
+            value = float(getattr(data, "BaseValueConstant", 0.0) or 0.0)
+        except Exception:
+            value = 0.0
+    try:
+        value *= float(getattr(data, "BaseValueScaleConstant", 1.0) or 1.0)
+    except Exception:
+        pass
+    return value
+
+
+def is_custom_asset_part(part: Any) -> bool:
+    """True when `part` is one of our runtime-constructed parts (never mutate vanilla donors!)."""
+    path = obj_path(part)
+    if not path:
+        return False
+    if "Inkblade" in path or "MeleeArsenal" in path:
+        return True
+    root = obj_path(STATE.root_package) if STATE.root_package is not None else ""
+    return bool(root) and path.startswith(f"{root}.")
+
+
 def load_compiled_manifest(manifest_path: Path | None = None) -> dict[str, Any] | None:
     p = manifest_path or MANIFEST_PATH
     if not p.is_file():
@@ -508,6 +571,9 @@ def _build_element_materials(
                     pass
             mp.Material = mic
             set_part_gestalt_fragment(mp, "None")
+            # The Material part alone decides item rarity -> stamp the exact tier so White / Green /
+            # Blue / Purple loot beams, item-card colours, and sell values are always correct.
+            set_part_rarity(mp, rarity)
             built_by_rarity[(elem_id, rarity)] = mp
             if rarity == Rarity.COMMON:
                 built_base[elem_id] = mp
@@ -785,6 +851,8 @@ def sync_definition_data_visual_parts(dd: Any) -> bool:
     acc_target = resolve_fitted_accessory_part(acc_id, blade_id=blade_id, grip_id=grip_id)
     elem_target = resolve_fitted_element_part(elem_id, blade_id=blade_id)
     mat_target = resolve_fitted_material_part(maker, rarity, elem_id=elem_id)
+    if mat_target is not None and is_custom_asset_part(mat_target):
+        set_part_rarity(mat_target, rarity)
 
     for field_name, target_obj in (
         ("BodyPartDefinition", body_target),

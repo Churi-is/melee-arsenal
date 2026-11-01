@@ -119,6 +119,28 @@ def _compare_against_vanilla_gun_damage(card: ComputedCardStats, compare_item: A
         return None
 
 
+def _resolve_title_rarity(engine_rarity: Any, card_rarity: Any) -> Any:
+    """Never let a Melee Weapon title render White when the weapon rolled a higher tier.
+
+    `ItemCardGFxObject.SetTitle`'s rarity argument is the 1-based BL2 rarity level the engine read
+    off the item (1 White … 4 Purple) and it colours the whole title. Items that we re-assemble
+    after the engine cached their level (command spawns, sidecar restores) can still report Common,
+    so promote the level to the rolled tier — we never downgrade a card.
+    """
+    try:
+        level = int(card_rarity)
+    except Exception:
+        return engine_rarity
+    if level <= 1:
+        return engine_rarity
+    if engine_rarity is None:
+        return level
+    if isinstance(engine_rarity, bool) or not isinstance(engine_rarity, (int, float)):
+        # Not a numeric rarity level (e.g. an already-resolved colour) — leave it untouched.
+        return engine_rarity
+    return level if int(engine_rarity) < level else engine_rarity
+
+
 def _call_set_top_stat(
     gfx_obj: Any,
     slot_idx: int,
@@ -236,7 +258,10 @@ def on_set_title_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
         return None
     try:
         mfr_str = str(getattr(args, "Manufacturer", "") or ov.payload.manufacturer_name)
-        rarity_color = getattr(args, "Rarity", None)
+        rarity_color = _resolve_title_rarity(
+            getattr(args, "Rarity", None),
+            ov.card_stats.rarity,
+        )
         type_icon = str(getattr(args, "TypeIcon", "") or "pistol")
         elem_icon = str(getattr(args, "ElementalIcon", "") or "")
         if not elem_icon and ov.card_stats.element != Element.NONE:

@@ -613,7 +613,19 @@ class MockBL2World:
                         mat_pkg,
                         f"Mat_{m}_{idx}",
                         Material=None,
-                        Rarity=self._attr_init(float(idx)),
+                        # Match real BL2: vanilla Material parts resolve `Rarity` through a
+                        # `BaseValueAttribute` resolver chain, NOT a literal `BaseValueConstant`.
+                        Rarity=FakeWrappedStruct(
+                            "AttributeInitializationData",
+                            BaseValueConstant=0.0,
+                            BaseValueAttribute=types.SimpleNamespace(
+                                ValueResolverChain=[
+                                    types.SimpleNamespace(ConstantValue=float(idx))
+                                ]
+                            ),
+                            InitializationDefinition=None,
+                            BaseValueScaleConstant=1.0,
+                        ),
                         GestaltModeSkeletalMeshName="None",
                         AdditionalGestaltModeSkeletalMeshNames=("None", "None"),
                         WeaponAttributeEffects=[],
@@ -759,6 +771,37 @@ class MockBL2World:
                     ],
                 )
             )
+
+        # Standard enemy / badass / boss death-drop pools (tiered `Pool_GunsAndGear_*`)
+        for tier in ("01_Common", "02_Uncommon", "04_Rare", "05_VeryRare"):
+            self.register(
+                FakeUObject(
+                    "ItemPoolDefinition",
+                    ip_enemy,
+                    f"Pool_GunsAndGear_{tier}",
+                    BalancedItems=[
+                        FakeWrappedStruct(
+                            "ItemPoolInfo",
+                            ItmPoolDefinition=pistol_subs[tier],
+                            InvBalanceDefinition=None,
+                            bDropOnDeath=True,
+                            Probability=self._attr_init(100.0),
+                        )
+                    ],
+                )
+            )
+
+        # Marcus gun vendors re-roll shelves from these pools
+        ven_pkg = self.register(FakeUObject("Package", None, "Sanctuary"))
+        self.vendor_resets: int = 0
+        self.vendor_machine = self.register(
+            FakeUObject(
+                "WillowVendingMachine",
+                ven_pkg,
+                "WillowVendingMachine_0",
+                ResetInventory=lambda: setattr(self, "vendor_resets", self.vendor_resets + 1),
+            )
+        )
 
         # Class-biased enemy death pool mixing weapon entries (100) + shield entries (85)
         self.register(
@@ -1729,6 +1772,36 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 self.assertEqual(top_rows_written[3][0], "Burn Dmg/s")
                 self.assertEqual(top_rows_written[4][0], "Effect Chance")
 
+                # 5B. Title colour must never render White for a higher-rarity Melee Weapon: the engine
+                # can still hand us the stale Common level for items we re-assembled after init.
+                title_calls: list[tuple] = []
+                title_card = types.SimpleNamespace(
+                    SetTitle=lambda *a: title_calls.append(a),
+                    SetTopStat=lambda *a: None,
+                    SetFunStats=lambda *a: None,
+                )
+                ui_item_card.on_set_item_card_ex_pre(
+                    title_card,
+                    types.SimpleNamespace(InventoryItem=phaseblade, CompareAgainstInventoryItem=None),
+                    None,
+                    None,
+                )
+                ui_item_card.on_set_title_pre(
+                    title_card,
+                    types.SimpleNamespace(
+                        Manufacturer="Maliwan",
+                        Rarity=1,
+                        TypeIcon="pistol",
+                        ElementalIcon="",
+                        bIsReadied=False,
+                    ),
+                    None,
+                    None,
+                )
+                self.assertEqual(len(title_calls), 1)
+                self.assertEqual(title_calls[0][2], 4)  # promoted 1 (White) -> 4 (Purple)
+                ui_item_card.on_set_item_card_ex_post(title_card, None, None, None)
+
                 # 6. Sidecar Save/Restore
                 saved = persistence_bridge.snapshot_player_melee_inventory(pc=world.pc)
                 self.assertEqual(saved, 3)
@@ -1763,6 +1836,19 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 self.assertTrue(state.STATE.custom_assets_active)
                 self.assertEqual(state.STATE.custom_kit_revision, "bold_ink_visual_revision_of_r4")
                 self.assertEqual(len(state.STATE.element_material_parts_by_rarity), 24)
+
+                # Every Inkblade Material part carries its exact BL2 rarity level (1 White … 4 Purple):
+                # the Material part alone decides card colour, loot-beam colour (`InventoryRarityLevel`)
+                # and sell value, so a stale/Common clone would render every Melee Weapon white.
+                for (elem_id, rarity), mat_obj in state.STATE.element_material_parts_by_rarity.items():
+                    self.assertAlmostEqual(
+                        custom_assets.get_part_rarity(mat_obj),
+                        float(int(rarity)),
+                        msg=f"{elem_id} {rarity.name} material has wrong Rarity!",
+                    )
+                    self.assertIsNone(mat_obj.Rarity.InitializationDefinition)
+                    self.assertIsNone(mat_obj.Rarity.BaseValueAttribute)
+                    self.assertAlmostEqual(mat_obj.Rarity.BaseValueScaleConstant, 1.0)
 
                 # Verify equal-size UPK restage detection compares 129B UPK summary/GUID header
                 p_old = Path(tmp) / "old.upk"
@@ -1922,6 +2008,12 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                     4.0,
                 )
 
+                # Loot beam + item-card colour levels must match the rolled tier on the live objects
+                # (`WillowPickup.InventoryRarityLevel` / `WillowInventory.RarityLevel`).
+                for pickup in world.ground_pickups:
+                    self.assertAlmostEqual(pickup.InventoryRarityLevel, 4.0)
+                    self.assertAlmostEqual(pickup.Inventory.RarityLevel, 4.0)
+
                 # Torgue gets exact blade-fitted variant 4 (`Ink_accessory_serrated_edge__s4`) + `Mat_Inkblade_Explosive_VeryRare`
                 self.assertEqual(
                     tor_wpn.DefinitionData.BarrelPartDefinition.GestaltModeSkeletalMeshName,
@@ -1994,8 +2086,35 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 # 3. Verify proportional 16.13% (`100 / 620`) class share across world, enemy, chest, locker & shop pools
                 report = loot_pools.inspect_loot_pools(resync_first=False)
                 self.assertTrue(report["subpool_stage_gates_cleared"])
-                self.assertEqual(report["injected_pools"], 10)
+                # 4 world + 4 real enemy death-drop tiers + 4 class-weighted + chest/container/shop
+                self.assertEqual(report["injected_pools"], 14)
                 self.assertAlmostEqual(report["avg_weapon_share_pct"], 16.13, places=1)
+
+                # Standard enemies roll `Pool_GunsAndGear_<tier>` on death, so Melee Weapons must be
+                # present there (mapped to the matching rarity sub-pool), not just in the AI-weighted pools.
+                for tier, melee_key in (
+                    ("01_Common", "01_Common"),
+                    ("02_Uncommon", "02_Uncommon"),
+                    ("04_Rare", "04_Rare"),
+                    ("05_VeryRare", "05_VeryRare"),
+                ):
+                    enemy_tier_pool = world.find_object(
+                        "ItemPoolDefinition", f"GD_Itempools.EnemyDropPools.Pool_GunsAndGear_{tier}"
+                    )
+                    tier_melee = [
+                        it
+                        for it in enemy_tier_pool.BalancedItems
+                        if "Pool_Weapons_Melee_" in it.ItmPoolDefinition._path_name()
+                    ]
+                    self.assertEqual(len(tier_melee), 1, f"Pool_GunsAndGear_{tier} has no melee entry!")
+                    self.assertTrue(
+                        tier_melee[0]
+                        .ItmPoolDefinition._path_name()
+                        .endswith(f"Pool_Weapons_Melee_{melee_key}")
+                    )
+
+                # Vendors already stocked before injection must be re-rolled once so shelves show melee
+                self.assertGreaterEqual(world.vendor_resets, 1)
 
                 # Verify `Pool_GunsAndGear_WeightedPistols` scaled against weapon weight (100), NOT shield weight (85)!
                 gg_pool = world.find_object("ItemPoolDefinition", "GD_Itempools.EnemyDropPools.Pool_GunsAndGear_WeightedPistols")

@@ -8,8 +8,14 @@ Root causes resolved in v0.3.3:
    verification instead of raw Python list assignment, and supports idempotent re-sync on every map load so
    `SparkLevelPatchEntry` hotfixes / BLCMM / UCP pool patches never wipe out Melee Arsenal entries.
 3. Scales melee weights proportionally (`weapon_sum * active_weight / 520.0`) across `Pool_Weapons_All_*`,
-   `EnemyDropPools.Pool_GunsAndGear_Weighted*`, `Treasure_ChestPools.*`, `LootablePools.*`, and
+   `EnemyDropPools.Pool_GunsAndGear_*` (the tiered pools a dying enemy rolls) plus the class-biased
+   `Pool_GunsAndGear_Weighted*` variants, `Treasure_ChestPools.*`, `LootablePools.*`, and
    `GD_ItemPools_Shop.WeaponPools.*` while never touching `GD_ItempoolsEnemyUse.*` (preventing AI weapon bugs).
+4. Resolves pools by exact path, then by case-insensitive live-object name, then through alternate
+   pistol / SMG / AR / shotgun donor pools, so patch / DLC / BLCMM-UCP naming drift never silently
+   disables every injection (a missing *donor* used to abort all 7 sub-pools at once).
+5. Re-rolls already-stocked `WillowVendingMachine` shelves once after the first successful injection:
+   vendors build their stock during map load, which can happen before the mod's pools exist.
 """
 from __future__ import annotations
 
@@ -86,7 +92,14 @@ TARGET_POOL_MATRIX: tuple[tuple[str, str, str], ...] = (
     ("world", "GD_Itempools.WeaponPools.Pool_Weapons_All_02_Uncommon", "02_Uncommon"),
     ("world", "GD_Itempools.WeaponPools.Pool_Weapons_All_04_Rare", "04_Rare"),
     ("world", "GD_Itempools.WeaponPools.Pool_Weapons_All_05_VeryRare", "05_VeryRare"),
-    # 2. Class-Biased Humanoid / Marauder / Nomad / Raider Death Drop Pools
+    # 2a. Standard Enemy / Badass / Boss death-drop pools. These tiered `Pool_GunsAndGear_*` pools are
+    #     what `WillowAIPawn` actually rolls when a normal enemy dies, so Melee Weapons must be present
+    #     here for enemies to ever drop them (each maps to the matching rarity sub-pool).
+    ("enemy", "GD_Itempools.EnemyDropPools.Pool_GunsAndGear_01_Common", "01_Common"),
+    ("enemy", "GD_Itempools.EnemyDropPools.Pool_GunsAndGear_02_Uncommon", "02_Uncommon"),
+    ("enemy", "GD_Itempools.EnemyDropPools.Pool_GunsAndGear_04_Rare", "04_Rare"),
+    ("enemy", "GD_Itempools.EnemyDropPools.Pool_GunsAndGear_05_VeryRare", "05_VeryRare"),
+    # 2b. Class-Biased Humanoid / Marauder / Nomad / Raider gear-weighted pools
     ("enemy", "GD_Itempools.EnemyDropPools.Pool_GunsAndGear_WeightedPistols", "All"),
     ("enemy", "GD_Itempools.EnemyDropPools.Pool_GunsAndGear_WeightedSMGs", "All"),
     ("enemy", "GD_Itempools.EnemyDropPools.Pool_GunsAndGear_WeightedShotguns", "All"),
@@ -109,14 +122,64 @@ TARGET_POOL_MATRIX: tuple[tuple[str, str, str], ...] = (
 
 _LAST_LOG_SIGNATURE: tuple[bool, float, int] | None = None
 
+# Pool paths whose casing/numbering drifts between BL2 patches, DLC packages, and UCP / BLCMM
+# level-patch overrides. Donor pistol pools fall back through all of these before giving up.
+_DONOR_POOL_TEMPLATES: tuple[str, ...] = (
+    "GD_Itempools.WeaponPools.Pool_Weapons_Pistols_{tier}",
+    "GD_Itempools.WeaponPools.Pool_Weapons_All_{tier}",
+    "GD_Itempools.WeaponPools.Pool_Weapons_SMG_{tier}",
+    "GD_Itempools.WeaponPools.Pool_Weapons_AssaultRifles_{tier}",
+    "GD_Itempools.WeaponPools.Pool_Weapons_Shotguns_{tier}",
+    "GD_Itempools.WeaponPools.Pool_Weapons_Pistols",
+)
+
+# Loaded `ItemPoolDefinition` cache (rebuilt once per `sync_loot_pools()` pass).
+_POOL_OBJECT_CACHE: list[Any] | None = None
+
+
+def _iter_loaded_pools() -> list[Any]:
+    """All live `ItemPoolDefinition` objects (``[]`` when the SDK cannot enumerate them)."""
+    global _POOL_OBJECT_CACHE
+    if _POOL_OBJECT_CACHE is not None:
+        return _POOL_OBJECT_CACHE
+    found: list[Any] = []
+    if unrealsdk is not None:
+        finder = getattr(unrealsdk, "find_all", None)
+        if callable(finder):
+            try:
+                found = list(finder("ItemPoolDefinition"))
+            except Exception:
+                found = []
+    _POOL_OBJECT_CACHE = found
+    return found
+
 
 def _find_pool(path: str) -> Any:
+    """Resolve a live pool, tolerating package/object name casing differences between game builds."""
     if unrealsdk is None:
         return None
     try:
-        return unrealsdk.find_object("ItemPoolDefinition", path)
+        found = unrealsdk.find_object("ItemPoolDefinition", path)
+        if found is not None:
+            return found
     except Exception:
-        return None
+        pass
+    wanted = path.lower()
+    for obj in _iter_loaded_pools():
+        try:
+            if obj_path(obj).lower() == wanted:
+                return obj
+        except Exception:
+            continue
+    return None
+
+
+def _find_pool_any(paths: tuple[str, ...]) -> Any:
+    for path in paths:
+        found = _find_pool(path)
+        if found is not None:
+            return found
+    return None
 
 
 def _ensure_itempool_packages_loaded() -> None:
@@ -287,7 +350,12 @@ def _build_or_refresh_melee_subpools(pkg_pools: Any) -> dict[str, Any]:
 
     # 1. Build the 4 per-rarity sub-pools (`01_Common`, `02_Uncommon`, `04_Rare`, `05_VeryRare`)
     for rarity, tier_key, donor_sub_path in _TIER_SPECS:
-        donor_sub = _find_pool(donor_sub_path) or donor_pool_any
+        donor_sub = _find_pool(donor_sub_path)
+        if donor_sub is None:
+            donor_sub = _find_pool_any(
+                tuple(tmpl.format(tier=tier_key) for tmpl in _DONOR_POOL_TEMPLATES)
+            )
+        donor_sub = donor_sub or donor_pool_any
         if donor_sub is None:
             continue
         donor_items = list(getattr(donor_sub, "BalancedItems", []) or [])
@@ -316,10 +384,11 @@ def _build_or_refresh_melee_subpools(pkg_pools: Any) -> dict[str, Any]:
         assign_struct_array(melee_sub, "BalancedItems", entries)
         subpools[tier_key] = melee_sub
 
-    if len(subpools) < 4 or donor_pool_any is None or donor_entry_tpl is None:
+    if not subpools or donor_pool_any is None or donor_entry_tpl is None:
         return subpools
 
     tier_order = ("01_Common", "02_Uncommon", "04_Rare", "05_VeryRare")
+    available_tiers = [t for t in tier_order if t in subpools]
 
     # 2. Composite `Pool_Weapons_Melee_All`: mirror live `Pool_Weapons_All` Probability structs if present
     melee_all = _get_or_create_custom_pool(pkg_pools, "Pool_Weapons_Melee_All", donor_pool_any)
@@ -332,7 +401,7 @@ def _build_or_refresh_melee_subpools(pkg_pools: Any) -> dict[str, Any]:
         "05_VeryRare": 0.1,
     }
     all_entries = []
-    for idx, tkey in enumerate(tier_order):
+    for idx, tkey in enumerate(available_tiers):
         row = copy.copy(donor_entry_tpl)
         row.ItmPoolDefinition = subpools[tkey]
         row.InvBalanceDefinition = None
@@ -348,7 +417,7 @@ def _build_or_refresh_melee_subpools(pkg_pools: Any) -> dict[str, Any]:
         elif idx < len(live_all_items):
             row.Probability = copy.copy(live_all_items[idx].Probability)
         else:
-            _set_constant_prob(row, default_all_weights[tkey])
+            _set_constant_prob(row, default_all_weights.get(tkey, 1.0))
         all_entries.append(row)
     assign_struct_array(melee_all, "BalancedItems", all_entries)
     subpools["All"] = melee_all
@@ -362,6 +431,8 @@ def _build_or_refresh_melee_subpools(pkg_pools: Any) -> dict[str, Any]:
     )
     epic_entries = []
     for tkey, w in default_epic_weights:
+        if tkey not in subpools:
+            continue
         row = copy.copy(donor_entry_tpl)
         row.ItmPoolDefinition = subpools[tkey]
         row.InvBalanceDefinition = None
@@ -386,6 +457,8 @@ def _build_or_refresh_melee_subpools(pkg_pools: Any) -> dict[str, Any]:
     )
     shop_entries = []
     for tkey, fallback_w in default_shop_weights:
+        if tkey not in subpools:
+            continue
         row = copy.copy(donor_entry_tpl)
         row.ItmPoolDefinition = subpools[tkey]
         row.InvBalanceDefinition = None
@@ -409,13 +482,15 @@ def _build_or_refresh_melee_subpools(pkg_pools: Any) -> dict[str, Any]:
 
 def sync_loot_pools() -> bool:
     """Idempotently inject/update/remove Melee Arsenal sub-pools across world, chest, container, and shop pools."""
-    global _LAST_LOG_SIGNATURE
+    global _LAST_LOG_SIGNATURE, _POOL_OBJECT_CACHE
     if unrealsdk is None:
         return False
     if not ensure_definitions_built():
         return False
 
     try:
+        # Pools may have just been streamed in / hotfixed; rebuild the loose-name lookup cache.
+        _POOL_OBJECT_CACHE = None
         _ensure_itempool_packages_loaded()
         pkg_pools = _ensure_pools_subpackage()
         if pkg_pools is None:
@@ -475,6 +550,18 @@ def sync_loot_pools() -> bool:
         STATE.injected_pool_count = verified_count if class_ratio > 0.0 else 0
         STATE.pools_injected = (verified_count > 0) if class_ratio > 0.0 else False
 
+        # Vending machines roll their shelf stock out of these pools when the map streams in — possibly
+        # before our first injection. Re-roll only when the injected configuration actually changed so
+        # existing vendor stock starts showing Melee Weapons instead of needing a map reload.
+        refresh_sig = (bool(STATE.world_drops_enabled), round(active_weight, 2))
+        if STATE.pools_injected and refresh_sig != STATE.vendor_refresh_signature:
+            refreshed = refresh_vending_machines()
+            if refreshed > 0:
+                # Only latch once machines actually existed (menus / hub maps can load zero vendors),
+                # so the re-roll is retried on the next map until it takes effect.
+                STATE.vendor_refresh_signature = refresh_sig
+                log_info(f"Re-rolled {refreshed} vending machine(s) to include Melee Arsenal stock.")
+
         sig = (bool(STATE.world_drops_enabled), round(active_weight, 2), verified_count)
         if sig != _LAST_LOG_SIGNATURE:
             _LAST_LOG_SIGNATURE = sig
@@ -496,6 +583,39 @@ def sync_loot_pools() -> bool:
         return False
 
 
+def refresh_vending_machines() -> int:
+    """Re-roll already-stocked gun vendors so they draw from the freshly injected shop pools.
+
+    BL2 fills `WillowVendingMachine` shelves from `GD_ItemPools_Shop` during map load (`ResetInventory`),
+    which can happen before the mod's pools exist — the machine then keeps that stale Common-only stock
+    for the whole session. Forcing one `ResetInventory()` after the first successful injection makes
+    Melee Weapons appear in Marcus machines without needing a map transition.
+    """
+    if unrealsdk is None:
+        return 0
+    finder = getattr(unrealsdk, "find_all", None)
+    if not callable(finder):
+        return 0
+    try:
+        machines = list(finder("WillowVendingMachine"))
+    except Exception:
+        return 0
+
+    refreshed = 0
+    for machine in machines:
+        if machine is None or str(getattr(machine, "Name", "")).startswith("Default__"):
+            continue
+        reset = getattr(machine, "ResetInventory", None)
+        if not callable(reset):
+            continue
+        try:
+            reset()
+            refreshed += 1
+        except Exception:
+            continue
+    return refreshed
+
+
 def inspect_loot_pools(resync_first: bool = True) -> dict[str, Any]:
     """Re-sync (optional) and return a live diagnostic report of all Melee Arsenal loot pools."""
     if resync_first:
@@ -510,10 +630,12 @@ def inspect_loot_pools(resync_first: bool = True) -> dict[str, Any]:
 
     pool_rows: list[dict[str, Any]] = []
     by_category: dict[str, int] = {}
+    missing_pools: list[str] = []
 
     for category, target_path, subpool_key in TARGET_POOL_MATRIX:
         target_pool = _find_pool(target_path)
         if target_pool is None:
+            missing_pools.append(target_path)
             continue
         items = list(getattr(target_pool, "BalancedItems", []) or [])
         melee_w = 0.0
@@ -557,5 +679,7 @@ def inspect_loot_pools(resync_first: bool = True) -> dict[str, Any]:
         "by_category": by_category,
         "subpool_stage_gates_cleared": subpool_gates_cleared,
         "avg_weapon_share_pct": avg_share,
+        "missing_pools": missing_pools,
+        "subpools_built": sorted(STATE.custom_melee_pools.keys()),
         "pools": pool_rows,
     }
