@@ -1731,7 +1731,15 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 world.spawned_emitters.clear()
                 combat._LAST_SWING_AT = 0.0
                 combat.on_weapon_consume_ammo_post(cleaver, None, None, None)
-                combat.on_weapon_shared_fire_post(cleaver, None, None, None)
+                with mock.patch.object(combat.STATE, "debug_attack_log", True), mock.patch.object(
+                    combat, "log_info"
+                ) as combat_log:
+                    combat.on_weapon_shared_fire_post(cleaver, None, None, None)
+                checkpoints = [call.args[0] for call in combat_log.call_args_list]
+                for stage in ("swing start", "before direct damage", "after direct damage",
+                              "before radius damage", "after radius damage",
+                              "before explosion effects", "after explosion effects"):
+                    self.assertTrue(any(stage in line for line in checkpoints), stage)
                 self.assertEqual(len(world.caused_damages), 3)
                 self.assertEqual(len(world.caused_radius_damages), 1)
                 self.assertAlmostEqual(world.caused_radius_damages[0]["Radius"], 180.0)

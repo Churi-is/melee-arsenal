@@ -159,7 +159,7 @@ opt_slash_scale = SliderOption(
 opt_debug_log = BoolOption(
     "Log Swing Damage Breakdown",
     False,
-    description="Log per-swing card damage, player melee multiplier, Roid bonus, and target count to melee_arsenal.log.",
+    description="Log per-swing damage and combat checkpoints to melee_arsenal.log for crash diagnosis.",
     on_change_anytime=_on_debug_log_changed,
 )
 
