@@ -1,64 +1,113 @@
 # Melee Arsenal — Borderlands 2 PythonSDK Mod & UPK Pipeline
 
-Source repository for **`melee_arsenal` (`v0.3.3`)**, the in-game engine/donor probe mod **`melee_arsenal_probe`**, the pure-Python UE3 `.upk` compiler **`tools/inkblade_upk`**, and the CPython `unittest` suite.
+**Melee Arsenal (`v0.3.3`)** adds a standalone **Melee Weapon** class to *Borderlands 2* (`pyunrealsdk` 1.10 / `unrealsdk` 3.2 / `mods_base` 1.12+) powered by a custom 22-part modular 3D **InkBlade Bold (`r5`)** Gestalt mesh and six 2048×2048 elemental texture atlases compiled via a pure-Python Unreal Engine 3 `.upk` pipeline.
+
+Primary Fire swings your equipped Melee Weapon (precision single-target strikes or frontal cleave arcs) scaling with gun-level base damage, weakspot crits, elemental DoT/splash, **player Melee Damage bonuses**, and **Roid shield buffs**, while `[V]` remains your vanilla character melee.
+
+---
+
+## Weapon Archetypes
+
+| Manufacturer | Archetype | Targeting Profile | Element Policy | Signature Trait |
+| :--- | :--- | :--- | :--- | :--- |
+| **Hyperion** | **Katana** | Single-Target | Optional (Fire / Shock / Corrosive / Slag) | Fast precision strikes & weakspot crits |
+| **Jakobs** | **Sabre** | Single-Target | Non-Elemental | High base damage & massive weakspot crit bonus |
+| **Bandit** | **Machete** | Frontal Cleave | Optional (Fire / Shock / Corrosive / Slag) | Wide multi-target cleave arc |
+| **Maliwan** | **Phaseblade** | Frontal Cleave | Always Elemental (Fire / Shock / Corrosive / Slag) | High elemental DoT & status chance |
+| **Torgue** | **Blast-Cleaver** | Frontal Cleave | Always Explosive | Heavy cleave + gyrojet explosive splash |
+
+Each weapon rolls a **Blade** (defines manufacturer & archetype), **Grip** (matching-grip bonus + handling stats), optional **Accessory** (7 physical mesh attachments with socket/bifacial twin fitting; guaranteed on Purple `VeryRare`), and **Element** (with matching elemental mesh emitter, atlas palette, and White/Green/Blue/Purple loot beam).
+
+---
+
+## Quick Start (`./melee` CLI)
+
+```bash
+# 1. Create local .venv & install Pillow (for UPK texture atlas compilation)
+./melee setup
+
+# 2. Check repository, kit, cooked UPK, and Borderlands 2 install status
+./melee status
+
+# 3. Compile ./assets/inkblade_bold_kit -> CookedPCConsole/*.upk + manifest JSON
+./melee build
+
+# 4. Run syntax verification & full unit test suite
+./melee test
+
+# 5. Install UPKs + sdk_mods/melee_arsenal into Borderlands 2
+#    (auto-detects Steam / Proton / CrossOver / Whisky / WSL2, or caches --bl2-dir in .bl2_dir)
+./melee install
+# or specify your Borderlands 2 root once:
+./melee install --bl2-dir "/path/to/Borderlands 2"
+```
+
+### All `./melee` Commands
+
+| Command | Description |
+| :--- | :--- |
+| `./melee setup` | Create `.venv/` and install `Pillow` for UPK compilation |
+| `./melee build [--kit <path>]` | Compile modular kit (default `./assets/inkblade_bold_kit`) into `WillowGame/CookedPCConsole/MeleeArsenal{Meshes,Textures}.upk`, update `inkblade_compiled_manifest.json`, and sync `sdk_mods/melee_arsenal/upk/` |
+| `./melee test [args]` | Byte-compile all modules and run `unittest` (e.g. `./melee test -q`, `./melee test -k world_drop`) |
+| `./melee preview` | Roll sample Level 50 Melee Arsenal weapons and print item cards + Roid/Crit/UVHM hit math |
+| `./melee package [--build]` | Build `dist/melee_arsenal.zip`, `dist/melee_arsenal-v0.3.3.zip`, and `dist/source.zip` |
+| `./melee install [--bl2-dir <dir>] [--probe]` | Stage `.upk` packages and sync `sdk_mods/melee_arsenal/` into Borderlands 2 (preserving `_melee_arsenal_saves` and `melee_arsenal.log`) |
+| `./melee dev` | Fast iteration loop: run quiet tests, then install to Borderlands 2 |
+| `./melee status` | Show mod version, Python/Pillow state, kit & UPK sizes, BL2 sync status, and sidecar save count |
+| `./melee logs [-f] [-n <lines>]` | View or tail live `<BL2>/sdk_mods/melee_arsenal/melee_arsenal.log` |
+| `./melee uninstall [--purge-saves]` | Remove mod & UPKs from Borderlands 2 (keeps `_melee_arsenal_saves` unless `--purge-saves` is passed) |
+| `./melee clean` | Remove `__pycache__`, `.pyc`, probe scratch reports, and `dist/` |
+| `./melee all` | Run `build -> test -> package -> install` end-to-end |
+
+---
 
 ## Repository Layout
 
-- `sdk_mods/melee_arsenal/` — Main Borderlands 2 PythonSDK (`pyunrealsdk` 1.10 / `unrealsdk` 3.2) mod:
-  - `core/` — Pure-Python weapon schemas, 5-manufacturer Blade/Grip/Accessory/Element catalog, damage/DoT/card math, targeting cones, loot roller, and save-persistence codec.
-  - `runtime/` — Live UE3 registration (`WeaponTypeDefinition`, `WeaponBalanceDefinition`, `WeaponPartDefinition`, `MaterialInstanceConstant`, `GestaltPartBounds` preview framing, `Bladed_Melee` 1P combat & cone/AoE hits, GFx item card rewrite, loot pool injection, and console commands).
-  - `data/inkblade_compiled_manifest.json` — Compiler-generated Gestalt bounds, socket deltas, bifacial twin variants, and element atlas manifest consumed automatically at runtime.
-- `sdk_mods/melee_arsenal_probe/` — Optional live BL2 diagnostic & donor-extraction SDK mod (`MeleeProbeTex.upk` + `Startup.upk` reader).
-- `tools/` — Offline asset & preview toolchain:
-  - `compile_inkblade_upk.py` — Compiles an `Inkblade_Modular_Kit` archive, split `.zip1/.zip2` parts, or directory (`r3`, `r4`, `r5` InkBlade Bold, ...) into cooked BL2 `MeleeArsenalMeshes.upk` + `MeleeArsenalTextures.upk` (`ArVer=832, LicenseeVer=46`, 129-byte `FPackageFileSummary`, outward manifold winding repair, MaxRects 2048×2048 DXT1 mipmapped element atlases) and updates `sdk_mods/melee_arsenal/data/inkblade_compiled_manifest.json`.
-  - `preview_arsenal.py` — Offline weapon roll & item-card simulator CLI.
-  - `inkblade_upk/` — Pure-Python UE3 LZO1X/zlib archive reader, `USkeletalMesh` & `UTexture2D` binary codec, kit compiler, and stripped `donors/weap_pistol_donor.upk` (`Weap_Pistol` skeleton + `WeaponOffset`).
-- `tests/` — CPython `unittest` suites covering core math/schemas, mocked `unrealsdk` runtime hooks, probe mod logic, and UPK/manifold compilation.
-
-## Requirements (Offline Tools & Tests)
-
-- Python `>= 3.10`
-- `Pillow` (`pip install Pillow`) for DXT1 texture atlas compilation in `tools/compile_inkblade_upk.py` and `tests/test_inkblade_upk.py`.
-
-## Running Tests
-
-From the repository root:
-
-```bash
-python3 -m unittest discover -s tests -v
+```text
+.
+├── melee                           # Project build, test, package & BL2 deployment CLI
+├── assets/
+│   └── inkblade_bold_kit/          # Modular 3D GLBs, bold-inked textures, and socket_manifest.json
+├── WillowGame/
+│   └── CookedPCConsole/            # Cooked UE3 packages (MeleeArsenalMeshes.upk & MeleeArsenalTextures.upk)
+├── sdk_mods/
+│   ├── melee_arsenal/              # Main Borderlands 2 PythonSDK mod
+│   │   ├── core/                   # Pure-Python catalog, schemas, card/hit math, targeting, persistence
+│   │   ├── data/                   # Compiler-generated Gestalt fragment/bounds/atlas manifest JSON
+│   │   ├── runtime/                # Live UE3 definitions, Gestalt/MIC binding, combat, GFx cards, loot pools
+│   │   └── upk/                    # Bundled fallback MeleeArsenalMeshes.upk auto-stager
+│   └── melee_arsenal_probe/        # Optional in-game UE3 diagnostics & Startup.upk donor extractor
+├── tools/
+│   ├── compile_inkblade_upk.py     # Offline GLB + PNG -> cooked BL2 UE3 .upk compiler CLI
+│   ├── preview_arsenal.py          # Offline weapon roller & damage calculator CLI
+│   └── inkblade_upk/               # Pure-Python UE3 LZO1X/zlib archive reader, SkeletalMesh/DXT1 codec & donor
+└── tests/                          # CPython unittest suites (core math, strict mock SDK runtime, UPK codec, probe)
 ```
 
-*(Optional fixture tests that exercise full `Inkblade_Modular_Kit_r3` / `r4_final` archives automatically run if those zips are placed in `./uploads/`, and skip cleanly otherwise.)*
+---
 
-## Compiling Updated `Inkblade_Modular_Kit` Assets
+## World Drops & Mod Menu Options
 
-When a new revision of `Inkblade_Modular_Kit` is exported (same manifest/GLB layout):
+Melee Arsenal injects proportionally across **19 weapon loot pools** with idempotent map-load re-syncing (preventing `SparkLevelPatchEntry`, BLCMM, or UCP level patches from overwriting drops):
 
-```bash
-python3 tools/compile_inkblade_upk.py \
-  --kit path/to/Inkblade_Modular_Kit_r4_final.zip
-```
+- **Global World-Drop Rarity Pools**: `GD_Itempools.WeaponPools.Pool_Weapons_All_{01_Common, 02_Uncommon, 04_Rare, 05_VeryRare}`
+- **Class-Biased Enemy Death Pools**: `GD_Itempools.EnemyDropPools.Pool_GunsAndGear_Weighted{Pistols, SMGs, Shotguns, Sniper}`
+- **Regular & Red Epic Weapon Chests**: `GD_Itempools.Treasure_ChestPools.Pool_{WeaponChest, EpicChest}_Weapons_{LongGuns, Pistols}` *(Red Chests exclude White Commons)*
+- **Interactive Containers**: `GD_Itempools.LootablePools.{Pool_Locker_Items_SMGsAndPistols, Pool_Dumpster_Guns}`
+- **Marcus Weapon Vendors & Item of the Day**: `GD_ItemPools_Shop.WeaponPools.{ShopPool_Weapons_Pistols, ShopPool_Weapons_SMG, ShopPool_Weapons_AssaultRifles, ShopPool_Weapons_Shotguns, Shoppool_FeaturedItem_WeaponMachine}`
+- *(AI `GD_ItempoolsEnemyUse.*` pools are never modified so NPC enemies never spawn wielding player melee blades.)*
 
-This writes:
-1. `WillowGame/CookedPCConsole/MeleeArsenalMeshes.upk`
-2. `WillowGame/CookedPCConsole/MeleeArsenalTextures.upk`
-3. `sdk_mods/melee_arsenal/data/inkblade_compiled_manifest.json`
+Under **MODS -> Melee Arsenal**, **`World Drop Class Weight`** defaults to **`100`** (`100 / 620 = ~16.1%` of weapon drops — 1:1 parity with Pistols, SMGs, Assault Rifles, and Shotguns) and can be tuned anywhere from `10` up to `500` (or toggled off via **`Enable World Drops`**).
 
-Copy `WillowGame/CookedPCConsole/MeleeArsenal*.upk` into `<Borderlands 2>/WillowGame/CookedPCConsole/` (and optionally copy `MeleeArsenalMeshes.upk` to `sdk_mods/melee_arsenal/upk/MeleeArsenalMeshes.upk` if bundling a release zip) alongside `sdk_mods/melee_arsenal/` in `<Borderlands 2>/sdk_mods/`.
+---
 
-## World Drops & Console Commands (`v0.3.3`)
+## In-Game Console Commands
 
-Melee Arsenal injects proportionally across all primary weapon loot sources (default **`World Drop Class Weight = 100`**, matching Pistols / SMGs / ARs / Shotguns at `~16.1%` of weapon drops, adjustable up to `500` in **MODS -> Melee Arsenal**):
-- Global enemy/pile weapon rarity pools (`GD_Itempools.WeaponPools.Pool_Weapons_All_{01_Common,02_Uncommon,04_Rare,05_VeryRare}`)
-- Class-biased humanoid/bandit enemy death pools (`GD_Itempools.EnemyDropPools.Pool_GunsAndGear_Weighted{Pistols,SMGs,Shotguns,Sniper}`)
-- Regular & Red Epic weapon chests (`GD_Itempools.Treasure_ChestPools.Pool_{WeaponChest,EpicChest}_Weapons_{LongGuns,Pistols}`)
-- Lockers & dumpsters (`GD_Itempools.LootablePools.{Pool_Locker_Items_SMGsAndPistols,Pool_Dumpster_Guns}`)
-- Marcus weapon vending machines & Item of the Day (`GD_ItemPools_Shop.WeaponPools.*`)
-- AI `GD_ItempoolsEnemyUse.*` pools are intentionally left untouched so enemy NPCs never spawn wielding player melee blades.
-- Run `melee_check_pools` in the PythonSDK console at any time to re-sync and inspect live per-pool melee drop shares.
+Open the PythonSDK console (`~`) in *Borderlands 2*:
 
-## Previewing Weapon Rolls Offline
-
-```bash
-python3 tools/preview_arsenal.py
-```
+- `melee_spawn [maker] [rarity] [element] [accessory]` — Drop a customized Melee Weapon in front of you (e.g. `melee_spawn hyperion purple shock serrated`)
+- `melee_spawn_all [white|green|blue|purple]` — Drop all 5 manufacturer archetypes in front of you
+- `melee_check_pools` — Re-sync and print live per-pool Melee Arsenal weights and weapon drop share `%`
+- `melee_dump_held` *(alias `melee_debug_swing`)* — Inspect the currently held Melee Weapon's parts, Gestalt fragments, card stats, and live player melee/Roid multiplier math
+- `melee_save_now` — Manually snapshot carried Melee Arsenal weapons to `_melee_arsenal_saves`
+- `melee_preview [roll_deg] [scale] [focus_radius] [pitch_deg] [yaw_deg] [bounds_z]` — Live-tune 3D inventory/inspect framing
