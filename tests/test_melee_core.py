@@ -12,6 +12,8 @@ if str(ROOT_DIR / "sdk_mods") not in sys.path:
 
 from melee_arsenal.core import (  # noqa: E402
     BLADES,
+    DAMAGE_REDUCTION_MAX_PCT,
+    DAMAGE_REDUCTION_MIN_PCT,
     ELEMENTS,
     GRIPS,
     MANUFACTURERS,
@@ -26,10 +28,12 @@ from melee_arsenal.core import (  # noqa: E402
     TargetCandidate,
     TargetingMode,
     Vec3,
+    apply_incoming_damage_reduction,
     build_asset_sublibrary_manifest,
     build_item_card_payload,
     compute_attack_damage,
     compute_card_stats,
+    compute_damage_reduction_pct,
     deserialize_weapon,
     plan_swing_strikes,
     read_save_records,
@@ -227,6 +231,16 @@ class TestMeleeArsenalCore(unittest.TestCase):
         visible_j = [r.label for r in card_j.top_stats if r.visible]
         self.assertEqual(visible_j, ["Damage", "Range", "Swing Speed"])
 
+        # The old green "Stacks with Player Melee & Roid Bonuses" line clipped into the manufacturer
+        # logo and repeated what every card already implies — it must be gone from every card.
+        for payload in (card_j, build_item_card_payload(maliwan)):
+            self.assertNotIn("Stacks with Player Melee", payload.fun_stats_html)
+            self.assertNotIn("Roid Bonuses", payload.fun_stats_html)
+            self.assertNotIn("#9be7a8", payload.fun_stats_html)
+            # ...and the rolled Damage Reduction is advertised instead (kept short so it never clips)
+            self.assertTrue(payload.fun_stats_lines[0].startswith("<font color='#7fd4ff'>Damage Reduction "))
+            self.assertIn("(Equipped)</font>", payload.fun_stats_lines[0])
+
         card_m = build_item_card_payload(maliwan, compared_against=jakobs)
         self.assertIsNotNone(card_m.elemental_section)
         assert card_m.elemental_section is not None
@@ -234,6 +248,54 @@ class TestMeleeArsenalCore(unittest.TestCase):
         # Jakobs has higher per-hit damage, Maliwan has longer range than Sabre (3.25m vs 3.10m)
         self.assertEqual(card_m.top_stats[0].arrow, CompareArrow.WORSE)
         self.assertEqual(card_m.top_stats[1].arrow, CompareArrow.BETTER)
+
+    def test_every_melee_weapon_rolls_50_to_70_damage_reduction(self) -> None:
+        self.assertEqual((DAMAGE_REDUCTION_MIN_PCT, DAMAGE_REDUCTION_MAX_PCT), (50, 70))
+
+        seen_values: set[int] = set()
+        for i in range(400):
+            maker = tuple(Manufacturer)[i % 5]
+            rarity = (Rarity.COMMON, Rarity.UNCOMMON, Rarity.RARE, Rarity.VERY_RARE)[i % 4]
+            wpn = roll_melee_weapon(
+                game_stage=1 + (i % 80),
+                rarity=rarity,
+                manufacturer=maker,
+                seed=f"dr:{i}",
+                unique_id=2000 + i,
+            )
+            pct = compute_card_stats(wpn).damage_reduction_pct
+            self.assertTrue(
+                DAMAGE_REDUCTION_MIN_PCT <= pct <= DAMAGE_REDUCTION_MAX_PCT,
+                f"{wpn.parts.blade_id} rolled {pct}% damage reduction (must be 50-70%)",
+            )
+            seen_values.add(pct)
+
+            # Deterministic: the same weapon always reports (and applies) the same reduction, so the
+            # card, `melee_dump_held`, and the live `TakeDamage` hook can never disagree.
+            self.assertEqual(pct, compute_damage_reduction_pct(wpn))
+            self.assertEqual(pct, compute_card_stats(wpn).damage_reduction_pct)
+
+            # ...even when BL2 hands back a zeroed `UniqueId` / reset `GameStage` for a re-assembled
+            # item (the same drift `persistence` level-repair guards against).
+            corrupted = MeleeWeaponInstance(
+                unique_id=0, game_stage=1, rarity=wpn.rarity, parts=wpn.parts
+            )
+            self.assertEqual(pct, compute_card_stats(corrupted).damage_reduction_pct)
+
+        # Every manufacturer must be represented across the full 50-70% band
+        self.assertEqual(len(seen_values), DAMAGE_REDUCTION_MAX_PCT - DAMAGE_REDUCTION_MIN_PCT + 1)
+
+    def test_incoming_damage_reduction_math(self) -> None:
+        self.assertAlmostEqual(apply_incoming_damage_reduction(1000.0, 50), 500.0)
+        self.assertAlmostEqual(apply_incoming_damage_reduction(1000.0, 70), 300.0)
+        self.assertAlmostEqual(apply_incoming_damage_reduction(1000.0, 62.5), 375.0)
+        # Clamped: never heals, never amplifies, never goes negative
+        self.assertAlmostEqual(apply_incoming_damage_reduction(1000.0, 0), 1000.0)
+        self.assertAlmostEqual(apply_incoming_damage_reduction(1000.0, -25), 1000.0)
+        self.assertAlmostEqual(apply_incoming_damage_reduction(1000.0, 100), 0.0)
+        self.assertAlmostEqual(apply_incoming_damage_reduction(1000.0, 250), 0.0)
+        self.assertAlmostEqual(apply_incoming_damage_reduction(0.0, 60), 0.0)
+        self.assertAlmostEqual(apply_incoming_damage_reduction(-500.0, 60), -500.0)
 
     def test_sidecar_persistence_and_level_repair(self) -> None:
         wpn = roll_melee_weapon(

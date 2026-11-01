@@ -264,6 +264,7 @@ def dump_held_melee_weapon() -> dict[str, Any] | None:
             "crit_bonus_pct": card.crit_bonus_pct,
             "elemental_dps": card.elemental_dps,
             "elemental_chance_pct": card.elemental_chance_pct,
+            "damage_reduction_pct": card.damage_reduction_pct,
         },
         "live_player_bonuses": {
             "melee_damage_scale": round(ctx.melee_damage_scale, 3),

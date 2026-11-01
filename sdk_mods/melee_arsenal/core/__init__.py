@@ -56,11 +56,15 @@ from .schemas import (
     StatModifier,
 )
 from .stats import (
+    DAMAGE_REDUCTION_MAX_PCT,
+    DAMAGE_REDUCTION_MIN_PCT,
     AttackDamageBreakdown,
     ComputedCardStats,
     apply_bl2_modifiers,
+    apply_incoming_damage_reduction,
     compute_attack_damage,
     compute_card_stats,
+    compute_damage_reduction_pct,
 )
 from .targeting import (
     Rotator,
@@ -75,6 +79,8 @@ __all__ = [
     "ACCESSORIES",
     "BLADES",
     "BLADE_BY_MANUFACTURER",
+    "DAMAGE_REDUCTION_MAX_PCT",
+    "DAMAGE_REDUCTION_MIN_PCT",
     "ELEMENTS",
     "ELEMENT_PART_BY_TYPE",
     "GRIPS",
@@ -111,10 +117,12 @@ __all__ = [
     "TargetingMode",
     "Vec3",
     "apply_bl2_modifiers",
+    "apply_incoming_damage_reduction",
     "build_asset_sublibrary_manifest",
     "build_item_card_payload",
     "compute_attack_damage",
     "compute_card_stats",
+    "compute_damage_reduction_pct",
     "deserialize_weapon",
     "eligible_accessories_for_roll",
     "eligible_elements_for_blade",

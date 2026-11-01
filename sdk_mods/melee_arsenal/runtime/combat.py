@@ -34,6 +34,14 @@ Built 100% on empirical results from `melee_combat_probe_report.json` (Sanctuary
      layers manufacturer-tuned `CameraAnim` shakes + blade whoosh/impact `AkEvent`s, and falls back to
      `Arms.SkeletalMesh.RotOrigin` + `Arms.ForceUpdate(False)` if a modded rig ever lacks `Bladed_Melee`.
    - Regular melee (`[V]`) is completely untouched so Maya Scorn, Zer0 Execute, Krieg Buzz Axe, etc. work natively.
+
+4. **Defensive Blade Guard: Rolled 50-70% Damage Reduction While Equipped**:
+   - Every Melee Weapon rolls a stable `50-70%` incoming-damage reduction (printed on its item card) that
+     protects you while it is the held `Pawn.Weapon`, rewarding committing to close-quarters combat.
+   - `WillowPlayerPawn:TakeDamage` PRE blocks the incoming hit and re-calls the same function with
+     `Damage * (1 - reduction)` inside `prevent_hooking_direct_calls()`, so BL2 still handles the
+     shield/health split, flinch, hit reactions, and FFYL exactly as normal. Only the local player's own
+     pawn is ever modified, and any unexpected state falls through to untouched vanilla damage.
 """
 from __future__ import annotations
 
@@ -49,10 +57,14 @@ from unrealsdk.hooks import Block, prevent_hooking_direct_calls
 
 from ..core.enums import Element, Manufacturer, TargetingMode
 from ..core.schemas import MeleeWeaponInstance, PlayerMeleeContext
-from ..core.stats import ComputedCardStats, compute_attack_damage
+from ..core.stats import (
+    ComputedCardStats,
+    apply_incoming_damage_reduction,
+    compute_attack_damage,
+)
 from ..core.targeting import TargetCandidate, Vec3
 from .log import log_error, log_info
-from .resolver import resolve_melee_weapon
+from .resolver import get_local_player_controller, resolve_melee_weapon
 from .state import STATE
 
 DEAD_OBJECT_FLAGS = 0x0000200000000000 | 0x0000000200000000 | 0x8000 | 0x10000
@@ -465,6 +477,81 @@ def read_player_melee_context(pawn: Any, pc: Any = None) -> PlayerMeleeContext:
 def read_live_player_melee_context(pc: Any, pawn: Any) -> PlayerMeleeContext:
     """Compatibility wrapper `(pc, pawn)` used by `commands.dump_held_melee_weapon`."""
     return read_player_melee_context(pawn, pc)
+
+
+# BL2 names the incoming-damage parameter `Damage` on `WillowPawn`/`WillowPlayerPawn:TakeDamage`,
+# but tolerate naming drift across game builds the same way the rest of this mod does.
+_TAKE_DAMAGE_AMOUNT_FIELDS = ("Damage", "DamageAmount", "InDamage", "RawDamage", "BaseDamage")
+
+
+def _read_take_damage_amount(args: Any) -> tuple[str, float] | None:
+    """Locate and read the incoming-damage float field off a `TakeDamage` args struct."""
+    if args is None:
+        return None
+    for field_name in _TAKE_DAMAGE_AMOUNT_FIELDS:
+        try:
+            if not hasattr(args, field_name):
+                continue
+            return field_name, float(getattr(args, field_name))
+        except Exception:
+            continue
+    return None
+
+
+def on_player_take_damage_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
+    """Grant the equipped Melee Weapon's rolled `50-70%` Damage Reduction (`WillowPlayerPawn:TakeDamage`).
+
+    Only the LOCAL player's pawn is touched, and only while a Melee Arsenal weapon is the active
+    `Pawn.Weapon`. pyunrealsdk hook `args` are mutable but never propagate to the live call, so the
+    reduction is applied by blocking the original hit and re-calling the same `TakeDamage` with the
+    reduced damage inside `prevent_hooking_direct_calls()` (BL2 then splits that reduced amount
+    between shields and health exactly as it normally would). Any unexpected state falls through and
+    lets vanilla damage apply untouched.
+    """
+    if not STATE.damage_reduction_enabled:
+        return None
+    try:
+        pc = get_local_player_controller()
+        if pc is None or obj is None or getattr(pc, "Pawn", None) is not obj:
+            return None
+
+        resolved = resolve_melee_weapon(getattr(obj, "Weapon", None), sync_weapon_props=False)
+        if resolved is None:
+            return None
+        _inst, card = resolved
+
+        pct = int(getattr(card, "damage_reduction_pct", 0))
+        if pct <= 0:
+            return None
+
+        found = _read_take_damage_amount(args)
+        if found is None:
+            return None
+        field_name, damage = found
+        if damage <= 0.0:
+            return None
+
+        reduced = apply_incoming_damage_reduction(damage, pct)
+        if reduced >= damage:
+            return None
+
+        try:
+            setattr(args, field_name, reduced)
+            with prevent_hooking_direct_calls():
+                func(args)
+        except Exception as exc:
+            log_error(f"Reduced-damage TakeDamage re-call failed: {exc!r}")
+            return None
+
+        if STATE.debug_attack_log:
+            log_info(
+                f"Melee Damage Reduction [{card.manufacturer.value} {card.archetype_name}] "
+                f"{pct}%: {damage:.1f} -> {reduced:.1f} incoming"
+            )
+        return Block
+    except Exception as exc:
+        log_error(f"on_player_take_damage_pre failed: {exc!r}")
+        return None
 
 
 # ---------------------------------------------------------------------------

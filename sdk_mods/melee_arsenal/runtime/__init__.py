@@ -22,6 +22,7 @@ from .combat import (
     on_ai_take_damage_post,
     on_light_projectile_add_proj_pre,
     on_pawn_weapon_fired_pre,
+    on_player_take_damage_pre,
     on_weapon_consume_ammo_post,
     on_weapon_firing_mode_fire_pre,
     on_weapon_instant_fire_pre,
@@ -110,6 +111,10 @@ def _on_debug_log_changed(_opt: Any, new_val: bool) -> None:
     STATE.debug_attack_log = bool(new_val)
 
 
+def _on_damage_reduction_changed(_opt: Any, new_val: bool) -> None:
+    STATE.damage_reduction_enabled = bool(new_val)
+
+
 def _on_spawn_all_button(_opt: Any) -> None:
     count = spawn_all_five_archetypes("purple")
     if count > 0:
@@ -156,6 +161,16 @@ opt_debug_log = BoolOption(
     False,
     description="Log per-swing card damage, player melee multiplier, Roid bonus, and target count to melee_arsenal.log.",
     on_change_anytime=_on_debug_log_changed,
+)
+
+opt_damage_reduction = BoolOption(
+    "Melee Weapon Damage Reduction",
+    True,
+    description=(
+        "While a Melee Weapon is equipped, incoming damage is reduced by that weapon's rolled "
+        "50-70% Damage Reduction (shown on its item card)."
+    ),
+    on_change_anytime=_on_damage_reduction_changed,
 )
 
 btn_spawn_all = ButtonOption(
@@ -304,6 +319,11 @@ def hook_ai_take_damage(obj: Any, args: Any, ret: Any, func: Any) -> Any:
     return on_ai_take_damage_post(obj, args, ret, func)
 
 
+@hook("WillowGame.WillowPlayerPawn:TakeDamage", Type.PRE)
+def hook_player_take_damage(obj: Any, args: Any, ret: Any, func: Any) -> Any:
+    return on_player_take_damage_pre(obj, args, ret, func)
+
+
 @hook("WillowGame.ItemCardGFxObject:SetItemCard", Type.PRE)
 def hook_card_set_item_card_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
     return on_set_item_card_ex_pre(obj, args, ret, func)
@@ -406,7 +426,7 @@ cmd_melee_spawn_all.add_argument("rarity", nargs="?", default="purple", help="Ra
 
 @command(
     "melee_dump_held",
-    description="Print held Melee Weapon parts, card stats, and live player melee/Roid scaling breakdown.",
+    description="Print held Melee Weapon parts, card stats, damage reduction, and live player melee/Roid scaling breakdown.",
 )
 def cmd_melee_dump_held(args: Any) -> None:
     info = dump_held_melee_weapon()
@@ -414,8 +434,9 @@ def cmd_melee_dump_held(args: Any) -> None:
         live = info["live_player_bonuses"]
         _notify_hud(
             info["name"],
-            f"Card {info['card_stats']['damage']} | Melee x{live['melee_damage_scale']} "
-            f"| Roid +{live['roid_flat_damage']:.0f} -> Hit {live['effective_body_hit']}",
+            f"Card {info['card_stats']['damage']} | DR {info['card_stats']['damage_reduction_pct']}% "
+            f"| Melee x{live['melee_damage_scale']} | Roid +{live['roid_flat_damage']:.0f} "
+            f"-> Hit {live['effective_body_hit']}",
         )
 
 
@@ -513,6 +534,7 @@ ALL_HOOKS = [
     hook_weapon_has_active_ammo,
     hook_weapon_start_reload,
     hook_ai_take_damage,
+    hook_player_take_damage,
     hook_card_set_item_card_pre,
     hook_card_set_item_card_post,
     hook_card_set_item_card_ex_pre,
@@ -541,6 +563,7 @@ ALL_OPTIONS = [
     opt_drop_weight,
     opt_slash_scale,
     opt_debug_log,
+    opt_damage_reduction,
     btn_spawn_all,
 ]
 
@@ -558,7 +581,8 @@ def build_runtime_mod(version: str, author: str) -> Any:
             "Adds a new Weapon Type: Melee Weapons across 5 Blade-defined manufacturers "
             "(Hyperion Katana, Bandit Machete, Jakobs Sabre, Maliwan Phaseblade, Torgue Blast-Cleaver). "
             "Primary Fire swings your Melee Weapon (Single-Target or Cleave) scaling with player Melee & Roid bonuses, "
-            "while [V] remains your vanilla character melee."
+            "while [V] remains your vanilla character melee. Every Melee Weapon also grants 50-70% incoming damage "
+            "reduction while equipped."
         ),
         supported_games=Game.BL2,
         auto_enable=True,
@@ -572,5 +596,6 @@ def build_runtime_mod(version: str, author: str) -> Any:
     STATE.world_drop_weight = float(getattr(opt_drop_weight, "value", 100.0))
     STATE.slash_motion_scale = float(getattr(opt_slash_scale, "value", 100)) / 100.0
     STATE.debug_attack_log = bool(getattr(opt_debug_log, "value", False))
+    STATE.damage_reduction_enabled = bool(getattr(opt_damage_reduction, "value", True))
     log_info(f"Melee Arsenal v{version} loaded and armed.")
     return mod_instance
