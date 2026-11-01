@@ -992,9 +992,16 @@ def _resolve_shooter_and_pc(wpn: Any) -> tuple[Any, Any]:
     return shooter, pc
 
 
+def _combat_breadcrumb(stage: str) -> None:
+    """Persist opt-in checkpoints before native calls that may not return on a crash."""
+    if STATE.debug_attack_log:
+        log_info(f"Combat checkpoint: {stage}")
+
+
 def _execute_melee_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCardStats) -> int:
     """Perform full blade swing animation + synchronous wall-occluded single-target/cleave damage."""
     global _FIRST_SWING_LOGGED
+    _combat_breadcrumb(f"swing start: {card.manufacturer.value} {card.archetype_name}")
     shooter, pc = _resolve_shooter_and_pc(wpn)
     if shooter is None or _is_dead(shooter):
         return 0
@@ -1003,7 +1010,9 @@ def _execute_melee_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCar
     ctx = read_player_melee_context(shooter, pc)
 
     # 1. Trigger 1st-person `Bladed_Melee` slash + CameraAnim + melee whoosh audio
+    _combat_breadcrumb("before swing animation")
     _trigger_first_person_blade_swing(pc, shooter, card, ctx.swing_speed_scale)
+    _combat_breadcrumb("after swing animation")
 
     # 2. Compute camera/eye ray origin and aim vector
     vec_tpl = getattr(shooter, "Location", None)
@@ -1052,9 +1061,12 @@ def _execute_melee_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCar
                 pass
 
     # 4. Primary 0-width crosshair trace (detects headshots, Target Dummies, barrels, or ground/walls)
+    _combat_breadcrumb("before center trace")
     center_actor, center_hit_xyz, center_bone = _run_weapon_trace(
         wpn, vec_tpl, start_xyz, center_end_xyz
     )
+
+    _combat_breadcrumb("after center trace")
 
     # List of `(actor, hit_xyz, bone_name)` to strike
     targets_to_strike: list[tuple[Any, tuple[float, float, float], str]] = []
@@ -1070,7 +1082,9 @@ def _execute_melee_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCar
         or len(targets_to_strike) == 0
     )
     if need_cone:
+        _combat_breadcrumb("before candidate snapshot")
         candidates, pawn_map = _snapshot_cleave_candidates(shooter)
+        _combat_breadcrumb(f"after candidate snapshot: {len(candidates)} candidates")
         if card.targeting_mode == TargetingMode.FRONTAL_CLEAVE:
             half_arc_deg = max(8.0, card.cleave_arc_degrees * 0.5)
             max_extra = max(1, card.max_targets)
@@ -1112,7 +1126,9 @@ def _execute_melee_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCar
         for _sc, cand, cpawn in scored:
             if len(targets_to_strike) >= max_extra:
                 break
+            _combat_breadcrumb("before candidate LOS trace")
             clear, hit_pt, bone = _candidate_has_clear_los(wpn, vec_tpl, start_xyz, cand, cpawn)
+            _combat_breadcrumb("after candidate LOS trace")
             if clear:
                 seen_ids.add(id(cpawn))
                 targets_to_strike.append((cpawn, hit_pt, bone))
@@ -1168,6 +1184,7 @@ def _execute_melee_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCar
             dt_def = _CACHED_DMG_TYPES_PROC.get(card.element)
             _set_wpn_status_chance_mods(0.0)
 
+        _combat_breadcrumb(f"before direct damage: {getattr(victim, 'Name', 'unknown')}")
         try:
             with prevent_hooking_direct_calls():
                 shooter.Behavior_CauseDamage(
@@ -1180,6 +1197,7 @@ def _execute_melee_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCar
                     bCanDamageFriendlies=False,
                     DamageCauser=wpn,
                 )
+            _combat_breadcrumb("after direct damage")
             hits_dealt += 1
             if primary_blast_xyz is None:
                 primary_blast_xyz = hit_xyz
@@ -1189,11 +1207,13 @@ def _execute_melee_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCar
         # Spawn surface/blood/spark impact FX at the strike point
         if vec_tpl is not None and hit_xyz is not None:
             try:
+                _combat_breadcrumb("before impact effects")
                 with prevent_hooking_direct_calls():
                     wpn.PlayImpactEffects(
                         _make_vec_from(vec_tpl, *start_xyz),
                         _make_vec_from(vec_tpl, *hit_xyz),
                     )
+                _combat_breadcrumb("after impact effects")
             except Exception:
                 pass
 
@@ -1216,6 +1236,7 @@ def _execute_melee_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCar
                 primary_blast_xyz[2] - sz,
             )
             exp_dt = _CACHED_DMG_TYPES_PROC.get(Element.EXPLOSIVE)
+            _combat_breadcrumb("before radius damage")
             try:
                 with prevent_hooking_direct_calls():
                     shooter.Behavior_CauseRadiusDamage(
@@ -1231,11 +1252,13 @@ def _execute_melee_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCar
                         DamageCauser=wpn,
                         bSkipTraceTest=False,
                     )
+                _combat_breadcrumb("after radius damage")
                 splash_triggered = True
             except Exception as exc:
                 log_error(f"Behavior_CauseRadiusDamage failed: {exc!r}")
 
             if splash_triggered:
+                _combat_breadcrumb("before explosion effects")
                 _spawn_torgue_explosion_vfx_sfx(
                     shooter=shooter,
                     pc=pc,
@@ -1243,6 +1266,7 @@ def _execute_melee_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCar
                     eye_xyz=(eye_x, eye_y, eye_z),
                     blast_xyz=primary_blast_xyz,
                 )
+                _combat_breadcrumb("after explosion effects")
 
     # 8. Meaty blade-hit audio when connecting with at least one enemy / prop
     if hits_dealt > 0 or splash_triggered:
