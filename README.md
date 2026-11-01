@@ -88,14 +88,19 @@ Each weapon rolls a **Blade** (defines manufacturer & archetype), **Grip** (matc
 
 ## World Drops & Mod Menu Options
 
-Melee Arsenal injects proportionally across **19 weapon loot pools** with idempotent map-load re-syncing (preventing `SparkLevelPatchEntry`, BLCMM, or UCP level patches from overwriting drops):
+Melee Arsenal injects proportionally across **23 weapon loot pools** with idempotent map-load re-syncing (preventing `SparkLevelPatchEntry`, BLCMM, or UCP level patches from overwriting drops):
 
 - **Global World-Drop Rarity Pools**: `GD_Itempools.WeaponPools.Pool_Weapons_All_{01_Common, 02_Uncommon, 04_Rare, 05_VeryRare}`
-- **Class-Biased Enemy Death Pools**: `GD_Itempools.EnemyDropPools.Pool_GunsAndGear_Weighted{Pistols, SMGs, Shotguns, Sniper}`
+- **Standard Enemy / Badass / Boss Death Pools**: `GD_Itempools.EnemyDropPools.Pool_GunsAndGear_{01_Common, 02_Uncommon, 04_Rare, 05_VeryRare}` *(the tiered pools a dying enemy actually rolls, each mapped to its matching rarity sub-pool)*
+- **Class-Biased Enemy Drop Pools**: `GD_Itempools.EnemyDropPools.Pool_GunsAndGear_Weighted{Pistols, SMGs, Shotguns, Sniper}`
 - **Regular & Red Epic Weapon Chests**: `GD_Itempools.Treasure_ChestPools.Pool_{WeaponChest, EpicChest}_Weapons_{LongGuns, Pistols}` *(Red Chests exclude White Commons)*
 - **Interactive Containers**: `GD_Itempools.LootablePools.{Pool_Locker_Items_SMGsAndPistols, Pool_Dumpster_Guns}`
 - **Marcus Weapon Vendors & Item of the Day**: `GD_ItemPools_Shop.WeaponPools.{ShopPool_Weapons_Pistols, ShopPool_Weapons_SMG, ShopPool_Weapons_AssaultRifles, ShopPool_Weapons_Shotguns, Shoppool_FeaturedItem_WeaponMachine}`
 - *(AI `GD_ItempoolsEnemyUse.*` pools are never modified so NPC enemies never spawn wielding player melee blades.)*
+
+Pool lookup tolerates BL2 patch/DLC naming drift (exact paths → case-insensitive live-object resolution → alternate pistol/SMG/AR/shotgun donor pools), and the first successful injection re-rolls any already-stocked `WillowVendingMachine` shelves so Marcus machines show Melee Weapons without a map transition.
+
+Every Melee Weapon's Material part is stamped with its exact rarity level (`1` White / `2` Green / `3` Blue / `4` Purple), and dropped pickups / inventory items get matching `WillowPickup.InventoryRarityLevel` / `WillowInventory.RarityLevel` values — so ground loot beams, item-card titles and sell values are always the rolled rarity's colour.
 
 Under **MODS -> Melee Arsenal**, **`World Drop Class Weight`** defaults to **`100`** (`100 / 620 = ~16.1%` of weapon drops — 1:1 parity with Pistols, SMGs, Assault Rifles, and Shotguns) and can be tuned anywhere from `10` up to `500` (or toggled off via **`Enable World Drops`**).
 
@@ -107,7 +112,7 @@ Open the PythonSDK console (`~`) in *Borderlands 2*:
 
 - `melee_spawn [maker] [rarity] [element] [accessory]` — Drop a customized Melee Weapon in front of you (e.g. `melee_spawn hyperion purple shock serrated`)
 - `melee_spawn_all [white|green|blue|purple]` — Drop all 5 manufacturer archetypes in front of you
-- `melee_check_pools` — Re-sync and print live per-pool Melee Arsenal weights and weapon drop share `%`
+- `melee_check_pools` — Re-sync, re-roll every gun vendor's shelf from the injected pools, and print live per-pool Melee Arsenal weights, drop share `%`, and any pool paths the current map has not loaded
 - `melee_dump_held` *(alias `melee_debug_swing`)* — Inspect the currently held Melee Weapon's parts, Gestalt fragments, card stats, and live player melee/Roid multiplier math
 - `melee_save_now` — Manually snapshot carried Melee Arsenal weapons to `_melee_arsenal_saves`
 - `melee_preview [roll_deg] [scale] [focus_radius] [pitch_deg] [yaw_deg] [bounds_z]` — Live-tune 3D inventory/inspect framing

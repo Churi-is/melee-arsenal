@@ -39,7 +39,7 @@ from .commands import (
 )
 from .definitions import ensure_combat_resources_cached, ensure_definitions_built
 from .log import log_info
-from .loot_pools import inspect_loot_pools, sync_loot_pools
+from .loot_pools import inspect_loot_pools, refresh_vending_machines, sync_loot_pools
 from .persistence_bridge import (
     on_apply_weapon_save_data_pre,
     on_save_game_pre,
@@ -481,6 +481,13 @@ def cmd_melee_check_pools(_args: Any) -> None:
             f"melee={row['melee_weight']} / total_weap={row['weapon_total_weight']} "
             f"({row['melee_weapon_share_pct']}%)"
         )
+    if report["missing_pools"]:
+        log_info(f"  not loaded in this map: {', '.join(report['missing_pools'])}")
+    # Manual re-roll: vendors build their shelves during map load, so existing stock can predate
+    # the injection above. This makes `melee_check_pools` also refresh every gun vendor in the map.
+    vendors = refresh_vending_machines()
+    if vendors > 0:
+        log_info(f"  re-rolled {vendors} vending machine shelf(ies) from the injected shop pools.")
     _notify_hud(
         "Melee Loot Pools",
         f"{report['injected_pools']}/{report['loaded_target_pools']} pools active | "

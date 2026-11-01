@@ -36,10 +36,13 @@ from ..core.enums import Manufacturer, Rarity
 from ..core.schemas import MeleeWeaponInstance, MeleeWeaponParts
 from ..core.stats import ComputedCardStats, compute_card_stats
 from .custom_assets import (
+    get_part_rarity,
+    is_custom_asset_part,
     resolve_fitted_accessory_part,
     resolve_fitted_element_part,
     resolve_fitted_grip_part,
     resolve_fitted_material_part,
+    set_part_rarity,
     sync_definition_data_visual_parts,
 )
 from .definitions import (
@@ -205,6 +208,37 @@ def resolve_melee_weapon(
         return None
 
 
+def _ensure_material_rarity(mat_part: Any, rarity: Rarity) -> None:
+    """Keep our Material part's `Rarity` level in sync with the rolled tier (never touch vanilla parts)."""
+    if mat_part is None or not is_custom_asset_part(mat_part):
+        return
+    if abs(get_part_rarity(mat_part) - float(int(rarity))) > 1e-3:
+        set_part_rarity(mat_part, rarity)
+
+
+def stamp_inventory_rarity(item_or_pickup: Any, rarity: Rarity) -> None:
+    """Stamp the live rarity level the engine uses for loot beams, item cards and sell value.
+
+    `WillowPickup.InventoryRarityLevel` (ground-beam colour) and `WillowInventory.RarityLevel`
+    (item-card colour) are cached when the item is *initialized*.  Weapons we re-assemble after
+    that point (command spawns, sidecar restores, natural rolls finalized in
+    `ChooseRandomNameParts`) would otherwise keep the stale Common level and show up white.
+    """
+    level = float(int(rarity))
+    targets = [item_or_pickup]
+    weapon = unwrap_weapon_object(item_or_pickup)
+    if weapon is not None and weapon is not item_or_pickup:
+        targets.append(weapon)
+    for obj in targets:
+        if obj is None:
+            continue
+        for attr in ("InventoryRarityLevel", "RarityLevel"):
+            try:
+                setattr(obj, attr, level)
+            except Exception:
+                continue
+
+
 def apply_instance_to_definition_data(dd: Any, inst: MeleeWeaponInstance) -> None:
     """Write exact UObject part references for `inst` onto a `WeaponDefinitionData` struct."""
     blade_spec = BLADES[inst.parts.blade_id]
@@ -222,6 +256,7 @@ def apply_instance_to_definition_data(dd: Any, inst: MeleeWeaponInstance) -> Non
     )
     elem_part = resolve_fitted_element_part(inst.parts.element_id, blade_id=inst.parts.blade_id)
     mat_part = resolve_fitted_material_part(maker, inst.rarity, elem_id=inst.parts.element_id)
+    _ensure_material_rarity(mat_part, inst.rarity)
 
     prefix_txt, title_txt, _ = resolve_weapon_name(
         inst.parts.blade_id,
@@ -288,6 +323,8 @@ def sync_live_weapon_properties(
 
     fire_iv = round(1.0 / max(0.25, card.swing_speed), 4)
     elem_dps = float(max(0.0, card.elemental_dps))
+    # Live rarity level drives loot-beam / item-card colour when the engine reads it off the item.
+    stamp_inventory_rarity(wpn, inst.rarity)
     for prop_name, val in (
         ("InstantHitDamageBaseValue", float(card.card_damage)),
         ("InstantHitDamage", float(card.card_damage)),
@@ -665,6 +702,7 @@ def on_place_spawned_items_post(obj: Any, args: Any, ret: Any, func: Any) -> Any
                 wpn.DefinitionData = dd
                 if inst.unique_id:
                     _STAMPED_UIDS.add(int(inst.unique_id))
+                stamp_inventory_rarity(pickup, inst.rarity)
             resolve_melee_weapon(wpn, sync_weapon_props=True)
     except Exception as exc:
         log_error(f"on_place_spawned_items_post error: {exc!r}")
