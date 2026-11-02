@@ -12,6 +12,7 @@ if str(ROOT_DIR / "sdk_mods") not in sys.path:
 from melee_arsenal.core import (  # noqa: E402
     Manufacturer,
     PlayerMeleeContext,
+    THROW_DAMAGE_MULTIPLIER,
     Rarity,
     apply_incoming_damage_reduction,
     build_item_card_payload,
@@ -61,7 +62,24 @@ def main() -> None:
             f"  Defense    : {stats.damage_reduction_pct}% Damage Reduction while equipped"
             f" (1,000 incoming -> {apply_incoming_damage_reduction(1000.0, stats.damage_reduction_pct):,.0f})"
         )
-        print(f"  Fun Stats  : {_strip_font_tags(card.fun_stats_lines[0])}")
+        if stats.secondary_attack.value == "throw":
+            thrown = compute_attack_damage(stats, ctx, damage_scale=THROW_DAMAGE_MULTIPLIER)
+            print(
+                f"  Secondary  : RMB Throw ({stats.throw_weight_kg:.2f}kg) -> "
+                f"{stats.throw_range_m:.1f}m arc, {stats.throw_arc_height_m:.2f}m apex, "
+                f"{stats.throw_flight_time_sec:.2f}s flight | "
+                f"thrown hit = {thrown.final_hit_damage:,}"
+            )
+        elif stats.secondary_attack.value == "guard":
+            print(
+                f"  Secondary  : RMB Hold Guard -> {stats.guard_reduction_pct}% braced DR, "
+                f"{stats.guard_parry_window_sec:.2f}s parry window, "
+                f"{stats.guard_cooldown_sec:.2f}s cooldown"
+            )
+        print(
+            "  Fun Stats  : "
+            + " | ".join(_strip_font_tags(line) for line in card.fun_stats_lines[:2])
+        )
         print(
             f"  On-Attack  : BaseCard={stats.card_damage:,} -> With +120% Melee, 12k Roid"
             f"{', Crit' if stats.can_weakspot_crit else ''} & UVHM Slag = {hit.final_hit_damage:,} dmg"

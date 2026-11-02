@@ -11,6 +11,7 @@ from .enums import (
     ModifierMode,
     PartSlot,
     Rarity,
+    SecondaryAttack,
     StatId,
     TargetingMode,
 )
@@ -76,6 +77,11 @@ class ManufacturerSpec:
     matching_grip_speed_bonus: float = 0.10
     intrinsic_modifiers: tuple[StatModifier, ...] = ()
     donor_manufacturer_path: str = ""
+    # RMB / Left Trigger secondary attack identity (Maliwan deliberately gets none).
+    secondary_attack: SecondaryAttack = SecondaryAttack.NONE
+    # Mass of this manufacturer's blade & grip hardware in kilograms. Bandit/Torgue thrown
+    # blades take their flight arc (speed, loft, range) from the mass of the actual parts.
+    part_weight_kg: float = 2.0
 
 
 @dataclass(frozen=True, slots=True)

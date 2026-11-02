@@ -26,6 +26,25 @@ class TargetingMode(str, Enum):
     FRONTAL_CLEAVE = "frontal_cleave"
 
 
+class SecondaryAttack(str, Enum):
+    """Manufacturer-locked Right Mouse Button / Left Trigger secondary attack.
+
+    Melee Weapons deliberately suppress the donor pistol's ADS zoom, freeing RMB for a
+    manufacturer signature move:
+
+    - `THROW` (Bandit, Torgue): hurl the blade along a weight-driven arc. It strikes with
+      a normal LMB hit, then homes back to your hand. LMB is locked while airborne.
+    - `GUARD` (Hyperion, Jakobs): hold RMB to brace. The next incoming hit has the blade's
+      rolled Damage Reduction applied twice, and a hit inside the `0.33 s` parry window deals
+      zero damage and is reflected back at a melee attacker as a forced critical hit.
+    - `NONE` (Maliwan): RMB stays inert.
+    """
+
+    NONE = "none"
+    THROW = "throw"
+    GUARD = "guard"
+
+
 class Element(str, Enum):
     """Elemental damage types supported on melee weapons."""
 

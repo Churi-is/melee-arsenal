@@ -6,8 +6,15 @@ from dataclasses import dataclass
 from typing import Iterable
 
 from .catalog import ACCESSORIES, BLADES, ELEMENTS, GRIPS, MANUFACTURERS, resolve_weapon_name
-from .enums import Element, Manufacturer, ModifierMode, Rarity, StatId, TargetingMode
+from .enums import Element, Manufacturer, ModifierMode, Rarity, SecondaryAttack, StatId, TargetingMode
 from .schemas import MeleeWeaponInstance, PlayerMeleeContext, StatModifier
+from .secondary import (
+    GUARD_PARRY_WINDOW_SEC,
+    build_throw_flight_plan,
+    compute_guard_cooldown_sec,
+    compute_throw_weight_kg,
+    guard_effective_reduction_pct,
+)
 
 # Borderlands 2 exponential level scaling curve: 1.13^GameStage.
 # Vanilla pistol base constant is ~18.0; melee weapon baseline scales ~2.65x higher per swing
@@ -125,6 +132,18 @@ class ComputedCardStats:
     # Defensive perk: level- & part-scaled incoming damage reduction while equipped (30-70%+)
     damage_reduction_pct: int
 
+    # RMB / Left Trigger secondary attack (Bandit & Torgue throw, Hyperion & Jakobs guard,
+    # Maliwan none). Throw values describe the ballistic arc its weight produces; guard values
+    # describe the braced mitigation window and its part-driven cooldown.
+    secondary_attack: SecondaryAttack = SecondaryAttack.NONE
+    throw_weight_kg: float = 0.0
+    throw_range_m: float = 0.0
+    throw_arc_height_m: float = 0.0
+    throw_flight_time_sec: float = 0.0
+    guard_cooldown_sec: float = 0.0
+    guard_parry_window_sec: float = 0.0
+    guard_reduction_pct: int = 0
+
 
 @dataclass(frozen=True, slots=True)
 class AttackDamageBreakdown:
@@ -213,6 +232,17 @@ def apply_incoming_damage_reduction(damage: float, damage_reduction_pct: float) 
         return damage
     pct = min(100.0, float(damage_reduction_pct))
     return damage * (1.0 - pct / 100.0)
+
+
+def apply_guard_damage_reduction(damage: float, damage_reduction_pct: float) -> float:
+    """Braced (RMB Guard) mitigation: apply the blade's card Damage Reduction twice.
+
+    The card's `Damage Reduction NN%` is already the passive equipped perk; holding Guard on a
+    Hyperion/Jakobs blade layers it again, exactly like `(damage * card DR) * card DR`. At a 60%
+    card roll a 1,000 damage hit becomes `1,000 * 0.4 * 0.4 = 160` while bracing.
+    """
+    guarded = apply_incoming_damage_reduction(damage, damage_reduction_pct)
+    return apply_incoming_damage_reduction(guarded, damage_reduction_pct)
 
 
 def compute_card_stats(weapon: MeleeWeaponInstance) -> ComputedCardStats:
@@ -316,6 +346,29 @@ def compute_card_stats(weapon: MeleeWeaponInstance) -> ComputedCardStats:
     splash_damage = round(raw_damage * splash_pct) if splash_radius > 0.0 and splash_pct > 0.0 else 0
     momentum_scale = max(0.1, apply_bl2_modifiers(1.0, all_mods, StatId.MOMENTUM))
 
+    # 7. Manufacturer secondary attack (RMB / Left Trigger). Throw arcs are solved from the
+    #    weapon's actual mass (blade + grip manufacturer hardware + accessory), guard cooldowns
+    #    from its parts. Maliwan deliberately has no secondary attack.
+    damage_reduction_pct = compute_damage_reduction_pct(weapon)
+    secondary_attack = maker_spec.secondary_attack
+    throw_weight_kg = 0.0
+    throw_range_m = 0.0
+    throw_arc_height_m = 0.0
+    throw_flight_time_sec = 0.0
+    guard_cooldown_sec = 0.0
+    guard_parry_window_sec = 0.0
+    guard_reduction_pct = 0
+    if secondary_attack == SecondaryAttack.THROW:
+        throw_weight_kg = compute_throw_weight_kg(weapon)
+        flight = build_throw_flight_plan(throw_weight_kg)
+        throw_range_m = flight.range_meters
+        throw_arc_height_m = flight.apex_meters
+        throw_flight_time_sec = flight.flight_time_sec
+    elif secondary_attack == SecondaryAttack.GUARD:
+        guard_cooldown_sec = compute_guard_cooldown_sec(weapon)
+        guard_parry_window_sec = GUARD_PARRY_WINDOW_SEC
+        guard_reduction_pct = guard_effective_reduction_pct(damage_reduction_pct)
+
     return ComputedCardStats(
         full_name=full_name,
         prefix=prefix,
@@ -345,7 +398,15 @@ def compute_card_stats(weapon: MeleeWeaponInstance) -> ComputedCardStats:
         splash_damage=splash_damage,
         matching_grip=matching_grip,
         momentum_scale=round(momentum_scale, 2),
-        damage_reduction_pct=compute_damage_reduction_pct(weapon),
+        damage_reduction_pct=damage_reduction_pct,
+        secondary_attack=secondary_attack,
+        throw_weight_kg=throw_weight_kg,
+        throw_range_m=throw_range_m,
+        throw_arc_height_m=throw_arc_height_m,
+        throw_flight_time_sec=throw_flight_time_sec,
+        guard_cooldown_sec=guard_cooldown_sec,
+        guard_parry_window_sec=guard_parry_window_sec,
+        guard_reduction_pct=guard_reduction_pct,
     )
 
 
@@ -357,6 +418,7 @@ def compute_attack_damage(
     target_is_slagged: bool = False,
     surface_mult: float = 1.0,
     normalize_roid_by_speed: bool = True,
+    damage_scale: float = 1.0,
 ) -> AttackDamageBreakdown:
     """Stack Player Melee Bonuses + Roid Shield on top of the weapon's base Card Damage.
 
@@ -364,7 +426,10 @@ def compute_attack_damage(
       weapon_term = card.raw_damage * ctx.gun_or_all_damage_scale
       roid_term   = ctx.roid_flat_damage * (ROID_REFERENCE_SWING_SPEED / card.swing_speed)
       subtotal    = (weapon_term + roid_term) * ctx.melee_damage_scale
-      final       = subtotal * crit_mult * slag_mult * surface_mult
+      final       = subtotal * crit_mult * slag_mult * surface_mult * damage_scale
+
+    `damage_scale` exists for secondary attacks: a thrown Bandit/Torgue blade strikes with the
+    exact same breakdown as its LMB swing (`THROW_DAMAGE_MULTIPLIER` is `1.0`).
     """
     ctx = ctx or PlayerMeleeContext()
 
@@ -389,12 +454,16 @@ def compute_attack_damage(
     else:
         slag_mult = 1.0
 
-    raw_final = pre_melee * melee_mult * crit_mult * slag_mult * max(0.0, surface_mult)
+    scale = max(0.0, float(damage_scale))
+    raw_final = pre_melee * melee_mult * crit_mult * slag_mult * max(0.0, surface_mult) * scale
     final_hit = max(1, round(raw_final))
 
     if card.splash_damage > 0:
         splash_ratio = card.splash_damage / max(1.0, card.raw_damage)
-        splash_hit = max(1, round(pre_melee * splash_ratio * melee_mult * slag_mult * max(0.0, surface_mult)))
+        splash_hit = max(
+            1,
+            round(pre_melee * splash_ratio * melee_mult * slag_mult * max(0.0, surface_mult) * scale),
+        )
     else:
         splash_hit = 0
 

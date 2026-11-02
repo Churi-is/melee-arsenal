@@ -204,7 +204,13 @@ class FakeUObject:
     def _path_name(self) -> str:
         outer = object.__getattribute__(self, "Outer")
         nm = object.__getattribute__(self, "Name")
-        return nm if outer is None else f"{outer._path_name()}.{nm}"
+        if outer is None:
+            return nm
+        try:
+            return f"{outer._path_name()}.{nm}"
+        except AttributeError:
+            # Components are constructed with the (mock) pawn actor as their outer.
+            return f"{getattr(outer, 'Name', repr(outer))}.{nm}"
 
     def __repr__(self) -> str:
         return f"{object.__getattribute__(self, '_cls_name')}'{self._path_name()}'"
@@ -289,6 +295,62 @@ class MockBL2World:
                 _find=lambda fn_or_prop: loc_field if fn_or_prop == "CustomLocation" else ab_fn,
             )
             obj.ApplyBehaviorToContext = lambda **kw: self._run_drop_spawner(obj, kw)
+        elif cls_name == "SkeletalMeshComponent":
+            object.__setattr__(obj, "SkeletalMesh", None)
+            object.__setattr__(obj, "Materials", [])
+            object.__setattr__(obj, "Location", self._vec())
+            object.__setattr__(obj, "Rotation", FakeWrappedStruct("Rotator", Pitch=0, Yaw=0, Roll=0))
+            object.__setattr__(obj, "Hidden", False)
+            object.__setattr__(obj, "Absolute", False)
+            record: dict = {
+                "name": name,
+                "mesh": None,
+                "materials": {},
+                "location": (0.0, 0.0, 0.0),
+                "pitch": 0,
+                "hidden": False,
+                "moves": 0,
+            }
+            self.thrown_blade_visuals.append(record)
+
+            def _set_mesh(mesh, _obj=obj, _rec=record):
+                object.__setattr__(_obj, "SkeletalMesh", mesh)
+                _rec["mesh"] = mesh
+
+            def _set_material(index, material, _obj=obj, _rec=record):
+                mats = list(_obj.Materials)
+                while len(mats) <= int(index):
+                    mats.append(None)
+                mats[int(index)] = material
+                object.__setattr__(_obj, "Materials", mats)
+                _rec["materials"][int(index)] = material
+
+            def _set_translation(vec, _obj=obj, _rec=record):
+                object.__setattr__(_obj, "Location", copy.copy(vec))
+                _rec["location"] = (float(vec.X), float(vec.Y), float(vec.Z))
+                _rec["moves"] += 1
+
+            def _set_rotation(rot, _obj=obj, _rec=record):
+                object.__setattr__(_obj, "Rotation", copy.copy(rot))
+                _rec["pitch"] = int(getattr(rot, "Pitch", 0))
+
+            def _set_hidden(flag, _obj=obj, _rec=record):
+                object.__setattr__(_obj, "Hidden", bool(flag))
+                _rec["hidden"] = bool(flag)
+
+            def _set_absolute(*flags, _obj=obj):
+                object.__setattr__(_obj, "Absolute", all(bool(f) for f in flags))
+
+            obj.SetSkeletalMesh = _set_mesh
+            obj.SetMaterial = _set_material
+            obj.SetTranslation = _set_translation
+            obj.SetRotation = _set_rotation
+            obj.SetHiddenGame = _set_hidden
+            obj.SetAbsolute = _set_absolute
+            obj.SetBlockRigidBody = lambda _flag: None
+            obj.SetCollision = lambda *_a: None
+            obj.SetScale3D = lambda scale, _rec=record: _rec.__setitem__("scale", scale)
+            obj.SetScale = lambda scale, _rec=record: _rec.__setitem__("scale", scale)
         elif cls_name == "MaterialInstanceConstant":
             object.__setattr__(obj, "Parent", None)
             object.__setattr__(obj, "_tex_params", {})
@@ -1048,6 +1110,17 @@ class MockBL2World:
             ObjectFlags=0,
         )
         self.spawned_emitters: list[tuple[str, tuple[float, float, float]]] = []
+        # Thrown-blade visual actor bookkeeping (Tediore-style flying weapon mesh) + HUD callouts
+        self.thrown_blade_visuals: list[dict] = []
+        self.attached_components: list[object] = []
+        self.detached_components: list[object] = []
+        self.hud_messages: list[tuple[str, str]] = []
+        self.thrown_blade_source_mesh = FakeUObject(
+            "SkeletalMesh", None, "Inkblade_Assembly"
+        )
+        self.thrown_blade_source_material = types.SimpleNamespace(
+            Name="Mat_Inkblade_Thrown", ObjectFlags=0
+        )
         fx_exp_pkg = self.register(FakeUObject("Package", None, "FX_WEP_Explosions"))
         fx_exp_sub = self.register(FakeUObject("Package", fx_exp_pkg, "Particles"))
         self.register(FakeUObject("ParticleSystem", fx_exp_sub, "Part_Gyrojet_Explosion"))
@@ -1075,6 +1148,7 @@ class MockBL2World:
         self.pawn = types.SimpleNamespace(
             Name="WillowPlayerPawn_0",
             ObjectFlags=0,
+            _path_name=lambda: "MockWorld.WillowPlayerPawn_0",
             Location=self._vec(),
             Rotation=FakeWrappedStruct("Rotator", Pitch=0, Yaw=0, Roll=0),
             BaseEyeHeight=64.0,
@@ -1087,6 +1161,8 @@ class MockBL2World:
             WorldInfo=self.world_info,
             Controller=None,
             PlayAkEvent=lambda ak: self.played_ak.append(ak._path_name()),
+            AttachComponent=lambda comp: self.attached_components.append(comp),
+            DetachComponent=lambda comp: self.detached_components.append(comp),
             IsEnemy=lambda other: getattr(other, "hostile", True),
             Behavior_CauseDamage=lambda **kw: self.caused_damages.append(
                 {
@@ -1107,7 +1183,11 @@ class MockBL2World:
             SaveGameName="Save0001",
             GetCurrentPlaythrough=lambda: 1,
             ClientPlayCameraAnim=self._client_play_camera_anim,
-            GetHUDMovie=lambda: None,
+            GetHUDMovie=lambda: types.SimpleNamespace(
+                AddTrainingText=lambda message, title, *a: self.hud_messages.append(
+                    (str(title), str(message))
+                )
+            ),
             ServerGrantMissionRewards=self._server_grant_mission_rewards,
         )
         self.pawn.Controller = self.pc
@@ -1264,6 +1344,16 @@ class MockBL2World:
         return (imp, ImpactList)
 
     def _make_live_weapon(self, dd):
+        mesh_state = {"hidden": False}
+        held_mesh = types.SimpleNamespace(
+            ObjectFlags=0,
+            SkeletalMesh=self.thrown_blade_source_mesh,
+            Materials=[self.thrown_blade_source_material],
+            Scale3D=self._vec(1.0, 1.0, 1.0),
+            RotOrigin=FakeWrappedStruct("Rotator", Pitch=0, Yaw=0, Roll=0),
+            SetHiddenGame=lambda flag: mesh_state.__setitem__("hidden", bool(flag)),
+            _state=mesh_state,
+        )
         wpn = types.SimpleNamespace(
             Name=f"WillowWeapon_{len(self.backpack) + 1}",
             ObjectFlags=0,
@@ -1285,6 +1375,7 @@ class MockBL2World:
             CalcWeaponFire=self._mock_calc_weapon_fire,
             GetTraceImpact=lambda: self.find_object("ImpactDefinition", "GD_Impacts.Melee.Impact_MeleeGeneric"),
             PlayImpactEffects=lambda *a: None,
+            Mesh=held_mesh,
         )
         wpn.ClearPendingFire = lambda _m: setattr(wpn, "pending_fire_cleared", True)
         return wpn
@@ -1516,9 +1607,23 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
             with mock.patch.dict(sys.modules, sdk_mods):
                 import melee_arsenal  # type: ignore[import-not-found]
                 from melee_arsenal.core.catalog import ACCESSORIES
-                from melee_arsenal.core.schemas import PlayerMeleeContext
+                from melee_arsenal.core.enums import Rarity
+                from melee_arsenal.core.item_card import build_item_card_payload
+                from melee_arsenal.core.schemas import (
+                    MeleeWeaponInstance,
+                    MeleeWeaponParts,
+                    PlayerMeleeContext,
+                )
+                from melee_arsenal.core.secondary import (
+                    THROW_DAMAGE_MULTIPLIER,
+                    build_throw_flight_plan,
+                    compute_parry_reflect_damage,
+                    compute_throw_weight_kg,
+                )
                 from melee_arsenal.core.stats import (
+                    apply_guard_damage_reduction,
                     compute_attack_damage,
+                    compute_card_stats,
                     compute_damage_reduction_pct,
                 )
                 from melee_arsenal.runtime import (
@@ -1528,6 +1633,8 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                     loot_pools,
                     persistence_bridge,
                     resolver,
+                    secondary as secondary_attacks,
+                    secondary_vfx,
                     state,
                     ui_item_card,
                 )
@@ -1925,11 +2032,23 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                         vanilla_wpn, None, None, lambda *a: zoom_func_calls.append(a)
                     )
                 )
-                self.assertFalse(combat.MELEE_SECONDARY_ATTACK_ENABLED)
-                self.assertFalse(
+                # RMB is now spent on the manufacturer secondary attack: a Jakobs Sabre guards.
+                self.assertTrue(combat.MELEE_SECONDARY_ATTACK_ENABLED)
+                secondary_attacks.reset_secondary_state()
+                self.assertTrue(
                     combat._try_melee_secondary_attack(sabre, sabre_inst_dr, sabre_dr_card)
                 )
+                self.assertTrue(secondary_attacks.is_guarding(sabre))
+                secondary_attacks.end_guard(sabre)
+                secondary_attacks._GUARD_COOLDOWN_UNTIL = 0.0
+                # Maliwan gets nothing: RMB is inert on a Phaseblade.
+                _, phase_card = resolver.resolve_melee_weapon(phaseblade, sync_weapon_props=False)
+                self.assertFalse(
+                    combat._try_melee_secondary_attack(phaseblade, sabre_inst_dr, phase_card)
+                )
+                self.assertFalse(secondary_attacks.is_guarding())
                 self.assertIn(melee_arsenal.runtime.hook_melee_start_zoom, melee_arsenal.runtime.ALL_HOOKS)
+                self.assertIn(melee_arsenal.runtime.cmd_melee_secondary, melee_arsenal.runtime.ALL_COMMANDS)
                 self.assertIn(
                     melee_arsenal.runtime.hook_display_recent_damage, melee_arsenal.runtime.ALL_HOOKS
                 )
@@ -1976,6 +2095,680 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 state.STATE.camera_shake_scale = 0.5
                 world.camera_anim_calls.clear()
                 world.played_canims.clear()
+
+                # 4H. Secondary Attack 1 — GUARD (Hyperion / Jakobs): hold RMB to brace.
+                #     The next hit has the card DR applied twice, a hit inside 0.33s is a perfect
+                #     zero-damage parry reflected back at a melee attacker as a forced crit, and the
+                #     part-driven cooldown locks the guard out afterwards.
+                secondary_attacks.reset_secondary_state()
+                world.pawn.Weapon = sabre
+                sabre_inst_g, sabre_card_g = resolver.resolve_melee_weapon(
+                    sabre, sync_weapon_props=False
+                )
+                self.assertEqual(sabre_card_g.secondary_attack.value, "guard")
+                self.assertAlmostEqual(sabre_card_g.guard_parry_window_sec, 0.33)
+                self.assertGreater(sabre_card_g.guard_cooldown_sec, 0.0)
+                self.assertGreater(sabre_card_g.guard_reduction_pct, sabre_card_g.damage_reduction_pct)
+                # Guard mitigation really is the card DR applied twice
+                self.assertAlmostEqual(
+                    apply_guard_damage_reduction(1000.0, sabre_card_g.damage_reduction_pct),
+                    1000.0
+                    * (1.0 - sabre_card_g.damage_reduction_pct / 100.0)
+                    * (1.0 - sabre_card_g.damage_reduction_pct / 100.0),
+                )
+
+                guard_re_calls = []
+                guard_args = FakeWrappedStruct("WillowPlayerPawn.TakeDamage", Damage=1000.0)
+                self.assertTrue(secondary_attacks.try_begin_guard(sabre, sabre_inst_g, sabre_card_g))
+                self.assertTrue(secondary_attacks.is_guarding(sabre))
+                # The brace is VISIBLE: the first-person hands (and the blade attached to them)
+                # rotate into a guard posture instead of staying in the idle pose.
+                self.assertEqual(combat.active_first_person_pose(), combat.POSE_GUARD)
+                # The hands only lift; they must never slide sideways across the screen (that was
+                # the "it just moves the hand toward the centre and left" complaint).
+                self.assertGreater(world.arms_skel_mesh.RotOrigin.Pitch, 800)
+                self.assertLess(world.arms_skel_mesh.RotOrigin.Pitch, 2200)
+                self.assertEqual(world.arms_skel_mesh.RotOrigin.Yaw, -16384)
+                self.assertAlmostEqual(world.arms_skel_mesh.Origin.Z, 3.0, msg="guard must not translate the hands")
+                self.assertAlmostEqual(world.arms_skel_mesh.Origin.Y, -2.0)
+                # ...the visible BRACE is the held blade itself tilting: its mesh pivots at the
+                # hand, so the tip lifts and swings toward the crosshair while the hand stays put.
+                guard_blade_mesh = sabre.Mesh
+                self.assertGreater(guard_blade_mesh.RotOrigin.Pitch, 1000, "blade tip must lift")
+                self.assertLess(guard_blade_mesh.RotOrigin.Yaw, 0, "blade must point inward")
+                self.assertLess(guard_blade_mesh.RotOrigin.Roll, 0, "blade must angle its flat")
+                # Hold the guard past the parry window, then eat one hit: mitigated, then consumed.
+                secondary_attacks._GUARD.started_at -= 0.60
+                self.assertIs(
+                    combat.on_player_take_damage_pre(
+                        world.pawn,
+                        guard_args,
+                        None,
+                        lambda *a: guard_re_calls.append(a),
+                    ),
+                    world.block_sentinel,
+                )
+                self.assertEqual(len(guard_re_calls), 1)
+                self.assertAlmostEqual(
+                    guard_args.Damage,
+                    apply_guard_damage_reduction(1000.0, sabre_card_g.damage_reduction_pct),
+                )
+                self.assertFalse(secondary_attacks.is_guarding())
+                self.assertGreater(secondary_attacks.guard_cooldown_remaining(), 0.0)
+                # ...and the blade mesh is restored exactly when the brace is consumed by a hit.
+                self.assertEqual(guard_blade_mesh.RotOrigin.Pitch, 0)
+                self.assertEqual(guard_blade_mesh.RotOrigin.Yaw, 0)
+                self.assertEqual(guard_blade_mesh.RotOrigin.Roll, 0)
+                # Dropping the guard restores the idle hands exactly (no drifting offsets).
+                self.assertEqual(combat.active_first_person_pose(), "")
+                self.assertEqual(world.arms_skel_mesh.RotOrigin.Pitch, 0)
+                self.assertEqual(world.arms_skel_mesh.RotOrigin.Yaw, -16384)
+                self.assertEqual(world.arms_skel_mesh.RotOrigin.Roll, 0)
+                self.assertAlmostEqual(world.arms_skel_mesh.Origin.X, 1.0)
+                self.assertAlmostEqual(world.arms_skel_mesh.Origin.Y, -2.0)
+                self.assertAlmostEqual(world.arms_skel_mesh.Origin.Z, 3.0)
+                # ...and the part-driven cooldown refuses a fresh guard
+                self.assertTrue(secondary_attacks.try_begin_guard(sabre, sabre_inst_g, sabre_card_g))
+                self.assertFalse(secondary_attacks.is_guarding())
+
+                # Perfect parry: inside 0.33s the hit is nullified and a melee blow is reflected
+                # back at a forced critical.
+                secondary_attacks._GUARD_COOLDOWN_UNTIL = 0.0
+                self.assertTrue(secondary_attacks.try_begin_guard(sabre, sabre_inst_g, sabre_card_g))
+                melee_attacker = types.SimpleNamespace(
+                    Name="WillowAIPawn_Pyscho_Melee", ObjectFlags=0, Location=world._vec(140.0, 0.0, 64.0)
+                )
+                parry_args = FakeWrappedStruct(
+                    "WillowPlayerPawn.TakeDamage",
+                    Damage=1000.0,
+                    DamageType=types.SimpleNamespace(
+                        _path_name=lambda: "WillowGame.WillowDmgSource_Melee"
+                    ),
+                    EventInstigator=types.SimpleNamespace(Pawn=melee_attacker),
+                )
+                world.caused_damages.clear()
+                guard_re_calls.clear()
+                combat.clear_all_pending_crit_feedback()
+                self.assertIs(
+                    combat.on_player_take_damage_pre(
+                        world.pawn, parry_args, None, lambda *a: guard_re_calls.append(a)
+                    ),
+                    world.block_sentinel,
+                )
+                # Zero damage: the blocked original call is never re-issued
+                self.assertEqual(guard_re_calls, [])
+                self.assertEqual(len(world.caused_damages), 1)
+                reflected = world.caused_damages[0]
+                self.assertIs(reflected["Target"], melee_attacker)
+                parry_ctx = combat.read_player_melee_context(world.pawn, world.pc)
+                blade_crit = compute_attack_damage(
+                    sabre_card_g, parry_ctx, is_crit=True
+                ).final_hit_damage
+                self.assertEqual(
+                    reflected["DamageAmount"],
+                    float(compute_parry_reflect_damage(1000.0, sabre_card_g.crit_bonus_pct, blade_crit)),
+                )
+                # ...and the reflected hit is tagged so BL2 prints a CRITICAL popup
+                self.assertIn(id(melee_attacker), combat._PENDING_CRIT_FEEDBACK)
+                # The parry is VISIBLE + AUDIBLE: HUD callout, clang and a camera jolt.
+                self.assertTrue(
+                    any("PERFECT PARRY" in msg for _title, msg in world.hud_messages),
+                    f"missing parry HUD callout: {world.hud_messages}",
+                )
+                self.assertTrue(
+                    any("Merc_impact" in path or "BladedWeap_hit" in path for path in world.played_ak)
+                )
+                self.assertTrue(world.camera_anim_calls, "parry must kick the camera")
+                combat.clear_all_pending_crit_feedback()
+                self.assertFalse(secondary_attacks.is_guarding())
+                self.assertGreater(secondary_attacks.guard_cooldown_remaining(), 0.0)
+
+                # A weak incoming poke is still parried back at the BLADE's critical scale, not as
+                # 2x of the poke (the old 112-card / "50 something" bug).
+                secondary_attacks._GUARD_COOLDOWN_UNTIL = 0.0
+                self.assertTrue(secondary_attacks.try_begin_guard(sabre, sabre_inst_g, sabre_card_g))
+                weak_args = FakeWrappedStruct(
+                    "WillowPlayerPawn.TakeDamage",
+                    Damage=20.0,
+                    DamageType=types.SimpleNamespace(
+                        _path_name=lambda: "WillowGame.WillowDmgSource_Melee"
+                    ),
+                    EventInstigator=types.SimpleNamespace(Pawn=melee_attacker),
+                )
+                world.caused_damages.clear()
+                world.hud_messages.clear()
+                self.assertIs(
+                    combat.on_player_take_damage_pre(
+                        world.pawn, weak_args, None, lambda *a: guard_re_calls.append(a)
+                    ),
+                    world.block_sentinel,
+                )
+                self.assertEqual(len(world.caused_damages), 1)
+                weak_reflect = int(world.caused_damages[0]["DamageAmount"])
+                self.assertGreaterEqual(weak_reflect, blade_crit)
+                self.assertGreater(weak_reflect, compute_parry_reflect_damage(20.0, 0.0))
+                self.assertTrue(any("PERFECT PARRY" in msg for _t, msg in world.hud_messages))
+                combat.clear_all_pending_crit_feedback()
+                self.assertFalse(secondary_attacks.is_guarding())
+                secondary_attacks._GUARD_COOLDOWN_UNTIL = 0.0
+
+                # A non-melee hit inside the parry window is still fully absorbed, but nothing is
+                # reflected (only melee blows are parried back).
+                secondary_attacks._GUARD_COOLDOWN_UNTIL = 0.0
+                self.assertTrue(secondary_attacks.try_begin_guard(sabre, sabre_inst_g, sabre_card_g))
+                ranged_args = FakeWrappedStruct(
+                    "WillowPlayerPawn.TakeDamage",
+                    Damage=1000.0,
+                    DamageType=types.SimpleNamespace(
+                        _path_name=lambda: "WillowGame.WillowDmgSource_Bullet"
+                    ),
+                    EventInstigator=types.SimpleNamespace(Pawn=melee_attacker),
+                )
+                world.caused_damages.clear()
+                guard_re_calls.clear()
+                self.assertIs(
+                    combat.on_player_take_damage_pre(
+                        world.pawn, ranged_args, None, lambda *a: guard_re_calls.append(a)
+                    ),
+                    world.block_sentinel,
+                )
+                self.assertEqual(guard_re_calls, [])
+                self.assertEqual(world.caused_damages, [])
+                self.assertFalse(secondary_attacks.is_guarding())
+
+                # Release (StopZoom), co-op safety and weapon-swap auto-drop
+                secondary_attacks._GUARD_COOLDOWN_UNTIL = 0.0
+                self.assertTrue(secondary_attacks.try_begin_guard(sabre, sabre_inst_g, sabre_card_g))
+                # A same-frame StartZoom/StopZoom pair is engine noise and must not drop the guard
+                secondary_attacks.on_melee_weapon_stop_zoom_pre(sabre, None, None, None)
+                self.assertTrue(secondary_attacks.is_guarding(sabre))
+                secondary_attacks._GUARD.started_at -= 0.40
+                secondary_attacks.on_melee_weapon_stop_zoom_pre(sabre, None, None, None)
+                self.assertFalse(secondary_attacks.is_guarding())
+                self.assertGreater(secondary_attacks.guard_cooldown_remaining(), 0.0)
+                secondary_attacks._GUARD_COOLDOWN_UNTIL = 0.0
+                self.assertTrue(secondary_attacks.try_begin_guard(sabre, sabre_inst_g, sabre_card_g))
+                co_op_pawn = types.SimpleNamespace(
+                    Name="WillowPlayerPawn_CoOp", ObjectFlags=0, Weapon=sabre
+                )
+                self.assertIsNone(
+                    combat.on_player_take_damage_pre(
+                        co_op_pawn, guard_args, None, lambda *a: guard_re_calls.append(a)
+                    )
+                )
+                self.assertTrue(secondary_attacks.is_guarding(sabre))
+                world.pawn.Weapon = phaseblade
+                secondary_attacks.tick_secondary_attacks()
+                self.assertFalse(secondary_attacks.is_guarding())
+                world.pawn.Weapon = sabre
+                secondary_attacks._GUARD_COOLDOWN_UNTIL = 0.0
+                secondary_attacks.reset_secondary_state()
+
+                # 4I. Secondary Attack 2 — THROW (Bandit / Torgue): the blade leaves your hand for
+                #     200% of its normal LMB hit, arcs by weight, rebounds on impact or arc expiry,
+                #     and locks Primary Fire while airborne.
+                world.pawn.Weapon = cleaver
+                bl_inst, bl_card = resolver.resolve_melee_weapon(cleaver, sync_weapon_props=False)
+                self.assertEqual(bl_card.secondary_attack.value, "throw")
+                self.assertAlmostEqual(bl_card.throw_weight_kg, compute_throw_weight_kg(bl_inst))
+                self.assertGreater(bl_card.throw_range_m, 0.0)
+                self.assertGreater(bl_card.throw_arc_height_m, 0.0)
+                self.assertGreater(bl_card.throw_flight_time_sec, 0.0)
+
+                # Heavier part builds throw shorter/higher than lighter ones (manufacturer mass)
+                light_parts = MeleeWeaponParts("Blade_Bandit_Machete", "Grip_Maliwan", "Acc_None", "Elem_None")
+                heavy_parts = MeleeWeaponParts("Blade_Torgue_BlastCleaver", "Grip_Torgue", "Acc_HeavySpine", "Elem_Explosive")
+                light_w = compute_throw_weight_kg(MeleeWeaponInstance(1, 50, Rarity.RARE, light_parts))
+                heavy_w = compute_throw_weight_kg(MeleeWeaponInstance(2, 50, Rarity.RARE, heavy_parts))
+                self.assertLess(light_w, heavy_w)
+                light_card = compute_card_stats(MeleeWeaponInstance(1, 50, Rarity.RARE, light_parts))
+                heavy_card = compute_card_stats(MeleeWeaponInstance(2, 50, Rarity.RARE, heavy_parts))
+                self.assertGreater(light_card.throw_range_m, heavy_card.throw_range_m)
+                self.assertLess(light_card.throw_arc_height_m, heavy_card.throw_arc_height_m)
+
+                # Maliwan never throws nor guards
+                self.assertFalse(
+                    secondary_attacks.begin_throw(phaseblade, sabre_inst_g, phase_card)
+                )
+                self.assertFalse(secondary_attacks.is_weapon_thrown(phaseblade))
+
+                world.caused_damages.clear()
+                world.caused_radius_damages.clear()
+                combat._LAST_SWING_AT = 0.0
+                world.played_custom_anims.clear()
+                # RMB dispatch: the throw starts with a real Bladed_Melee release motion
+                self.assertTrue(combat._try_melee_secondary_attack(cleaver, bl_inst, bl_card))
+                self.assertEqual(len(world.played_custom_anims), 1)
+                self.assertEqual(world.played_custom_anims[0][1], "Bladed_Melee")
+                # ...and a blade already in flight cannot be thrown again
+                self.assertFalse(combat._try_melee_secondary_attack(cleaver, bl_inst, bl_card))
+                self.assertTrue(secondary_attacks.is_weapon_thrown(cleaver))
+                live_state = secondary_attacks.describe_secondary_state()
+                self.assertTrue(live_state["thrown"])
+                self.assertEqual(live_state["throw_phase"], "outbound")
+                self.assertIn("Throw", live_state["detail"])
+                # A real flying actor carries the weapon's own mesh: attached to the pawn, using
+                # the held weapon's SkeletalMesh + material instances (Tediore throw visual).
+                self.assertTrue(live_state["thrown_visual"])
+                self.assertTrue(secondary_vfx.has_thrown_blade_visual())
+                self.assertEqual(len(world.attached_components), 1)
+                self.assertEqual(len(world.thrown_blade_visuals), 1)
+                blade_vis = world.thrown_blade_visuals[0]
+                self.assertIs(blade_vis["mesh"], world.thrown_blade_source_mesh)
+                self.assertIs(blade_vis["materials"][0], world.thrown_blade_source_material)
+                self.assertEqual(blade_vis["location"], (8.0, 0.0, 64.0))
+                self.assertIsNotNone(blade_vis.get("scale"), "the thrown blade copies the mesh scale")
+                # The release swing still happens in the hand; the held blade is hidden once the
+                # hands drop (no double blade, empty hand while it flies).
+                self.assertFalse(cleaver.Mesh._state["hidden"])
+                self.assertEqual(combat.active_first_person_pose(), "", "hands stay up for the release")
+
+                # One clean flight frame with no enemies: the actor moves along the arc, tumbles,
+                # and the first-person hands drop out of frame after the release swing.
+                saved_pawn_list = world.world_info.PawnList
+                world.world_info.PawnList = None
+                world.next_center_trace_override = None
+                secondary_attacks._THROW.started_at -= 0.20
+                secondary_attacks.tick_secondary_attacks()
+                world.world_info.PawnList = saved_pawn_list
+                self.assertGreaterEqual(blade_vis["moves"], 2)
+                self.assertGreater(blade_vis["location"][0], 100.0)
+                self.assertGreater(blade_vis["pitch"], 0, "the thrown blade must tumble")
+                self.assertEqual(combat.active_first_person_pose(), combat.POSE_THROWN)
+                self.assertLess(world.arms_skel_mesh.Origin.Z, -40.0)
+                self.assertTrue(cleaver.Mesh._state["hidden"])
+                # LMB is locked out while the blade is airborne — no swing, no damage, no anim
+                world.played_custom_anims.clear()
+                self.assertIs(
+                    combat.on_weapon_instant_fire_pre(cleaver, None, None, None),
+                    world.block_sentinel,
+                )
+                self.assertIsNone(combat.on_weapon_shared_fire_post(cleaver, None, None, None))
+                self.assertEqual(world.caused_damages, [])
+                self.assertEqual(world.played_custom_anims, [])
+
+                # First arc segment connects with the target dummy -> exact 200% LMB damage
+                throw_ctx = combat.read_player_melee_context(world.pawn, world.pc)
+                expected_throw = compute_attack_damage(
+                    bl_card, throw_ctx, damage_scale=THROW_DAMAGE_MULTIPLIER
+                )
+                self.assertEqual(THROW_DAMAGE_MULTIPLIER, 1.0)
+                world.next_center_trace_override = (dummy_pawn, world._vec(210.0, 0.0, 95.0), "None")
+                secondary_attacks.tick_secondary_attacks()
+                self.assertEqual(len(world.caused_damages), 1)
+                self.assertIs(world.caused_damages[0]["Target"], dummy_pawn)
+                self.assertAlmostEqual(
+                    world.caused_damages[0]["DamageAmount"], float(expected_throw.final_hit_damage)
+                )
+                # v0.4.4: a throw is a normal-strength hit (it used to be 200% and out-damage the
+                # whole kit), so its damage must equal the plain LMB hit exactly.
+                self.assertEqual(
+                    expected_throw.final_hit_damage,
+                    compute_attack_damage(bl_card, throw_ctx).final_hit_damage,
+                )
+                # Torgue's thrown slab detonates on impact too
+                self.assertEqual(len(world.caused_radius_damages), 1)
+                self.assertAlmostEqual(
+                    world.caused_radius_damages[0]["DamageAmount"],
+                    float(expected_throw.splash_hit_damage),
+                )
+                # ...and the blade is now rebounding, still locking LMB until it is caught
+                self.assertEqual(secondary_attacks._THROW.phase, "return")
+                self.assertTrue(secondary_attacks.is_weapon_thrown(cleaver))
+                self.assertTrue(secondary_vfx.has_thrown_blade_visual())
+                self.assertEqual(
+                    blade_vis["location"], (210.0, 0.0, 95.0), "rebound starts at the strike point"
+                )
+                moves_before_return = blade_vis["moves"]
+                throw_state = secondary_attacks._THROW
+                catch_point = secondary_attacks._player_grab_point(throw_state)
+                self.assertIsNotNone(catch_point)
+                # Simulate 0.15 s of flight (the frame hook can run twice in one millisecond).
+                throw_state.last_return_at -= 0.15
+                secondary_attacks.tick_secondary_attacks()
+                self.assertTrue(secondary_attacks.is_weapon_thrown(cleaver))
+                self.assertGreaterEqual(blade_vis["moves"], moves_before_return + 1)
+                self.assertLess(blade_vis["location"][0], 210.0, "the blade flies back to the hand")
+                self.assertGreater(
+                    blade_vis["location"][0], catch_point[0], "...but does not teleport past it"
+                )
+
+                # 4I-1B. The rebound homes on the player's CURRENT position, Minecraft-trident
+                #        style: move the pawn while the blade is flying back and it follows.
+                before_move = blade_vis["location"]
+                saved_loc = world.pawn.Location
+                world.pawn.Location = world._vec(900.0, -400.0, 64.0)
+                try:
+                    for _ in range(6):
+                        throw_state.last_return_at -= 0.15
+                        secondary_attacks.tick_secondary_attacks()
+                    after_move = blade_vis["location"]
+                    self.assertGreater(
+                        after_move[0], before_move[0] + 100.0, "blade must chase the moved player"
+                    )
+                    self.assertLess(after_move[1], before_move[1], "and track the new direction")
+                finally:
+                    world.pawn.Location = saved_loc
+                for _ in range(80):
+                    if not secondary_attacks.is_weapon_thrown(cleaver):
+                        break
+                    secondary_attacks._THROW.last_return_at -= 0.15
+                    secondary_attacks.tick_secondary_attacks()
+                self.assertFalse(secondary_attacks.is_weapon_thrown(cleaver))
+                # Caught: the flying actor is detached/hidden and the hands come back.
+                self.assertFalse(secondary_vfx.has_thrown_blade_visual())
+                self.assertEqual(len(world.detached_components), 1)
+                self.assertTrue(blade_vis["hidden"])
+                self.assertFalse(cleaver.Mesh._state["hidden"], "the held blade reappears on catch")
+                self.assertEqual(combat.active_first_person_pose(), "")
+                self.assertAlmostEqual(world.arms_skel_mesh.Origin.Z, 3.0)
+                self.assertEqual(world.played_custom_anims, [])
+
+                # 4I-2. A throw that touches nothing must NOT stop dead in mid-air: past its
+                #       planned arc it keeps falling (the "off a cliff" case) and only the fall /
+                #       time fail-safes recall it. No damage is dealt along the way.
+                world.caused_damages.clear()
+                world.caused_radius_damages.clear()
+                self.assertTrue(secondary_attacks.begin_throw(cleaver, bl_inst, bl_card))
+                # Aim away from every enemy so the swept-segment check finds nothing
+                original_rot = world.pc.Rotation
+                saved_walls = world.wall_blocked_names
+                world.pc.Rotation = FakeWrappedStruct("Rotator", Pitch=0, Yaw=16384, Roll=0)
+                world.next_center_trace_override = None
+                world.wall_blocked_names = set()
+                saved_pawns_4i2 = world.world_info.PawnList
+                world.world_info.PawnList = None
+                try:
+                    st = secondary_attacks._THROW
+                    planned = st.plan.flight_time_sec
+                    outbound_steps = 0
+                    while (
+                        outbound_steps < 400
+                        and secondary_attacks._THROW is not None
+                        and secondary_attacks._THROW.phase == "outbound"
+                    ):
+                        secondary_attacks._THROW.started_at -= 0.10
+                        outbound_steps += 1
+                        secondary_attacks.tick_secondary_attacks()
+                    self.assertEqual(world.caused_damages, [])
+                    self.assertIsNotNone(secondary_attacks._THROW)
+                    self.assertEqual(secondary_attacks._THROW.phase, "return")
+                    self.assertEqual(
+                        secondary_attacks._THROW.last_return_reason, "fell out of the world"
+                    )
+                    # ...and it really did fly far past the planned arc before giving up.
+                    self.assertGreater(outbound_steps * 0.10, planned + 2.0)
+                    for _ in range(80):
+                        if not secondary_attacks.is_any_weapon_thrown():
+                            break
+                        secondary_attacks._THROW.last_return_at -= 0.20
+                        secondary_attacks.tick_secondary_attacks()
+                    self.assertFalse(secondary_attacks.is_any_weapon_thrown())
+                    self.assertEqual(world.caused_damages, [])
+                finally:
+                    world.pc.Rotation = original_rot
+                    world.wall_blocked_names = saved_walls
+                    world.world_info.PawnList = saved_pawns_4i2
+
+                # 4I-5. Non-solid engine actors (and the thrower themselves) must never stop the
+                #       blade: BL2's weapon trace reports volumes/triggers and the player's own
+                #       arms mesh, which used to end a throw in mid-air.
+                world.pawn.Weapon = cleaver
+                self.assertTrue(secondary_attacks.begin_throw(cleaver, bl_inst, bl_card))
+                try:
+                    ghost = types.SimpleNamespace(
+                        Name="PhysicsVolume_9", Class=types.SimpleNamespace(Name="PhysicsVolume")
+                    )
+                    world.next_center_trace_override = (ghost, world._vec(40.0, 0.0, 64.0), "None")
+                    secondary_attacks.tick_secondary_attacks()
+                    self.assertEqual(secondary_attacks._THROW.phase, "outbound")
+                    # ...and a hit right at the release point (own arms/weapon) is ignored too.
+                    world.next_center_trace_override = (
+                        world.pawn,
+                        world._vec(2.0, 0.0, 64.0),
+                        "None",
+                    )
+                    secondary_attacks.tick_secondary_attacks()
+                    self.assertEqual(secondary_attacks._THROW.phase, "outbound")
+                    self.assertEqual(world.caused_damages, [])
+                finally:
+                    world.next_center_trace_override = None
+                    secondary_attacks.reset_secondary_state()
+
+                # 4I-7. Reaching the end of the planned arc must NOT teleport the blade onto a
+                #       probed ground point (that read as "it stops in mid-air, then jumps to the
+                #       ground and comes back"): it keeps flying and lets the trace land it.
+                world.pawn.Weapon = cleaver
+                self.assertTrue(secondary_attacks.begin_throw(cleaver, bl_inst, bl_card))
+                saved_pawns_4i7 = world.world_info.PawnList
+                world.world_info.PawnList = None
+                try:
+                    st7 = secondary_attacks._THROW
+                    st7.started_at -= st7.plan.flight_time_sec + 0.01
+                    vis7 = world.thrown_blade_visuals[-1]
+                    world.next_center_trace_override = (
+                        world.wall_actor,
+                        world._vec(50.0, 0.0, -1053.0),
+                        "None",
+                    )
+                    secondary_attacks.tick_secondary_attacks()
+                    self.assertEqual(secondary_attacks._THROW.phase, "outbound")
+                    self.assertTrue(secondary_attacks._THROW.arc_probe_logged)
+                    self.assertGreater(
+                        vis7["location"][2], -500.0, "the blade must not snap down to the ground"
+                    )
+                    self.assertEqual(world.caused_damages, [])
+                finally:
+                    world.next_center_trace_override = None
+                    world.world_info.PawnList = saved_pawns_4i7
+                    secondary_attacks.reset_secondary_state()
+
+                # 4I-6. A real solid hit still ends the throw exactly where it lands.
+                world.pawn.Weapon = cleaver
+                self.assertTrue(secondary_attacks.begin_throw(cleaver, bl_inst, bl_card))
+                try:
+                    solid = world.wall_actor
+                    world.next_center_trace_override = (
+                        solid,
+                        world._vec(300.0, 0.0, 64.0),
+                        "None",
+                    )
+                    secondary_attacks.tick_secondary_attacks()
+                    self.assertEqual(secondary_attacks._THROW.phase, "return")
+                    self.assertEqual(secondary_attacks._THROW.last_return_reason, "impact")
+                finally:
+                    world.next_center_trace_override = None
+                    secondary_attacks.reset_secondary_state()
+                world.pawn.Weapon = cleaver
+                # 4I-3. A physical Bandit Machete throw hits for 200% with no splash at all.
+                world.ground_pickups.clear()
+                commands.spawn_single_command("bandit", "purple", "")
+                bandit_wpn = world.ground_pickups[-1].Inventory
+                bandit_inst, bandit_card = resolver.resolve_melee_weapon(
+                    bandit_wpn, sync_weapon_props=False
+                )
+                self.assertEqual(bandit_card.secondary_attack.value, "throw")
+                self.assertEqual(bandit_card.splash_damage, 0)
+                world.pawn.Weapon = bandit_wpn
+                world.caused_damages.clear()
+                world.caused_radius_damages.clear()
+                self.assertTrue(secondary_attacks.begin_throw(bandit_wpn, bandit_inst, bandit_card))
+                bandit_ctx = combat.read_player_melee_context(world.pawn, world.pc)
+                expected_bandit = compute_attack_damage(
+                    bandit_card, bandit_ctx, damage_scale=THROW_DAMAGE_MULTIPLIER
+                )
+                world.next_center_trace_override = (dummy_pawn, world._vec(210.0, 0.0, 95.0), "None")
+                secondary_attacks.tick_secondary_attacks()
+                self.assertEqual(len(world.caused_damages), 1)
+                self.assertAlmostEqual(
+                    world.caused_damages[0]["DamageAmount"],
+                    float(expected_bandit.final_hit_damage),
+                )
+                self.assertEqual(world.caused_radius_damages, [])
+                self.assertTrue(secondary_vfx.has_thrown_blade_visual())
+                secondary_attacks.reset_secondary_state()
+                self.assertFalse(secondary_vfx.has_thrown_blade_visual())
+
+                # 4I-4. The throw follows the camera pitch (and gravity): aim up -> the blade
+                # leaves upward, aim down -> it leaves downward, always on an arc.
+                world.pawn.Weapon = bandit_wpn
+                saved_rot = world.pc.Rotation
+                try:
+                    world.pc.Rotation = FakeWrappedStruct("Rotator", Pitch=4096, Yaw=0, Roll=0)
+                    self.assertTrue(
+                        secondary_attacks.begin_throw(bandit_wpn, bandit_inst, bandit_card)
+                    )
+                    up_throw = secondary_attacks._THROW
+                    flat_throw = build_throw_flight_plan(bandit_card.throw_weight_kg)
+                    self.assertGreater(up_throw.plan.launch_pitch_deg, flat_throw.launch_pitch_deg)
+                    up_xyz = secondary_attacks._throw_point(up_throw, 0.10)
+                    self.assertGreater(up_xyz[2], up_throw.origin_xyz[2])
+                    secondary_attacks.reset_secondary_state()
+
+                    world.pc.Rotation = FakeWrappedStruct("Rotator", Pitch=-4096, Yaw=0, Roll=0)
+                    self.assertTrue(
+                        secondary_attacks.begin_throw(bandit_wpn, bandit_inst, bandit_card)
+                    )
+                    down_throw = secondary_attacks._THROW
+                    self.assertLess(down_throw.plan.launch_pitch_deg, flat_throw.launch_pitch_deg)
+                    down_xyz = secondary_attacks._throw_point(down_throw, 0.10)
+                    self.assertLess(down_xyz[2], down_throw.origin_xyz[2])
+                finally:
+                    world.pc.Rotation = saved_rot
+                    secondary_attacks.reset_secondary_state()
+
+                world.pawn.Weapon = cleaver
+                idle_state = secondary_attacks.describe_secondary_state()
+                self.assertNotIn("thrown", idle_state)
+
+                # 4J. Secondary attack state is part of the item card payload, and Maliwan shows none
+                cleaver_payload = build_item_card_payload(bl_card)
+                self.assertTrue(
+                    any("RMB Throw: 100% Damage" in line for line in cleaver_payload.fun_stats_lines)
+                )
+                sabre_payload = build_item_card_payload(sabre_card_g)
+                self.assertTrue(
+                    any("RMB Hold: Guard" in line for line in sabre_payload.fun_stats_lines)
+                )
+                self.assertFalse(
+                    any("RMB" in line for line in build_item_card_payload(phase_card).fun_stats_lines)
+                )
+
+                # 4K. The frame driver must run off a tick that actually fires in BL2.
+                #     `Engine.GameViewportClient:Tick` is not a UFunction on every build, so the
+                #     same body is mirrored on `WillowPlayerController:PlayerTick` (once per frame).
+                runtime_mod = melee_arsenal.runtime
+                self.assertIn(runtime_mod.hook_player_tick, runtime_mod.ALL_HOOKS)
+                self.assertIn(runtime_mod.hook_viewport_tick, runtime_mod.ALL_HOOKS)
+                # RMB release must not depend on the tick ever running: registered at load.
+                self.assertIn(secondary_attacks.on_melee_weapon_stop_zoom_pre, runtime_mod.ALL_HOOKS)
+                self.assertIn(
+                    secondary_attacks.on_melee_weapon_client_stop_zoom_pre, runtime_mod.ALL_HOOKS
+                )
+                runtime_mod._last_restored_pawn_key = "mock.pawn"
+                runtime_mod._last_frame_tick_at = 0.0
+                ticks_before = runtime_mod._tick_counter
+                runtime_mod.hook_player_tick(None, None, None, None)
+                self.assertEqual(runtime_mod._tick_counter, ticks_before + 1)
+                # Both tick hooks firing in the same frame must only run the body once.
+                runtime_mod.hook_viewport_tick(None, None, None, None)
+                self.assertEqual(runtime_mod._tick_counter, ticks_before + 1)
+
+                # 4N. The map-restore pass keys the pawn by path name, not wrapper identity: an
+                #     `id()` that churns re-ran the whole restore (and reset the secondary state,
+                #     deleting an in-flight blade) about a second into a throw.
+                runtime_mod._last_restored_pawn_key = "MockWorld.WillowPlayerPawn_0"
+                runtime_mod._map_restore_ready_at = 0.0
+                runtime_mod._tick_counter = 119
+                runtime_mod._last_frame_tick_at = 0.0
+                runtime_mod.hook_player_tick(None, None, None, None)
+                self.assertEqual(
+                    runtime_mod._map_restore_ready_at, 0.0, "a stable pawn must not re-restore"
+                )
+
+                # A live throw must survive a map-restore pass. `id(pawn)` churns when
+                #     pyunrealsdk hands back a new wrapper for the same UObject, which used to
+                #     re-run the whole restore (and reset the secondary state, deleting the flying
+                #     blade) a second or so into a throw.
+                world.pawn.Weapon = cleaver
+                self.assertTrue(secondary_attacks.begin_throw(cleaver, bl_inst, bl_card))
+                try:
+                    runtime_mod._last_restored_pawn_key = "some.other.pawn"
+                    runtime_mod._map_restore_ready_at = 0.0
+                    runtime_mod._tick_counter = 59
+                    runtime_mod._last_frame_tick_at = 0.0
+                    runtime_mod.hook_player_tick(None, None, None, None)
+                    self.assertTrue(
+                        secondary_attacks.is_any_weapon_thrown(),
+                        "a map-restore pass must not delete a blade that is still in flight",
+                    )
+                    self.assertTrue(secondary_vfx.has_thrown_blade_visual())
+                finally:
+                    secondary_attacks.reset_secondary_state()
+                    runtime_mod._last_restored_pawn_key = "MockWorld.WillowPlayerPawn_0"
+                    runtime_mod._map_restore_ready_at = 0.0
+
+
+                # 4L. Self-healing: a finished throw/guard can never leave the hands moved or a
+                #     copy of the blade hanging in the air — even if a state ended abnormally.
+                secondary_attacks._GUARD = None
+                secondary_attacks._THROW = None
+                self.assertTrue(combat.apply_first_person_pose(world.pc, combat.POSE_GUARD))
+                self.assertGreater(world.arms_skel_mesh.RotOrigin.Pitch, 1000)
+
+                # 4L-1. `Guard Blade Tilt (%)` is the in-game escape hatch if the RotOrigin
+                #       sign convention reads backwards: -100% leans the blade the other way.
+                self.assertIn(runtime_mod.opt_guard_pose, runtime_mod.ALL_OPTIONS)
+                tilt_blade_mesh = world.pawn.Weapon.Mesh
+                runtime_mod._on_guard_pose_changed(None, -100)
+                combat.update_first_person_pose(world.pc)
+                self.assertGreater(
+                    tilt_blade_mesh.RotOrigin.Yaw, 0, "negative tilt must lean the blade outward"
+                )
+                runtime_mod._on_guard_pose_changed(None, 100)
+                combat.update_first_person_pose(world.pc)
+                self.assertLess(tilt_blade_mesh.RotOrigin.Yaw, 0)
+                # The hands never slide sideways at either setting.
+                self.assertEqual(world.arms_skel_mesh.RotOrigin.Yaw, -16384)
+
+                # 4L-2. Guarding over and over must never creep: every release restores the exact
+                #       transform the hands had before the guard (players reported the view model
+                #       drifting further up and to the left with every block).
+                combat.reset_first_person_pose("rest before drift test")
+                rest_pitch = world.arms_skel_mesh.RotOrigin.Pitch
+                rest_yaw = world.arms_skel_mesh.RotOrigin.Yaw
+                rest_z = world.arms_skel_mesh.Origin.Z
+                self.assertEqual(rest_pitch, 0)
+                for _ in range(8):
+                    self.assertTrue(combat.apply_first_person_pose(world.pc, combat.POSE_GUARD))
+                    combat.update_first_person_pose(world.pc)
+                    combat.apply_first_person_pose(world.pc, combat.POSE_GUARD)
+                    combat.update_first_person_pose(world.pc)
+                    self.assertFalse(
+                        combat.capture_first_person_rest_transform(),
+                        "a live pose must never be captured as the rest transform",
+                    )
+                    combat.reset_first_person_pose("release")
+                    self.assertEqual(world.arms_skel_mesh.RotOrigin.Pitch, rest_pitch)
+                    self.assertEqual(world.arms_skel_mesh.RotOrigin.Yaw, rest_yaw)
+                    self.assertAlmostEqual(world.arms_skel_mesh.Origin.Z, rest_z)
+                    self.assertEqual(combat.active_first_person_pose(), "")
+                    # The blade mesh must come back too — otherwise it would stay cocked over.
+                    self.assertEqual(world.pawn.Weapon.Mesh.RotOrigin.Pitch, 0)
+                    self.assertEqual(world.pawn.Weapon.Mesh.RotOrigin.Yaw, 0)
+                    self.assertEqual(world.pawn.Weapon.Mesh.RotOrigin.Roll, 0)
+
+                self.assertTrue(
+                    secondary_vfx.spawn_thrown_blade(world.pawn, cleaver, (10.0, 0.0, 64.0))
+                )
+                self.assertTrue(secondary_vfx.has_thrown_blade_visual())
+                runtime_mod._last_frame_tick_at = 0.0
+                runtime_mod.hook_player_tick(None, None, None, None)
+                self.assertFalse(secondary_vfx.has_thrown_blade_visual(), "orphan blade must be removed")
+                self.assertEqual(combat.active_first_person_pose(), "")
+                self.assertEqual(world.arms_skel_mesh.RotOrigin.Pitch, 0)
+                self.assertEqual(world.arms_skel_mesh.RotOrigin.Yaw, -16384)
+                self.assertAlmostEqual(world.arms_skel_mesh.Origin.Z, 3.0)
 
                 # 5. Item Card GFx Hooks — MUST NOT call AdjustHeight()!
                 top_rows_written: dict[int, tuple] = {}
@@ -2061,7 +2854,7 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 from melee_arsenal.core.schemas import MeleeWeaponInstance, MeleeWeaponParts
                 from melee_arsenal.runtime import commands, custom_assets, definitions, resolver, state
 
-                self.assertEqual(melee_arsenal.__version__, "0.3.5")
+                self.assertEqual(melee_arsenal.__version__, "0.4.5")
                 self.assertTrue(definitions.ensure_definitions_built())
                 self.assertTrue(state.STATE.custom_assets_active)
                 self.assertEqual(state.STATE.custom_kit_revision, "bold_ink_visual_revision_of_r4")

@@ -7,6 +7,7 @@ from .enums import (
     Manufacturer,
     ModifierMode,
     Rarity,
+    SecondaryAttack,
     StatId,
     TargetingMode,
 )
@@ -60,6 +61,9 @@ MANUFACTURERS: dict[Manufacturer, ManufacturerSpec] = {
             StatModifier(StatId.STATUS_CHANCE, ModifierMode.SCALE, 0.10),
         ),
         donor_manufacturer_path="GD_Manufacturers.Manufacturers.Hyperion",
+        # High-tech monomolecular alloy: the lightest blade in the kit.
+        secondary_attack=SecondaryAttack.GUARD,
+        part_weight_kg=1.40,
     ),
     Manufacturer.BANDIT: ManufacturerSpec(
         manufacturer=Manufacturer.BANDIT,
@@ -93,6 +97,9 @@ MANUFACTURERS: dict[Manufacturer, ManufacturerSpec] = {
             StatModifier(StatId.MOMENTUM, ModifierMode.SCALE, 0.25),
         ),
         donor_manufacturer_path="GD_Manufacturers.Manufacturers.Bandit",
+        # Scrapyard steel slab: heavy enough to throw short, flat and mean.
+        secondary_attack=SecondaryAttack.THROW,
+        part_weight_kg=2.90,
     ),
     Manufacturer.JAKOBS: ManufacturerSpec(
         manufacturer=Manufacturer.JAKOBS,
@@ -119,6 +126,9 @@ MANUFACTURERS: dict[Manufacturer, ManufacturerSpec] = {
         matching_grip_speed_bonus=0.10,
         intrinsic_modifiers=(),
         donor_manufacturer_path="GD_Manufacturers.Manufacturers.Jakobs",
+        # Solid frontier steel with a weighted pommel: guard-tuned, mid weight.
+        secondary_attack=SecondaryAttack.GUARD,
+        part_weight_kg=2.10,
     ),
     Manufacturer.MALIWAN: ManufacturerSpec(
         manufacturer=Manufacturer.MALIWAN,
@@ -153,6 +163,9 @@ MANUFACTURERS: dict[Manufacturer, ManufacturerSpec] = {
             StatModifier(StatId.STATUS_DAMAGE, ModifierMode.SCALE, 0.35),
         ),
         donor_manufacturer_path="GD_Manufacturers.Manufacturers.Maliwan",
+        # Hard-light emitter: almost massless, and Maliwan grants no secondary attack at all.
+        secondary_attack=SecondaryAttack.NONE,
+        part_weight_kg=1.20,
     ),
     Manufacturer.TORGUE: ManufacturerSpec(
         manufacturer=Manufacturer.TORGUE,
@@ -183,6 +196,9 @@ MANUFACTURERS: dict[Manufacturer, ManufacturerSpec] = {
             StatModifier(StatId.MOMENTUM, ModifierMode.SCALE, 0.60),
         ),
         donor_manufacturer_path="GD_Manufacturers.Manufacturers.Torgue",
+        # Rocket-assisted slab: the heaviest thing you can hurl.
+        secondary_attack=SecondaryAttack.THROW,
+        part_weight_kg=3.80,
     ),
 }
 
