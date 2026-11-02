@@ -32,7 +32,7 @@ inserted without editing anything that already exists.
 | 3 | `flat` | **Flat textures saved as PNGs**: one solid palette colour per UV island (per-island brightness jitter, lightened `edge` role). | `<part>.png` (**the flat pass on disk**) |
 | 4 | `mottle` | Paint wash (three-octave field), deposits, dry-brush streaks, gouges, chipped paint, tally marks, edge chips. | `<part>.png` |
 | 5 | `detail` | Micro-texture: brushed/polished sheet metal (strokes follow each island's long axis), rim occlusion that seats every island in the atlas, a honed wire just inside the cutting bevels, and grit settled along island rims. | `<part>.png` |
-| 6 | `decals` | Manufacturer markings, painted **before** the ink pass: Hyperion band + wordmark + serial stencils + diamond cluster, Jakobs watered-steel etch, gilt pinline, scrollwork and maker's plate, Torgue badge, hazard chevrons, rivets and warning stencils, Bandit blood, grime, welds, tally marks and stencilled tags, Maliwan droplet mark and pinstripes. Blades get a plate on each broad face (plus a `panel` plate on a bolted-on panel such as Bandit's red slab), grips get a wrap pattern on every facet wide enough to carry lettering, accessory strips get milled grooves and rivets. Optional external PNG art (`--decals <dir>`) is stamped in the same pass. `--no-decals-art` turns the built-in art off. | `<part>.png` |
+| 6 | `decals` | Manufacturer markings, painted **before** the ink pass. Hyperion is the only house that prints its own name: a yellow corporate band with the slanted wordmark, a serial stencil and the four-parallelogram cluster. Everyone else marks hardware instead of lettering it - Jakobs gets a watered-steel etch, a gilt pinline, scrollwork and hex proof stamps, Torgue a nameless hex badge with a blast monogram plus hazard bands, rivets and warning triangles, Bandit blood, grime, a weld seam, kill tallies (one group scratched in at an angle) and a sprayed arrow, Maliwan the droplet sigil on the grips with cyan hairlines, pips and diamonds on the blades. Blades get a plate on each broad face (plus a `panel` plate on a bolted-on panel such as Bandit's red slab), grips get a wrap pattern on every facet big enough for a plate, accessory strips get milled grooves and rivets. Optional external PNG art (`--decals <dir>`) is stamped in the same pass. `--no-decals-art` turns the built-in art off. | `<part>.png` |
 | 7 | `linework` | The bold ink look: an overlay (translucent shadow planes, 3/5/7px weighted perimeters, broken pen strokes, corner hatch clusters, fractured accents, scratch groups, highlight nicks, all clipped to a 1px-eroded island mask) over corner hatch strokes and the `INK_PX` boundary. `--linework-seed TEXT` salts the RNG that picks hatch corners and stroke breaks; empty uses the default seed. | `<part>.png` |
 | 8 | `textures` | Fill each island's own padded rectangle with its flat colour (never beyond it) and write the final atlases (`--quantise N` optionally reduces them to an indexed palette; off by default to avoid palette snapping). | `<part>_basecolor.png` |
 | 9 | `export` | GLBs (embedded atlas, sockets, `FACE_FRONT`/`FACE_BACK`), assembled combinations, UV layout JSONs, `socket_manifest.json`, kit README. | `models/`, `textures/`, manifest |
@@ -58,10 +58,11 @@ right/down basis) and mirrored correctly on the rear face. Faces pointing along 
 (pommel caps, emitter plates) and warped quads whose fitted axes are nearly parallel are skipped rather
 than smeared.
 
-Blade faces keep their lettering out of the middle band (that is where a raised fuller or a bolted-on
-panel usually sits) and a panel that covers a big share of the face gets its own `variant="panel"`
-plate. Text is auto-shrunk to the width of its plate (`fit_height`), which is what stops a wordmark
-from being cut into fragments by a narrow facet.
+Blade faces keep their art out of the middle band (that is where a raised fuller or a bolted-on panel
+usually sits) and a panel that covers a big share of the face gets its own `variant="panel"` plate.
+Text is auto-shrunk to the width of its plate (`fit_height`), which is what stops a wordmark from
+being cut into fragments by a narrow facet. `MarkingArtTests` locks the house rule in: only Hyperion
+may call `draw_text`, so a stray slogan on someone else's blade fails the suite.
 
 ## Previews without Blender
 

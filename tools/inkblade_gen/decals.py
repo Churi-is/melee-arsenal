@@ -1,4 +1,4 @@
-"""Decal art: manufacturer wordmarks, emblems, engravings, blood and dirt.
+"""Decal art: manufacturer emblems, engravings, blood and dirt.
 
 The `decals` stage paints this module *before* `linework`, so every marking ends up underneath the
 bold ink pass: contours, hatch clusters and scratches are drawn over the prints, which reads as paint
@@ -7,13 +7,15 @@ and etching on the metal instead of a sticker floating on top of the art.
 Everything here is procedural and Pillow-only:
 
 * a tiny stroke font (`GLYPHS`) draws the stencilled/block lettering (no TTF required, so the kit
-  renders identically on machines with no fonts installed),
+  renders identically on machines with no fonts installed) - used sparingly, because in this world
+  only **Hyperion** puts its own name on a gun; everyone else marks hardware with a badge, an
+  engraving or a scratch,
 * the emblems are hand-authored polygons/curves modelled on the in-game manufacturer marks,
 * blood, dirt, rust and fingerprints are seeded noise clusters,
 
 and all of it is placed through a *physical* frame derived from the mesh.  `island_frame()` recovers,
 for any UV island, which way is "up the blade" and which way the outward face looks, so a 0.24 m wide
-wordmark on the 1.68 m blade is stamped at the right size, the right rotation and the right handedness
+marking on the 1.68 m blade is stamped at the right size, the right rotation and the right handedness
 on both the front and the rear face.
 """
 from __future__ import annotations
@@ -407,16 +409,26 @@ def hyperion_emblem(layer: Layer, cx: float, cy: float, width: float, alpha: int
 
 
 def torgue_emblem(layer: Layer, cx: float, cy: float, width: float, alpha: int = 255) -> None:
-    """Black hexagon plate, orange rim and block `TORGUE` lettering."""
+    """Torgue's badge: a black hexagon plate with an orange rim and a detonation star.
+
+    Deliberately *nameless* - the house stamps this monogram on its hardware, not its own name.
+    """
     height = width * 0.46
     plate = hexagon(cx, cy, width / 2.0, height / 2.0, angle=0.0)
     layer.poly(plate, fill=(28, 26, 28, alpha), outline=(214, 96, 34, alpha), width=width * 0.022)
     inner = hexagon(cx, cy, width * 0.44, height * 0.40, angle=0.0)
     layer.poly(inner, fill=(38, 36, 40, alpha), outline=(196, 150, 52, alpha), width=width * 0.008)
-    draw_text(
-        layer, "TORGUE", cx, cy - height * 0.20, height * 0.40, (236, 196, 96, alpha),
-        stroke=height * 0.085, tracking=width * 0.008, align="center",
-    )
+    # The mark itself: a chunky six-point blast (fat rays read as a badge at 30 px, thin ones read
+    # as a sun) with a dark vented core.
+    burst = []
+    for i in range(12):
+        angle = -math.pi / 2.0 + i * math.tau / 12.0
+        r = height * 0.44 if i % 2 == 0 else height * 0.26
+        burst.append((cx + math.cos(angle) * r * 1.42, cy + math.sin(angle) * r))
+    layer.poly(burst, fill=(232, 186, 74, alpha))
+    core = hexagon(cx, cy, height * 0.20, height * 0.20, angle=math.pi / 6.0)
+    layer.poly(core, fill=(30, 28, 30, alpha), outline=(214, 96, 34, alpha),
+               width=max(1.0, width * 0.010))
     # Detonator tick marks along the bottom of the badge.
     for i in range(7):
         x = cx - width * 0.30 + i * width * 0.10
@@ -448,17 +460,24 @@ def jakobs_emblem(layer: Layer, cx: float, cy: float, width: float, alpha: int =
                            (x + sign * width * 0.10, y - height * 0.26),
                            (x + sign * width * 0.02, y - height * 0.30)])
             layer.line(leaf, width=width * 0.006, fill=dark)
-    # Centre plate with the maker's name.
+    # Centre cartouche: an engraved lozenge between two rules.  No lettering - Jakobs signs its
+    # work with gilt scrollwork and a proof mark, the way a gunmaker stamps an escutcheon.
     plate_w = width * 0.46
     plate = skew_box(cx - plate_w / 2.0, cy - height * 0.30, plate_w, height * 0.60, shear=height * 0.10)
     layer.poly(plate, fill=(70, 46, 32, alpha), outline=gold, width=width * 0.008)
-    draw_text(layer, "JAKOBS", cx, cy - height * 0.17, height * 0.34, (232, 214, 168, alpha),
-              stroke=height * 0.055, tracking=width * 0.014, align="center")
-    # A small "& CO" under-rule, the way the family firm stamps its work.
+    for scale, colour, line_w in ((1.0, gold, 0.007), (0.58, (232, 214, 168, alpha), 0.005)):
+        layer.poly([(cx, cy - height * 0.26 * scale),
+                    (cx + plate_w * 0.40 * scale, cy),
+                    (cx, cy + height * 0.26 * scale),
+                    (cx - plate_w * 0.40 * scale, cy)],
+                   outline=colour, width=width * line_w)
+    layer.ellipse(cx, cy, width * 0.014, width * 0.014, fill=(232, 214, 168, alpha))
+    # Rules flanking the cartouche, and a hairline under it, the way an engraver frames a proof.
+    for sign in (-1.0, 1.0):
+        layer.line([(cx + sign * plate_w * 0.44, cy), (cx + sign * plate_w * 0.66, cy)],
+                   width=width * 0.005, fill=gold)
     layer.line([(cx - width * 0.13, cy + height * 0.20), (cx + width * 0.13, cy + height * 0.20)],
                width=width * 0.005, fill=gold)
-    draw_text(layer, "& SON", cx, cy + height * 0.24, height * 0.14, gold,
-              stroke=height * 0.026, tracking=width * 0.010, align="center")
 
 
 def maliwan_emblem(layer: Layer, cx: float, cy: float, width: float, alpha: int = 255) -> None:
@@ -466,8 +485,20 @@ def maliwan_emblem(layer: Layer, cx: float, cy: float, width: float, alpha: int 
     height = width * 0.55
     navy = (24, 44, 62, alpha)
     teal = (74, 204, 220, alpha)
-    drop = bezier([(cx, cy - height * 0.52), (cx + width * 0.20, cy), (cx, cy + height * 0.50)]) + \
-        bezier([(cx, cy + height * 0.50), (cx - width * 0.20, cy), (cx, cy - height * 0.52)])
+    # A real teardrop: a point at the top, straight-ish shoulders and a round bulb at the bottom.
+    # (Two mirrored beziers make a lens, which reads as an eye rather than a droplet.)
+    bulb_r = width * 0.26
+    bulb_y = cy + height * 0.16
+    drop = [(cx, cy - height * 0.56)]
+    drop += bezier([(cx, cy - height * 0.56),
+                    (cx + bulb_r * 1.10, bulb_y - height * 0.34),
+                    (cx + bulb_r, bulb_y)], steps=14)
+    for i in range(1, 14):
+        angle = math.pi * i / 14.0
+        drop.append((cx + math.cos(angle) * bulb_r, bulb_y + math.sin(angle) * bulb_r))
+    drop += bezier([(cx - bulb_r, bulb_y),
+                    (cx - bulb_r * 1.10, bulb_y - height * 0.34),
+                    (cx, cy - height * 0.56)], steps=14)
     layer.poly(drop, fill=navy, outline=teal, width=width * 0.014)
     layer.ellipse(cx, cy + height * 0.10, width * 0.085, width * 0.085, fill=teal)
     for sign in (-1.0, 1.0):
@@ -615,17 +646,31 @@ def fingerprints(layer: Layer, rng: random.Random, cx: float, cy: float, size: f
 
 
 def tally_marks(layer: Layer, rng: random.Random, cx: float, cy: float, height: float,
-                colour: RGBA, groups: int = 3) -> None:
-    """Crude four-stroke tallies with a slash, the way a Bandit counts kills."""
+                colour: RGBA, groups: int = 3, tilt: float = 0.0) -> None:
+    """Crude four-stroke tallies with a slash, the way a Bandit counts kills.
+
+    `tilt` (radians) leans *one* of the groups, because nobody scratches a kill count with a set
+    square and a ruler: the rest stay upright, so the tilted one reads as hand-slanted rather than
+    as a different kind of mark.
+    """
     cursor = cx
+    leaning = rng.randrange(groups) if (tilt > 0.0 and groups > 0) else -1
     for group in range(groups):
+        angle = rng.uniform(0.55, 1.0) * tilt if group == leaning else 0.0
+        cos_a, sin_a = math.cos(angle), math.sin(angle)
+        pivot = (cursor + height * 0.22, cy)
+
+        def lean(point: tuple[float, float], pivot=pivot, cos_a=cos_a, sin_a=sin_a):
+            dx, dy = point[0] - pivot[0], point[1] - pivot[1]
+            return (pivot[0] + dx * cos_a - dy * sin_a, pivot[1] + dx * sin_a + dy * cos_a)
+
         for stroke in range(4):
             x = cursor + stroke * height * 0.16
-            layer.line([(x, cy - height * rng.uniform(0.45, 0.55)),
-                        (x + rng.uniform(-height * 0.05, height * 0.05), cy + height * 0.5)],
+            layer.line([lean((x, cy - height * rng.uniform(0.45, 0.55))),
+                        lean((x + rng.uniform(-height * 0.05, height * 0.05), cy + height * 0.5))],
                        width=max(1.0, height * 0.06), fill=colour)
-        layer.line([(cursor - height * 0.06, cy + height * 0.16),
-                    (cursor + height * 0.5, cy - height * 0.20)],
+        layer.line([lean((cursor - height * 0.06, cy + height * 0.16)),
+                    lean((cursor + height * 0.5, cy - height * 0.20))],
                    width=max(1.0, height * 0.055), fill=colour)
         cursor += height * 0.85
 
@@ -718,14 +763,14 @@ def stamp(
 # Two rules keep the art visible on the model:
 #
 # * the **middle band** of a blade face is usually where a raised fuller or a bolted-on panel sits, so
-#   primary plates keep their lettering in the outer bands (`y` around 0.22 and 0.70) and leave the
-#   centre alone,
+#   primary plates keep their art in the outer bands (`y` around 0.22 and 0.70) and leave the centre
+#   alone,
 # * an inset panel that covers a big share of the face (Bandit's red slab, Torgue's orange plate) gets
 #   its own `variant="panel"` plate, so the art lands on the surface actually seen.
 #
 # Grip plates stay across-the-grip (`x` = around the handle, `y` = along it) and are pattern-led:
-# a hex facet is only a few centimetres wide, so words there would just be mud, except on the wide
-# wrap faces which do get lettering.
+# a hex facet is only a few centimetres wide, so fine art there would just be mud.  Hyperion is the
+# only house whose wordmark survives the trip around a handle; the rest get a badge or an engraving.
 # ---------------------------------------------------------------------------
 Variant = str
 
@@ -834,18 +879,23 @@ def _blade_jakobs(size: tuple[int, int], rng: random.Random, variant: Variant = 
         layer.line(curl, width=max(1.0, h * 0.028), fill=(58, 42, 28, 215))
         layer.line([(x, y - h * 0.016) for x, y in curl], width=max(1.0, h * 0.012),
                    fill=GOLD + (170,))
-    # Maker's name plate + the family motto, both clear of the fuller.
-    _outlined_text(layer, "JAKOBS", w * 0.40, h * 0.58, h * 0.32, (242, 228, 188, 250),
-                   (42, 30, 20, 240), tracking=h * 0.060)
-    _outlined_text(layer, "FINE ARMS", w * 0.82, h * 0.58, h * 0.150, (240, 226, 188, 235),
-                   (48, 36, 24, 230), tracking=h * 0.030)
-    # A repeating gilt lozenge motif along the spine side: the family's fine detail.
-    for i in range(7):
-        x = w * (0.10 + i * 0.125)
+    # Proof stamps instead of a name: small hex punches down the flank band opposite the fuller (a
+    # mark in the middle of the face would disappear under the inlay).  Jakobs signs its work with a
+    # proof mark and gilt engraving, not with a printed plaque.
+    for i in range(3):
+        px, py = w * (0.30 + i * 0.19), h * 0.78
+        layer.poly(hexagon(px, py, h * 0.070, h * 0.070, angle=math.pi / 6.0),
+                   outline=GOLD + (205,), width=max(1.0, h * 0.013))
+        layer.poly(hexagon(px, py, h * 0.042, h * 0.042, angle=math.pi / 6.0),
+                   outline=(72, 54, 34, 185), width=max(1.0, h * 0.009))
+        layer.ellipse(px, py, h * 0.013, h * 0.013, fill=(232, 214, 168, 195))
+    # A repeating gilt lozenge motif along the tip end of the spine band: the family's fine detail.
+    for i in range(5):
+        x = w * (0.60 + i * 0.078)
         y = h * 0.30
-        layer.poly([(x, y - h * 0.075), (x + w * 0.016, y), (x, y + h * 0.075),
-                    (x - w * 0.016, y)], outline=GOLD + (200,), width=max(1.0, h * 0.016))
-        layer.ellipse(x, y, h * 0.012, h * 0.012, fill=GOLD + (225,))
+        layer.poly([(x, y - h * 0.060), (x + w * 0.013, y), (x, y + h * 0.060),
+                    (x - w * 0.013, y)], outline=GOLD + (200,), width=max(1.0, h * 0.014))
+        layer.ellipse(x, y, h * 0.010, h * 0.010, fill=GOLD + (225,))
     # Etched border line just inside the cutting edge.
     layer.line([(w * 0.03, h * 0.90), (w * 0.97, h * 0.90)], width=max(1.0, h * 0.010),
                fill=(70, 54, 36, 170))
@@ -862,7 +912,8 @@ def _blade_torgue(size: tuple[int, int], rng: random.Random, variant: Variant = 
     layer = Layer(size)
     w, h = layer.size
     if variant == "panel":
-        # The bolted-on orange plate: badge, letters and hazard border.
+        # The bolted-on orange plate: the house badge and a hazard border.  No wordmark - Torgue
+        # stamps its monogram, never its name.
         layer.poly([(w * 0.03, h * 0.06), (w * 0.97, h * 0.06), (w * 0.97, h * 0.94),
                     (w * 0.03, h * 0.94)], outline=(32, 28, 30, 220), width=max(1.0, h * 0.03))
         for i in range(9):
@@ -871,28 +922,34 @@ def _blade_torgue(size: tuple[int, int], rng: random.Random, variant: Variant = 
                         (x - w * 0.023, h * 0.20)], fill=(32, 28, 30, 180))
             layer.poly([(x, h * 0.94), (x + w * 0.035, h * 0.94), (x + w * 0.012, h * 0.80),
                         (x - w * 0.023, h * 0.80)], fill=(32, 28, 30, 180))
-        _outlined_text(layer, "TORGUE", w * 0.5, h * 0.36, h * 0.30, (252, 226, 150, 245),
-                       (28, 24, 26, 240), tracking=h * 0.060)
+        # The badge sits at the forte end of the plate: the four dark cleats are bolted down the
+        # middle and the hilt end, and a monogram behind a cleat would never be read.
+        torgue_emblem(layer, w * 0.23, h * 0.50, h * 0.82, alpha=250)
+        for i in range(3):
+            x = w * (0.10 + i * 0.11)
+            layer.poly([(x, h * 0.30), (x + w * 0.045, h * 0.30), (x + w * 0.030, h * 0.70),
+                        (x - w * 0.015, h * 0.70)], fill=(32, 28, 30, 170))
         return layer.finish()
-    # Primary: the steel slab around the plate.
-    layer.line([(w * 0.04, h * 0.12), (w * 0.96, h * 0.12)], width=max(1.0, h * 0.014),
-               fill=(54, 46, 42, 190))
-    layer.line([(w * 0.04, h * 0.88), (w * 0.96, h * 0.88)], width=max(1.0, h * 0.014),
-               fill=(54, 46, 42, 190))
-    xs = [w * (0.06 + i * 0.11) for i in range(9)]
-    _rivet_row(layer, xs, h * 0.12, h * 0.026, (96, 84, 70, 215))
-    _rivet_row(layer, xs, h * 0.88, h * 0.026, (96, 84, 70, 215))
-    # Hazard chevrons marching along the spine side.
-    for i in range(6):
-        x = w * (0.10 + i * 0.135)
-        layer.poly([(x, h * 0.20), (x + w * 0.032, h * 0.20), (x + w * 0.020, h * 0.40),
-                    (x - w * 0.012, h * 0.40)], fill=(30, 26, 28, 215))
-    _outlined_text(layer, "HIGH EXPLOSIVE", w * 0.30, h * 0.62, h * 0.115, (250, 232, 186, 235),
-                   (34, 28, 28, 230), tracking=h * 0.020)
-    _outlined_text(layer, "DO NOT DROP", w * 0.76, h * 0.62, h * 0.100, (248, 228, 180, 225),
-                   (34, 28, 28, 225), tracking=h * 0.020)
-    draw_text(layer, "TORGUE MFG", w * 0.50, h * 0.30, h * 0.085, (46, 38, 32, 215),
-              stroke=h * 0.020, tracking=h * 0.014, align="center")
+    # Primary: the steel slab around the orange plate.  Once the plate is bolted on, only the two
+    # thin flanks show, so the signage lives in those bands and the middle is left clean.
+    for edge in (0.055, 0.845):
+        layer.line([(w * 0.04, h * (edge + 0.055)), (w * 0.96, h * (edge + 0.055))],
+                   width=max(1.0, h * 0.012), fill=(54, 46, 42, 190))
+        xs = [w * (0.06 + i * 0.11) for i in range(9)]
+        _rivet_row(layer, xs, h * edge, h * 0.024, (96, 84, 70, 215))
+        # Hazard band: diagonal stripes marching along both flanks.
+        for i in range(9):
+            x = w * (0.05 + i * 0.11)
+            for base in (0.075, 0.865):
+                layer.poly([(x, h * base), (x + w * 0.042, h * base),
+                            (x + w * 0.028, h * (base + 0.055)),
+                            (x - w * 0.014, h * (base + 0.055))], fill=(30, 26, 28, 205))
+    # A pair of hazard triangles at the hilt end of the flanks - signage, not a wordmark.
+    for cx, cy in ((w * 0.09, 0.30), (w * 0.90, 0.70)):
+        triangle = [(w * cx, h * (cy - 0.10)), (w * cx + h * 0.13, h * (cy + 0.09)),
+                    (w * cx - h * 0.13, h * (cy + 0.09))]
+        layer.poly(triangle, fill=(246, 226, 170, 230), outline=(34, 28, 28, 240),
+                   width=max(1.0, h * 0.018))
     return layer.finish()
 
 
@@ -901,27 +958,43 @@ def _blade_bandit(size: tuple[int, int], rng: random.Random, variant: Variant = 
     w, h = layer.size
     if variant == "panel":
         # The red slab is bolted down its tip half: the three modelled bolts sit at x=0.13..0.52 of
-        # the plate, spanning y=0.33..0.82.  The wordmark therefore lives in the clear hilt half, on
-        # the outer edge of the slab (`y=0.62`): that keeps it off the bolts *and* out from behind a
-        # front-mounted accessory strip, which is what bolted over it before.  The tallies hug the
-        # free edge above the bolt heads.
+        # the plate, spanning y=0.33..0.82.  Bandits do not brand their work with a name (only
+        # Hyperion does that), so the slab carries a weld seam and kill tallies instead - and the
+        # tallies are scratched in by hand, so one group leans.
         blood_splatter(layer, rng, w * 0.86, h * 0.74, h * 0.30, alpha=215, drip=(-1.0, 0.15))
         blood_splatter(layer, rng, w * 0.34, h * 0.80, h * 0.26, alpha=200, drip=(-1.0, 0.0))
         blood_splatter(layer, rng, w * 0.62, h * 0.30, h * 0.18, alpha=165, drip=(-1.0, 0.0))
         grime_streaks(layer, rng, w * 0.5, h * 0.5, w * 0.9, h * 0.9, alpha=150, horizontal=True)
-        _outlined_text(layer, "BANDIT", w * 0.55, h * 0.62, h * 0.30, (28, 22, 20, 235),
-                       (214, 202, 176, 120), tracking=h * 0.042, rng=rng, jitter=h * 0.008,
-                       align="left")
-        tally_marks(layer, rng, w * 0.14, h * 0.16, h * 0.22, (26, 20, 20, 225), groups=2)
+        # A rough weld bead laid along the spine edge, with its spatter.
+        seam = [(w * 0.05 + i * w * 0.028, h * (0.19 + 0.014 * math.sin(i * 1.6))) for i in range(28)]
+        layer.line(seam, width=max(1.5, h * 0.045), fill=(52, 32, 26, 195))
+        layer.line([(x, y - h * 0.016) for x, y in seam], width=max(1.0, h * 0.018),
+                   fill=(198, 172, 142, 130))
+        for _ in range(9):
+            i = rng.randrange(len(seam))
+            layer.ellipse(seam[i][0], seam[i][1] + h * rng.uniform(-0.03, 0.03),
+                          h * rng.uniform(0.010, 0.022), h * rng.uniform(0.010, 0.022),
+                          fill=(46, 34, 28, 165))
+        # Kill tallies in the hilt half (clear of the bolts), hand-scratched: one group leans.
+        tally_marks(layer, rng, w * 0.58, h * 0.62, h * 0.26, (26, 20, 20, 230), groups=2,
+                    tilt=0.26)
+        tally_marks(layer, rng, w * 0.16, h * 0.14, h * 0.22, (26, 20, 20, 225), groups=2,
+                    tilt=0.22)
         return layer.finish()
     # Primary: the steel body around the slab - blood, welds, scrapes and a scratched warning.
     blood_splatter(layer, rng, w * 0.16, h * 0.62, h * 0.34, alpha=205, drip=(-1.0, 0.3))
     blood_splatter(layer, rng, w * 0.50, h * 0.28, h * 0.24, alpha=185, drip=(-1.0, 0.0))
     blood_splatter(layer, rng, w * 0.86, h * 0.72, h * 0.20, alpha=175, drip=(-1.0, 0.2))
     grime_streaks(layer, rng, w * 0.5, h * 0.5, w * 0.92, h * 0.9, alpha=150, horizontal=True)
-    tally_marks(layer, rng, w * 0.10, h * 0.72, h * 0.20, (28, 22, 22, 220), groups=3)
-    _outlined_text(layer, "4 SHARP", w * 0.52, h * 0.26, h * 0.115, (34, 26, 24, 225),
-                   (222, 214, 190, 110), tracking=h * 0.020, rng=rng, jitter=h * 0.010)
+    tally_marks(layer, rng, w * 0.10, h * 0.72, h * 0.20, (28, 22, 22, 220), groups=3, tilt=0.24)
+    # A spray-painted arrow pointing up the blade rather than a painted slogan: Bandit daubs its
+    # work, it does not letter it (Hyperion is the only house that prints words on hardware).
+    arrow_x, arrow_y = w * 0.50, h * 0.26
+    layer.line([(arrow_x, arrow_y), (arrow_x + w * 0.105, arrow_y)], width=max(1.5, h * 0.045),
+               fill=(34, 26, 24, 205))
+    layer.poly([(arrow_x + w * 0.100, arrow_y - h * 0.080),
+                (arrow_x + w * 0.150, arrow_y + h * 0.006),
+                (arrow_x + w * 0.100, arrow_y + h * 0.092)], fill=(34, 26, 24, 205))
     for _ in range(11):
         layer.blot(rng.uniform(w * 0.06, w * 0.94), h * rng.uniform(0.12, 0.88),
                    h * rng.uniform(0.03, 0.070), rng, (46, 40, 36, 150), lobes=6)
@@ -944,11 +1017,17 @@ def _blade_maliwan(size: tuple[int, int], rng: random.Random, variant: Variant =
         for k in range(8):
             layer.ellipse(w * (0.10 + k * 0.108), h * y, h * 0.020, h * 0.020,
                           fill=(74, 204, 220, 200))
-    maliwan_emblem(layer, w * 0.22, h * 0.62, h * 0.70, alpha=245)
-    _outlined_text(layer, "MALIWAN", w * 0.58, h * 0.58, h * 0.22, (36, 54, 70, 245),
-                   (222, 236, 238, 215), tracking=h * 0.045)
-    draw_text(layer, "ELEMENTAL", w * 0.58, h * 0.26, h * 0.105, (44, 62, 78, 235),
-              stroke=h * 0.026, tracking=h * 0.045, align="center")
+    # The blade's flanks are too thin for the droplet sigil (it lands half under the emissive inlay
+    # and reads as a clipped blob), so the blade is signed in fine cyan work only - hairlines, pips
+    # and diamonds.  The sigil itself goes on the grip, where the facet is big enough to carry it.
+    for y in (0.405, 0.595):
+        layer.line([(w * 0.06, h * y), (w * 0.94, h * y)], width=max(1.0, h * 0.008),
+                   fill=(74, 204, 220, 175))
+    for i in range(3):
+        x = w * (0.44 + i * 0.10)
+        layer.poly([(x, h * 0.16), (x + w * 0.013, h * 0.22), (x, h * 0.28),
+                    (x - w * 0.013, h * 0.22)], outline=(74, 204, 220, 190),
+                   width=max(1.0, h * 0.010))
     return layer.finish()
 
 
@@ -986,7 +1065,8 @@ def _grip_bandit(size: tuple[int, int], rng: random.Random, variant: Variant = "
         return layer.finish()
     fingerprints(layer, rng, w * 0.5, h * 0.55, unit * 0.60)
     blood_splatter(layer, rng, w * 0.40, h * 0.28, unit * 0.26, alpha=185, drip=(0.0, 1.0))
-    tally_marks(layer, rng, w * 0.16, h * 0.14, unit * 0.16, (28, 24, 22, 210), groups=2)
+    tally_marks(layer, rng, w * 0.16, h * 0.14, unit * 0.16, (28, 24, 22, 210), groups=2,
+                tilt=0.22)
     # A scrap of dirty tape, torn at both ends.
     layer.poly([(w * 0.12, h * 0.60), (w * 0.88, h * 0.56), (w * 0.92, h * 0.70), (w * 0.08, h * 0.74)],
                fill=(156, 146, 122, 170), outline=(48, 42, 36, 145), width=max(1.0, unit * 0.02))
@@ -994,10 +1074,11 @@ def _grip_bandit(size: tuple[int, int], rng: random.Random, variant: Variant = "
         x = rng.uniform(w * 0.14, w * 0.86)
         layer.line([(x, h * 0.59), (x + w * 0.02, h * 0.72)], width=max(1.0, unit * 0.014),
                    fill=(72, 64, 52, 100))
+    # No wordmark on the wrap: Bandit counts kills, it does not print its name.  A second tally
+    # group goes on the wide facets instead.
     if w >= 120:
-        _outlined_text(layer, "BANDIT", w * 0.5, h * 0.82, unit * 0.18, (32, 26, 24, 230),
-                       (218, 210, 188, 130), tracking=unit * 0.018, rng=rng, jitter=unit * 0.008,
-                       max_width=w * 0.86)
+        tally_marks(layer, rng, w * 0.14, h * 0.84, unit * 0.14, (30, 24, 22, 220), groups=3,
+                    tilt=0.24)
     return layer.finish()
 
 
@@ -1053,9 +1134,18 @@ def _grip_jakobs(size: tuple[int, int], rng: random.Random, variant: Variant = "
         return layer.finish()
     layer.line([(w * 0.5, h * 0.03), (w * 0.5, h * 0.97)], width=max(1.0, unit * 0.030),
                fill=GOLD + (180,))
+    # A gilt pinline with inlay pins instead of the family name (Jakobs engraves, it does not print).
+    for edge in (0.10, 0.90):
+        layer.line([(w * 0.06, h * edge), (w * 0.94, h * edge)], width=max(1.0, unit * 0.014),
+                   fill=GOLD + (185,))
     if w >= 85:
-        _outlined_text(layer, "JAKOBS", w * 0.5, h * 0.06, unit * 0.16, (238, 222, 180, 245),
-                       (44, 32, 20, 235), tracking=unit * 0.012, max_width=w * 0.88)
+        # Gilt lozenges and inlay pins: at facet size the full escutcheon just reads as a smudge.
+        for i in range(3):
+            cx = w * (0.30 + i * 0.20)
+            layer.poly([(cx, h * 0.34), (cx + w * 0.030, h * 0.50), (cx, h * 0.66),
+                        (cx - w * 0.030, h * 0.50)], outline=GOLD + (215,),
+                       width=max(1.0, unit * 0.018))
+            layer.ellipse(cx, h * 0.50, unit * 0.014, unit * 0.014, fill=(232, 214, 168, 225))
     return layer.finish()
 
 
@@ -1071,9 +1161,19 @@ def _grip_torgue(size: tuple[int, int], rng: random.Random, variant: Variant = "
         y += band * 1.6
     layer.line([(0, h * 0.06), (w, h * 0.06 - band * 0.3)], width=max(2.0, unit * 0.040),
                fill=(214, 118, 38, 215))
+    # The badge, not the name: a facet that is roughly square gets the hex monogram, a long rib
+    # facet gets hazard chevrons instead (a badge squeezed into a rib just reads as a smudge).
     if variant == "panel" and w >= 85:
-        _outlined_text(layer, "TORGUE", w * 0.5, h * 0.44, unit * 0.24, (250, 226, 156, 240),
-                       (26, 22, 24, 235), tracking=unit * 0.014, max_width=w * 0.88)
+        if w <= h * 1.9:
+            torgue_emblem(layer, w * 0.5, h * 0.48, unit * 0.86, alpha=240)
+        else:
+            step = unit * 0.30
+            x = w * 0.08
+            while x < w * 0.92:
+                layer.poly([(x, h * 0.22), (x + step * 0.55, h * 0.22),
+                            (x + step * 0.95, h * 0.74), (x + step * 0.40, h * 0.74)],
+                           fill=(214, 118, 38, 210))
+                x += step * 1.6
     return layer.finish()
 
 
@@ -1131,10 +1231,11 @@ def _accessory_strip(size: tuple[int, int], rng: random.Random, variant: Variant
 
 #: Minimum island area (in atlas pixels) before a face is worth decorating at all.
 MIN_ART_AREA = 1800
-#: Grip facets at least this wide (in art pixels, i.e. physically) can carry a wordmark: narrower
-#: facets receive only grime and scratches.
+#: Grip facets at least this wide (in art pixels, i.e. physically) can carry the branded plate - the
+#: badge, escutcheon or (Hyperion only) the wordmark.  Narrower facets receive only pattern and grime.
 GRIP_LETTER_MIN_PX = 85
-#: ... and no longer than this (metres) along the handle, which excludes the wrap strips.
+#: ... and no longer than this (metres) along the handle, which excludes the wrap strips: those are
+#: several modelled faces sharing one island, so any plate laid across one would be cut by the seams.
 GRIP_LETTER_MAX_LENGTH_M = 0.22
 
 
@@ -1183,8 +1284,8 @@ def paint_manufacturer_decals(
 ) -> int:
     """Stamp the manufacturer's own art onto its faces. Returns the number of plates applied.
 
-    Blades take one plate per broad face (front and rear), authored along the blade so the wordmark
-    runs from hilt to point.  Grips take a smaller wrap plate on each of their largest side facets.
+    Blades take one plate per broad face (front and rear), authored along the blade so the art reads
+    from hilt to point.  Grips take a smaller wrap plate on each of their largest side facets.
     Everything is sized from the face's own physical measurements, so a marking is the same size in
     metres no matter which part or atlas resolution it lands on.
     """
@@ -1240,13 +1341,13 @@ def paint_manufacturer_decals(
             applied += stamp(canvas, island, art, frame, anchor, (art_w, art_h), orientation="along")
         else:
             # Grips are wrapped, so every facet that can hold paint is painted. A facet wide enough
-            # to carry lettering gets the branded wrap; the narrow ones only get working grime (a
-            # word a few millimetres tall would just read as a smudge).
+            # to carry the branded plate gets it; the narrow ones only get working grime (a badge a
+            # few millimetres across would just read as a smudge).
             if area < max(700, largest * 0.06) or min(across_m, along_m) < 0.010:
                 continue
             art_w, art_h = across_m * 0.94, along_m * 0.94
-            # Only the small, self-contained facets (ribs, end caps) can carry a word: the long
-            # wrap strips are several modelled faces sharing one island, so a word laid across one
+            # Only the small, self-contained facets (ribs, end caps) can carry a plate: the long
+            # wrap strips are several modelled faces sharing one island, so anything laid across one
             # would be cut into fragments by the seams.
             big_facet = (art_w * frame.px_per_m >= GRIP_LETTER_MIN_PX
                          and along_m <= GRIP_LETTER_MAX_LENGTH_M)

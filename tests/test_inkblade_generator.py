@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import random
 from pathlib import Path
 import struct
 import tempfile
@@ -868,6 +869,31 @@ class MarkingArtTests(unittest.TestCase):
             with self.subTest(part=part_id):
                 self.assertGreaterEqual(applied, 2)
                 self.assertNotEqual(canvas.tobytes(), textures.new_canvas(layout).tobytes())
+
+    def test_only_hyperion_prints_its_own_name(self) -> None:
+        """House rule: Hyperion is the only house that stamps its name on the hardware.
+
+        Everything else signs with a badge, an engraving, a proof stamp or a scratch, so any stray
+        `draw_text` call on another manufacturer's plate is a regression, not a detail.
+        """
+        calls: list[str] = []
+        real = decals.draw_text
+
+        def spy(layer, text, *args, **kwargs):
+            calls.append(str(text))
+            return real(layer, text, *args, **kwargs)
+
+        for maker, art_fn in list(decals.BLADE_ART.items()) + list(decals.GRIP_ART.items()):
+            seen: list[str] = []
+            for variant in ("primary", "panel"):
+                calls.clear()
+                with mock.patch.object(decals, "draw_text", spy):
+                    art_fn((420, 260), random.Random(11), variant)
+                seen.extend(calls)
+            if maker == "Hyperion":
+                self.assertTrue(seen, f"{maker} lost its wordmark")
+            else:
+                self.assertEqual(seen, [], f"{maker} still prints lettering: {seen}")
 
     def test_marking_pass_is_deterministic(self) -> None:
         part = self.parts["blade_bandit"]
