@@ -89,6 +89,12 @@ class RunConfig:
     bake_combinations: bool = True
     # Restrict generation to a subset of parts (None = every part in the catalogue).
     parts: tuple[str, ...] | None = None
+    # Preview renders (`<render_dir>/{parts,combinations}/` + overview sheets). Off by default so
+    # headless kit builds stay fast; `--renders` turns the stage on.
+    render_enabled: bool = False
+    render_dir: Path = field(default_factory=lambda: Path("build/inkblade_renders"))
+    render_size: int = 720
+    render_supersample: int = 2
     revision: str = "r6_staged"
 
     def part_enabled(self, part_id: str) -> bool:
@@ -106,5 +112,8 @@ class RunConfig:
             "decal_fit": self.decal_fit,
             "bake_combinations": self.bake_combinations,
             "parts": list(self.parts) if self.parts else [],
+            "renders": bool(self.render_enabled),
+            "render_size": self.render_size,
+            "render_supersample": self.render_supersample,
             "revision": self.revision,
         }

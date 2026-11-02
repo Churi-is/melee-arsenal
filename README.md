@@ -53,7 +53,8 @@ While a Melee Weapon is your held `Pawn.Weapon`, incoming damage on `WillowGame.
 ./melee status
 
 # 3. (Optional) Regenerate the modular kit through the staged pipeline -> build/inkblade_kit
-./melee generate
+#    Add --renders for Blender-free preview PNGs in build/inkblade_renders
+./melee generate --renders
 
 # 4. Compile ./assets/inkblade_bold_kit -> CookedPCConsole/*.upk + manifest JSON
 ./melee build
@@ -74,7 +75,7 @@ While a Melee Weapon is your held `Pawn.Weapon`, incoming damage on `WillowGame.
 | :--- | :--- |
 | `./melee setup` | Create `.venv/` and install `Pillow` for UPK compilation |
 | `./melee build [--kit <path>]` | Compile modular kit (default `./assets/inkblade_bold_kit`) into `WillowGame/CookedPCConsole/MeleeArsenal{Meshes,Textures}.upk`, update `inkblade_compiled_manifest.json`, and sync `sdk_mods/melee_arsenal/upk/` |
-| `./melee generate [options]` | Regenerate the Inkblade kit through the staged pipeline (`geometry -> uv -> flat -> mottle -> linework -> decals -> textures -> export`) into `build/inkblade_kit`, with a per-stage cache in `build/inkblade_stages`. Supports `--list-stages`, `--only`, `--from`, `--force`, `--decals`, `--parts`, `--out <dir\|zip>` |
+| `./melee generate [options]` | Regenerate the Inkblade kit through the staged pipeline (`geometry -> uv -> flat -> mottle -> linework -> decals -> textures -> export -> render`) into `build/inkblade_kit`, with a per-stage cache in `build/inkblade_stages`. Supports `--list-stages`, `--only`, `--from`, `--force`, `--decals`, `--parts`, `--out <dir\|zip>`, and `--renders [dir]` for preview PNGs + overview sheets in `build/inkblade_renders` |
 | `./melee test [args]` | Byte-compile all modules and run `unittest` (e.g. `./melee test -q`, `./melee test -k world_drop`) |
 | `./melee preview` | Roll sample Level 50 Melee Arsenal weapons and print item cards, level-scaled Damage Reduction, and Roid/Crit/UVHM hit math |
 | `./melee package [--build]` | Build `dist/melee_arsenal.zip`, `dist/melee_arsenal-v0.3.5.zip`, and `dist/source.zip` |

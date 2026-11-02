@@ -12,6 +12,7 @@ inserted without editing anything that already exists.
 ./melee generate --only linework      # re-paint ink, everything before it comes from cache
 ./melee generate --from textures      # re-run from a stage onwards, keeping earlier cache
 ./melee generate --decals assets/inkblade_decals --parts blade_jakobs,grip_hyperion
+./melee generate --renders                 # + preview PNGs in build/inkblade_renders
 ./melee generate --out dist/Inkblade_Modular_Kit_r6.zip
 ./melee build --kit build/inkblade_kit
 ```
@@ -30,10 +31,29 @@ inserted without editing anything that already exists.
 | 6 | `decals` | Optional external decal art (extension point, no-op without art). | `<part>.png` |
 | 7 | `textures` | Seal island colour into the UV padding, quantise to 64 colours, write the shipped atlases. | `<part>_basecolor.png` |
 | 8 | `export` | GLBs (embedded atlas, sockets, `FACE_FRONT`/`FACE_BACK`), assembled combinations, UV layout JSONs, `socket_manifest.json`, kit README. | `models/`, `textures/`, manifest |
+| 9 | `render` | Preview PNGs via the built-in software rasteriser: 720×720 part and combination tiles plus labelled overview sheets. Optional (`--renders`). | `build/inkblade_renders/{parts,combinations,overview_*.png}` |
 
 Ordering note: an atlas cannot be *painted* before the island layout exists, so the painting stages
 follow the UV stage. What the split buys is that each painting pass is independent, inspectable and
 re-runnable against the same layout — `--only linework` re-inks a kit in seconds.
+
+## Previews without Blender
+
+`--renders` (or `RUN` with `render_enabled=True`) writes previews next to the kit instead of into it:
+
+```
+build/inkblade_renders/
+├── parts/<part_id>.png               # 720x720 each
+├── combinations/<recipe>.png
+├── overview_parts.png                # labelled contact sheets
+└── overview_combinations.png
+```
+
+`render.py` is a small orthographic software rasteriser: three-light flat shading, z-buffered
+(supersampled 2× by default) triangles sampled straight from the painted atlas, so the ink linework
+shows in every preview. Bifacial parts render both `FACE_FRONT`/`FACE_BACK` instances, and element
+recipes get their accent islands recoloured exactly like the exported combinations. A full 22-part
++ 7-combination set takes ~30 s. `--render-size` and `--render-supersample 1` trade quality for speed.
 
 ## Caching
 
@@ -65,6 +85,7 @@ tools/inkblade_gen/
 ├── uv.py         # projection, packing, template reuse -> PartLayout + layout JSON
 ├── textures.py   # the painting layers (flat / mottle / linework / decals / seal / quantise)
 ├── glb.py        # GLB read/write, ear-clipping triangulation, per-part export, merge
+├── render.py     # Blender-free software rasteriser + contact sheets
 ├── stages.py     # Stage definitions, KitState, manifest builder, stage catalogue
 ├── pipeline.py   # ordering, --only/--from/--force, fingerprint cache
 └── cli.py        # argument parsing, kit zipping, console report
@@ -77,5 +98,6 @@ work and hatching were rebuilt with Pillow primitives (`ImageChops`, `MaxFilter`
 
 - `tests/test_inkblade_generator.py` covers the stage contract (ordering, insertion, cache chaining,
   decal invalidation), the kit contract consumed by `tools/inkblade_upk`, geometry parity against the
-  shipped kit (bounds + sockets), and paint determinism.
+  shipped kit (bounds + sockets), paint determinism, and the render stage (coverage, determinism,
+  bifacial pairing, output layout).
 - Generated kits compile unchanged with `python tools/compile_inkblade_upk.py --kit <dir>`.

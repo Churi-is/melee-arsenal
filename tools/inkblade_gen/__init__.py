@@ -10,6 +10,7 @@ The kit is produced by a stack of independent, individually cacheable stages (se
 6. `decals`    — optional external decal art (the template for future art passes)
 7. `textures`  — padding seal, quantisation, final `<part>_basecolor.png`
 8. `export`    — `<part>.glb`, combinations, UV layout JSON and `socket_manifest.json`
+9. `render`    — optional preview PNGs (`--renders`), rendered without Blender
 
 Public API::
 

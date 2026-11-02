@@ -23,6 +23,7 @@ Pillow:
 
 ```
 ./melee generate                                   # -> build/inkblade_kit
+./melee generate --renders                         # + previews in build/inkblade_renders
 ./melee generate --only linework                   # re-ink only, reusing cached UV/flat/mottle work
 ./melee generate --parts blade_jakobs --decals art # one part, with external decal art
 ./melee build --kit build/inkblade_kit             # compile the generated kit to UE3 packages

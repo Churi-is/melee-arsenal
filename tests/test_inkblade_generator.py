@@ -37,7 +37,7 @@ class StageStackTests(unittest.TestCase):
         names = [stage.name for stage in default_stages()]
         self.assertEqual(
             names,
-            ["geometry", "uv", "flat", "mottle", "linework", "decals", "textures", "export"],
+            ["geometry", "uv", "flat", "mottle", "linework", "decals", "textures", "export", "render"],
         )
 
     def test_flat_texture_stage_writes_pngs_before_models(self) -> None:
@@ -109,9 +109,12 @@ class PipelineCacheTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             first = Pipeline(self._cfg(tmp)).run()
             second = Pipeline(self._cfg(tmp)).run()
-            self.assertEqual(first.ran[-1], "export")
-            self.assertEqual(second.cached, ["geometry", "uv", "flat", "mottle", "linework", "decals", "textures"])
-            self.assertEqual(second.ran, ["export"])
+            self.assertIn("export", first.ran)
+            self.assertIn("render", first.ran)
+            self.assertEqual(
+                second.cached, ["geometry", "uv", "flat", "mottle", "linework", "decals", "textures"]
+            )
+            self.assertEqual(second.ran, ["export", "render"])
 
     def test_forcing_a_stage_reruns_it_even_with_a_warm_cache(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -134,14 +137,14 @@ class PipelineCacheTests(unittest.TestCase):
                     stages[index] = Stage("linework", stage.title, edited_linework, stage.save, stage.load)
             result = Pipeline(self._cfg(tmp), stages).run()
             self.assertEqual(result.cached, ["geometry", "uv", "flat", "mottle"])
-            self.assertEqual(result.ran, ["linework", "decals", "textures", "export"])
+            self.assertEqual(result.ran, ["linework", "decals", "textures", "export", "render"])
 
     def test_restarting_from_a_stage_reuses_upstream_cache(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             Pipeline(self._cfg(tmp)).run()
             result = Pipeline(self._cfg(tmp)).run(start="textures")
             self.assertIn("geometry", result.cached)
-            self.assertEqual(result.ran[-2:], ["textures", "export"])
+            self.assertEqual(result.ran[-3:], ["textures", "export", "render"])
 
     def test_decal_art_change_invalidates_the_decal_stage(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -325,6 +328,107 @@ def _paint_atlas_bytes(cfg: RunConfig, parts, layouts) -> bytes:
     colours = textures.role_colours(part, layout, cfg.seed)
     final = textures.finalise_atlas(canvas, layout, colours, cfg.quantize_colors).convert("RGB")
     return final.tobytes()
+
+
+class RenderStageTests(unittest.TestCase):
+    """Preview renders are a stage too: optional, ordered last, and Blender-free."""
+
+    def test_render_stage_is_last_and_off_by_default(self) -> None:
+        names = [stage.name for stage in default_stages()]
+        self.assertEqual(names[-1], "render")
+        self.assertFalse(RunConfig().render_enabled)
+
+    def test_rasteriser_draws_the_part_deterministically(self) -> None:
+        from tools.inkblade_gen.render import BACKGROUND, part_scene, rasterise
+
+        cfg = RunConfig(density=320.0, ink_px=3, padding=5, parts=("grip_jakobs",), quantize_colors=None)
+        parts = build_parts(cfg.parts)
+        layouts = unwrap_parts(parts, cfg)
+        state = _painted_state(cfg, parts, layouts)
+        triangles = part_scene(state.parts["grip_jakobs"], state.layouts["grip_jakobs"])
+        self.assertTrue(triangles)
+        first = rasterise(triangles, state.finals["grip_jakobs"], size=(200, 200), supersample=1)
+        second = rasterise(triangles, state.finals["grip_jakobs"], size=(200, 200), supersample=1)
+        self.assertEqual(first.tobytes(), second.tobytes())
+        self.assertEqual(first.size, (200, 200))
+        pixels = first.tobytes()
+        covered = sum(1 for index in range(0, len(pixels), 3) if tuple(pixels[index : index + 3]) != BACKGROUND)
+        self.assertGreater(covered / (first.width * first.height), 0.05)
+        self.assertLess(covered / (first.width * first.height), 0.95)
+
+    def test_bifacial_parts_render_both_instances(self) -> None:
+        from tools.inkblade_gen.render import part_scene, part_triangles
+
+        cfg = RunConfig(density=320.0, ink_px=3, padding=5, parts=("element_fire",), quantize_colors=None)
+        parts = build_parts(cfg.parts)
+        layouts = unwrap_parts(parts, cfg)
+        single = part_triangles(parts["element_fire"], layouts["element_fire"])
+        both = part_scene(parts["element_fire"], layouts["element_fire"])
+        self.assertAlmostEqual(len(both), len(single) * 2, delta=2)
+
+    def test_render_stage_writes_previews_and_sheets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = RunConfig(
+                out_dir=Path(tmp) / "kit",
+                work_dir=Path(tmp) / "work",
+                density=256.0,
+                ink_px=3,
+                padding=4,
+                parts=("blade_jakobs", "grip_jakobs"),
+                render_enabled=True,
+                render_dir=Path(tmp) / "renders",
+                render_size=160,
+                render_supersample=1,
+            )
+            result = Pipeline(cfg).run()
+            renders = Path(cfg.render_dir)
+            self.assertEqual(result.state.renders["parts"], 2)
+            # `blade_jakobs` + `grip_jakobs` is the recipe for the 03_Cavalier assembly.
+            self.assertEqual(result.state.renders["combinations"], 1)
+            self.assertTrue((renders / "combinations" / "03_Cavalier.png").is_file())
+            self.assertTrue((renders / "overview_combinations.png").is_file())
+            self.assertTrue((renders / "parts" / "blade_jakobs.png").is_file())
+            self.assertTrue((renders / "parts" / "grip_jakobs.png").is_file())
+            self.assertTrue((renders / "overview_parts.png").is_file())
+            self.assertTrue((renders / "README.md").is_file())
+            with Image.open(renders / "parts" / "blade_jakobs.png") as tile:
+                self.assertEqual(tile.size, (160, 160))
+            with Image.open(renders / "overview_parts.png") as sheet:
+                self.assertGreater(sheet.width, 160)
+                self.assertGreater(sheet.height, 160)
+
+    def test_kit_run_without_renders_leaves_no_preview_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = RunConfig(
+                out_dir=Path(tmp) / "kit",
+                work_dir=Path(tmp) / "work",
+                density=256.0,
+                ink_px=3,
+                padding=4,
+                parts=("element_fire",),
+                render_dir=Path(tmp) / "renders",
+            )
+            Pipeline(cfg).run()
+            self.assertFalse(Path(cfg.render_dir).exists())
+
+
+def _painted_state(cfg: RunConfig, parts, layouts):
+    """Run the paint stages for a small part set without touching the filesystem."""
+    from tools.inkblade_gen import textures
+    from tools.inkblade_gen.stages import KitState
+
+    state = KitState(cfg=cfg)
+    state.parts = parts
+    state.layouts = layouts
+    for part_id, layout in layouts.items():
+        canvas = textures.new_canvas(layout)
+        canvas = textures.paint_flat_colours(parts[part_id], layout, canvas, cfg.seed)
+        canvas = textures.paint_mottle(parts[part_id], layout, canvas)
+        canvas = textures.paint_linework(parts[part_id], layout, canvas, ink_px=cfg.ink_px)
+        colours = textures.role_colours(parts[part_id], layout, cfg.seed)
+        state.colours[part_id] = colours
+        state.finals[part_id] = textures.finalise_atlas(canvas, layout, colours, cfg.quantize_colors)
+    return state
 
 
 class ManifestBuilderTests(unittest.TestCase):

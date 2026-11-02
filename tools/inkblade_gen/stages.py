@@ -66,6 +66,7 @@ class KitState:
     decals_applied: dict[str, int] = field(default_factory=dict)
     element_atlases: dict[tuple[str, str], Image.Image] = field(default_factory=dict)
     reports: list["StageReport"] = field(default_factory=list)
+    renders: dict[str, int] = field(default_factory=dict)
     kit_dir: Path | None = None
     manifest: dict[str, Any] = field(default_factory=dict)
 
@@ -582,6 +583,10 @@ def _run_export(state: KitState) -> None:
             )
 
     (kit_dir / "socket_manifest.json").write_text(json.dumps(manifest, indent=2))
+    if cfg.render_enabled:
+        (kit_dir / "docs" / "renders.json").write_text(
+            json.dumps({"directory": str(cfg.render_dir), **state.renders}, indent=2)
+        )
     (kit_dir / "docs" / "stages.json").write_text(
         json.dumps(
             {
@@ -633,6 +638,25 @@ def _kit_readme(state: KitState) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Stage: preview renders
+# ---------------------------------------------------------------------------
+def _run_render(state: KitState) -> None:
+    """Render part/combination previews with the built-in rasteriser (no Blender needed)."""
+    from .render import render_kit
+
+    cfg = state.cfg
+    if not cfg.render_enabled:
+        return
+    counts = render_kit(
+        state,
+        Path(cfg.render_dir),
+        size=(int(cfg.render_size), int(cfg.render_size)),
+        supersample=int(cfg.render_supersample),
+    )
+    state.renders = counts
+
+
+# ---------------------------------------------------------------------------
 # Stage catalogue
 # ---------------------------------------------------------------------------
 def default_stages() -> list[Stage]:
@@ -668,6 +692,12 @@ def default_stages() -> list[Stage]:
             "export",
             "Write GLBs, UV layouts and the socket manifest",
             _run_export,
+            cacheable=False,
+        ),
+        Stage(
+            "render",
+            "Render part and combination previews (no Blender)",
+            _run_render,
             cacheable=False,
         ),
     ]

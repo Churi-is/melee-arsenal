@@ -34,6 +34,7 @@ from .stages import default_stages
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OUT = REPO_ROOT / "build" / "inkblade_kit"
 DEFAULT_WORK = REPO_ROOT / "build" / "inkblade_stages"
+DEFAULT_RENDERS = REPO_ROOT / "build" / "inkblade_renders"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -55,6 +56,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--force", default="", help="comma-separated stages to ignore cached output for")
     parser.add_argument("--no-combinations", action="store_true", help="skip the assembled example GLBs")
     parser.add_argument("--no-quantise", action="store_true", help="keep 24-bit atlases instead of palettes")
+    parser.add_argument(
+        "--renders",
+        nargs="?",
+        const=str(DEFAULT_RENDERS),
+        default=None,
+        metavar="DIR",
+        help=f"also render part/combination previews (default {DEFAULT_RENDERS})",
+    )
+    parser.add_argument("--render-size", type=int, default=720, help="preview render edge in pixels")
+    parser.add_argument(
+        "--render-supersample",
+        type=int,
+        default=2,
+        help="preview render supersampling factor (1 = fast draft)",
+    )
     parser.add_argument("--revision", default="r6_staged", help="revision label written into the manifest")
     parser.add_argument("--list-stages", action="store_true", help="print the stack and exit")
     return parser
@@ -77,6 +93,10 @@ def config_from_args(args: argparse.Namespace) -> RunConfig:
         decal_fit=float(args.decal_fit),
         bake_combinations=not args.no_combinations,
         parts=_csv(args.parts) or None,
+        render_enabled=args.renders is not None,
+        render_dir=Path(args.renders) if args.renders else DEFAULT_RENDERS,
+        render_size=int(args.render_size),
+        render_supersample=int(args.render_supersample),
         revision=str(args.revision),
     )
 
@@ -122,6 +142,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     print(f"Inkblade kit -> {result.kit_dir}")
+    if cfg.render_enabled:
+        print(f"Inkblade renders -> {cfg.render_dir}")
     for report in result.reports:
         print(
             f"  [{report.status:>6}] {report.name:<10} {report.title:<52} "
