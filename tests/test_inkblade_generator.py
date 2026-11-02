@@ -9,9 +9,9 @@ import tempfile
 import unittest
 from unittest import mock
 
-from PIL import Image
+from PIL import Image, ImageChops
 
-from tools.inkblade_gen import Pipeline, RunConfig
+from tools.inkblade_gen import Pipeline, RunConfig, decals, textures
 from tools.inkblade_gen.config import ELEMENTS
 from tools.inkblade_gen import geometry
 from tools.inkblade_gen.geometry import build_parts
@@ -37,8 +37,17 @@ class StageStackTests(unittest.TestCase):
         names = [stage.name for stage in default_stages()]
         self.assertEqual(
             names,
-            ["geometry", "uv", "flat", "mottle", "linework", "decals", "textures", "export", "render"],
+            ["geometry", "uv", "flat", "mottle", "detail", "decals", "linework", "textures",
+             "export", "render"],
         )
+
+    def test_marking_art_is_painted_before_the_ink_pass(self) -> None:
+        """Decals sit *under* the linework, so contours and hatching are drawn over the prints."""
+        names = [stage.name for stage in default_stages()]
+        self.assertLess(names.index("detail"), names.index("decals"))
+        self.assertLess(names.index("decals"), names.index("linework"))
+        decals = next(stage for stage in default_stages() if stage.name == "decals")
+        self.assertTrue(any("decals.py" in str(source) for source in decals.sources))
 
     def test_flat_texture_stage_writes_pngs_before_models(self) -> None:
         """The flat colour pass is a real PNG-writing stage, not an inline step of the exporter."""
@@ -112,7 +121,8 @@ class PipelineCacheTests(unittest.TestCase):
             self.assertIn("export", first.ran)
             self.assertIn("render", first.ran)
             self.assertEqual(
-                second.cached, ["geometry", "uv", "flat", "mottle", "linework", "decals", "textures"]
+                second.cached,
+                ["geometry", "uv", "flat", "mottle", "detail", "decals", "linework", "textures"],
             )
             self.assertEqual(second.ran, ["export", "render"])
 
@@ -121,7 +131,7 @@ class PipelineCacheTests(unittest.TestCase):
             Pipeline(self._cfg(tmp)).run()
             result = Pipeline(self._cfg(tmp)).run(force=["linework"])
             self.assertIn("linework", result.ran)
-            self.assertEqual(result.cached[:4], ["geometry", "uv", "flat", "mottle"])
+            self.assertEqual(result.cached[:5], ["geometry", "uv", "flat", "mottle", "detail"])
 
     def test_editing_a_stage_invalidates_it_and_everything_downstream(self) -> None:
         """The fingerprint chains, so a changed ink stage re-runs every later painting stage."""
@@ -136,8 +146,8 @@ class PipelineCacheTests(unittest.TestCase):
                 if stage.name == "linework":
                     stages[index] = Stage("linework", stage.title, edited_linework, stage.save, stage.load)
             result = Pipeline(self._cfg(tmp), stages).run()
-            self.assertEqual(result.cached, ["geometry", "uv", "flat", "mottle"])
-            self.assertEqual(result.ran, ["linework", "decals", "textures", "export", "render"])
+            self.assertEqual(result.cached, ["geometry", "uv", "flat", "mottle", "detail", "decals"])
+            self.assertEqual(result.ran, ["linework", "textures", "export", "render"])
 
     def test_restarting_from_a_stage_reuses_upstream_cache(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -158,7 +168,9 @@ class PipelineCacheTests(unittest.TestCase):
 
             Image.new("RGBA", (32, 32), (0, 0, 255, 255)).save(decals / "stripe.png")
             second = Pipeline(cfg).run()
-            self.assertEqual(second.cached[:4], ["geometry", "uv", "flat", "mottle"])
+            self.assertEqual(
+                second.cached[:5], ["geometry", "uv", "flat", "mottle", "detail"]
+            )
             self.assertIn("decals", second.ran)
             self.assertEqual(second.state.decals_applied.get("blade_jakobs"), 2)
 
@@ -202,7 +214,8 @@ class KitOutputTests(unittest.TestCase):
         for name in ("blade_core_depth_multiplier", "heavy_spine_depth_multiplier", "torgue_grip", "stages"):
             self.assertIn(name, notes)
         self.assertEqual(
-            notes["stages"], ["geometry", "uv", "flat", "mottle", "linework", "decals", "textures"]
+            notes["stages"],
+            ["geometry", "uv", "flat", "mottle", "detail", "decals", "linework", "textures"],
         )
 
     def test_part_entries_carry_compiler_fields(self) -> None:
@@ -266,7 +279,7 @@ class KitOutputTests(unittest.TestCase):
 class GeneratorBehaviourTests(unittest.TestCase):
     """Geometry invariants and deterministic texture generation."""
 
-    def test_r6_stage_regression_hashes(self) -> None:
+    def test_stage_regression_hashes(self) -> None:
         # Representative element, default seeds, no decals. Hash pixels rather than PNG
         # encoding; intentional art changes require reviewing and updating these baselines.
         expected = {
@@ -274,9 +287,10 @@ class GeneratorBehaviourTests(unittest.TestCase):
             "uv": "607d808523c4a09cf3022f01cb3102a5d3554cee5741a49b577ee130232345a8",
             "flat": "3e245e2713f388e1b863660beac6078904e64e64cf053d01fd03066fa0e3f45a",
             "mottle": "716ccc2cb9f473d279e3d4d37403a0c9c0a1097fb8354bd357e8ddcc1ecaffe9",
-            "linework": "2e3ac8c2d2d63ac569c95ace26188ccbdfc7fe473da67f88fece291331e0b16d",
-            "decals": "2e3ac8c2d2d63ac569c95ace26188ccbdfc7fe473da67f88fece291331e0b16d",
-            "textures": "cc0155c8db7738dd6506005990ef50cf9cd8b9d461c4558119bd10dfd060b123",
+            "detail": "9f0a060b7a3c77ecde156b609c0b9b704c8919764a78011ac5705c953f3c290e",
+            "decals": "9f0a060b7a3c77ecde156b609c0b9b704c8919764a78011ac5705c953f3c290e",
+            "linework": "3ea9b3a678a3a6280178be3088b8bd92c589503a1d02aef5f006458863ff2227",
+            "textures": "5d8b3b2ac4816391fce850828b4378a481cdaed12f430a0c6b934a0842ed9f50",
         }
         with tempfile.TemporaryDirectory() as tmp:
             work = Path(tmp) / "work"
@@ -776,6 +790,116 @@ class FlaredCleaveGuardTests(unittest.TestCase):
                 self.assertLess(cy - sy / 2, plate_front_y)
                 self.assertGreater(cy + sy / 2, plate_front_y, "cap floats clear of the plate")
                 self.assertTrue(self._inside(plate_pts, cx, cz), "cap is not over the wing")
+
+
+class MarkingArtTests(unittest.TestCase):
+    """The decal pass: physical placement, masking, lettering and determinism."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cfg = RunConfig(density=256.0, ink_px=3, padding=4,
+                        parts=("blade_bandit", "grip_torgue", "accessory_serrated_edge"))
+        cls.cfg = cfg
+        cls.parts = build_parts(cfg.parts)
+        cls.layouts = unwrap_parts(cls.parts, cfg)
+
+    def test_island_frame_recovers_the_physical_projection(self) -> None:
+        part = self.parts["blade_bandit"]
+        layout = self.layouts["blade_bandit"]
+        island = max((i for i in layout.islands if i.owner), key=lambda i: i.rect[2] * i.rect[3])
+        frame = decals.island_frame(part, island)
+        self.assertIsNotNone(frame)
+        assert frame is not None
+        # The fit is the UV stage's own projection, so both axes carry the atlas density.
+        self.assertAlmostEqual(frame.px_per_m, self.cfg.density, delta=1.0)
+        a_min, a_max, b_min, b_max = decals.frame_bounds(island.polygon, frame)
+        # The blade's broad face is much longer up the blade than it is wide.
+        self.assertGreater(b_max - b_min, (a_max - a_min) * 2.0)
+
+    def test_degenerate_faces_are_skipped(self) -> None:
+        """A cap whose normal is the blade axis has no usable "up" direction."""
+        part = build_parts(("grip_torgue",))["grip_torgue"]
+        layout = unwrap_parts({"grip_torgue": part}, self.cfg)["grip_torgue"]
+        frames = [decals.island_frame(part, island) for island in layout.islands]
+        self.assertTrue(any(frame is None for frame in frames))
+
+    def test_stamp_stays_inside_the_island_polygon(self) -> None:
+        part = self.parts["blade_bandit"]
+        layout = self.layouts["blade_bandit"]
+        island = max((i for i in layout.islands if i.owner), key=lambda i: i.rect[2] * i.rect[3])
+        frame = decals.island_frame(part, island)
+        assert frame is not None
+        canvas = textures.new_canvas(layout)
+        canvas = textures.paint_flat_colours(part, layout, canvas, self.cfg.seed)
+        before = canvas.copy()
+        x, y, w, h = island.rect
+        box = (x, y, x + w, y + h)
+        a_min, a_max, b_min, b_max = decals.frame_bounds(island.polygon, frame)
+        centre = ((a_min + a_max) / 2.0, (b_min + b_max) / 2.0)
+        art = Image.new("RGBA", (64, 64), (255, 0, 0, 255))
+        self.assertTrue(decals.stamp(canvas, island, art, frame, centre, (0.2, 0.2),
+                                     orientation="along"))
+        self.assertNotEqual(before.crop(box).tobytes(), canvas.crop(box).tobytes())
+        # Everything the pass writes must be inside the island mask.
+        mask = decals.island_mask(island.polygon, (w, h), (x, y)).point(
+            [0 if value < 128 else 255 for value in range(256)]
+        )
+        changed = ImageChops.difference(before.crop(box), canvas.crop(box)).convert("L")
+        outside = ImageChops.subtract(changed, ImageChops.multiply(changed, mask))
+        self.assertIsNone(outside.getbbox(), "decal art bled outside its island")
+
+    def test_lettering_shrinks_to_fit_its_plate(self) -> None:
+        wide = decals.text_width("HYPERION", 40.0)
+        fitted = decals.fit_height("HYPERION", 40.0, wide / 2.0)
+        self.assertLess(fitted, 40.0)
+        self.assertLessEqual(decals.text_width("HYPERION", fitted), wide / 2.0 + 1e-6)
+        self.assertEqual(decals.fit_height("HYPERION", 40.0, wide * 2), 40.0)
+
+    def test_every_blade_gets_a_plate_on_both_broad_faces(self) -> None:
+        cfg = RunConfig(density=192.0, ink_px=3, padding=4)
+        parts = build_parts([f"blade_{name.lower()}" for name in decals.BLADE_ART])
+        layouts = unwrap_parts(parts, cfg)
+        for part_id, part in parts.items():
+            layout = layouts[part_id]
+            canvas = textures.paint_flat_colours(
+                part, layout, textures.new_canvas(layout), cfg.seed
+            )
+            applied = decals.paint_manufacturer_decals(part, layout, canvas, decals.stage_seed(part_id))
+            with self.subTest(part=part_id):
+                self.assertGreaterEqual(applied, 2)
+                self.assertNotEqual(canvas.tobytes(), textures.new_canvas(layout).tobytes())
+
+    def test_marking_pass_is_deterministic(self) -> None:
+        part = self.parts["blade_bandit"]
+        layout = self.layouts["blade_bandit"]
+
+        def painted() -> bytes:
+            canvas = textures.paint_flat_colours(
+                part, layout, textures.new_canvas(layout), self.cfg.seed
+            )
+            decals.paint_manufacturer_decals(part, layout, canvas, decals.stage_seed(part.part_id))
+            return canvas.tobytes()
+
+        self.assertEqual(painted(), painted())
+
+    def test_surface_detail_is_deterministic_and_changes_the_canvas(self) -> None:
+        part = self.parts["blade_bandit"]
+        layout = self.layouts["blade_bandit"]
+        base = textures.paint_flat_colours(
+            part, layout, textures.new_canvas(layout), self.cfg.seed
+        )
+        first = textures.paint_surface_detail(part, layout, base.copy())
+        second = textures.paint_surface_detail(part, layout, base.copy())
+        self.assertEqual(first.tobytes(), second.tobytes())
+        self.assertNotEqual(first.tobytes(), base.tobytes())
+
+    def test_markings_can_be_switched_off(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = RunConfig(out_dir=Path(tmp) / "kit", work_dir=Path(tmp) / "work",
+                            density=192.0, ink_px=3, padding=4, parts=("blade_bandit",),
+                            decal_art=False, bake_combinations=False)
+            result = Pipeline(cfg).run(only=["decals"])
+            self.assertEqual(result.state.markings_applied.get("blade_bandit"), 0)
 
 
 class StageSourceFingerprintTests(unittest.TestCase):

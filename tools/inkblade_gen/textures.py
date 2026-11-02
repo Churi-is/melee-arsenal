@@ -271,6 +271,130 @@ def _grain_and_overlay(
 
 
 # ---------------------------------------------------------------------------
+# Stage: surface detail (brushed steel, rim occlusion, honed bevels, grit)
+# ---------------------------------------------------------------------------
+#: Roles that read as bare sheet metal, and so get directional brushing.
+_BRUSHED_ROLES = frozenset({"metal", "trim", "edge", "dark"})
+#: Roles that are a ground cutting bevel, and so get the bright honed wire.
+_BEVEL_ROLES = frozenset({"edge", "trim"})
+
+
+def _detail_overlay(
+    patch: Image.Image, mask: Image.Image, painter: Callable, seed: int
+) -> Image.Image:
+    """Composite a transparent detail overlay, clipped to the island mask."""
+    layer = Image.new("RGBA", patch.size, (0, 0, 0, 0))
+    painter(ImageDraw.Draw(layer), patch.size)
+    masked = Image.composite(layer, Image.new("RGBA", patch.size, (0, 0, 0, 0)), mask)
+    return Image.alpha_composite(patch.convert("RGBA"), masked).convert("RGB")
+
+
+def paint_surface_detail(part: Part, layout: PartLayout, canvas: Image.Image) -> Image.Image:
+    """Micro-texture pass: brushed sheet metal, rim occlusion, honed bevels and settled grit.
+
+    Nothing here changes silhouette or palette; it only makes the existing flat islands read as
+    physical surfaces.  Directional brushing follows each island's long axis (which the UV projection
+    aligns with the physical long edge), so blade faces are striated along the blade.
+    """
+    rng = stage_rng(part.part_id, "detail")
+
+    # 1. Brushed / polished sheet metal.
+    for island in layout.islands:
+        if not island.owner or island.role not in _BRUSHED_ROLES:
+            continue
+        if min(island.rect[2], island.rect[3]) < 14:
+            continue
+        seed = rng.randrange(2**32)
+        area = island.rect[2] * island.rect[3]
+
+        def painter(draw: ImageDraw.ImageDraw, size: tuple[int, int], *, seed=seed, area=area) -> None:
+            local = random.Random(seed)
+            w, h = size
+            horizontal = w >= h
+            span, thickness = (w, h) if horizontal else (h, w)
+            strokes = max(4, min(260, area // 260))
+            for _ in range(strokes):
+                t = local.randrange(0, max(1, thickness))
+                start = local.uniform(0.0, span * 0.9)
+                end = start + local.uniform(span * 0.04, span * 0.6)
+                if horizontal:
+                    a, b = (start, t), (end, t)
+                else:
+                    a, b = (t, start), (t, end)
+                if local.random() < 0.52:
+                    colour = (238, 234, 220, local.randrange(16, 46))
+                else:
+                    colour = (26, 30, 34, local.randrange(14, 40))
+                draw.line([a, b], fill=colour, width=1)
+
+        edit_island(
+            canvas, island, layout,
+            lambda patch, mask, poly, p=painter, s=seed: _detail_overlay(patch, mask, p, s),
+        )
+
+    # 2. Rim occlusion: isolate each island from the atlas background by darkening its own border.
+    width, height = layout.atlas_size
+    mask = Image.new("L", (width, height), 0)
+    mask_draw = ImageDraw.Draw(mask)
+    for island in layout.islands:
+        if island.owner and len(island.polygon) >= 3:
+            mask_draw.polygon(island.polygon, fill=255)
+    radius = max(2.0, layout.density / 110.0)
+    blurred = mask.filter(ImageFilter.GaussianBlur(radius))
+    shade = blurred.point([max(0, min(255, 255 - int((255 - value) * 0.30))) for value in range(256)])
+    canvas = ImageChops.multiply(canvas, Image.merge("RGB", (shade, shade, shade)))
+
+    # 3. Honed bevel: a thin bright wire just inside every cutting-bevel island.
+    bevel = Image.new("L", (width, height), 0)
+    bevel_draw = ImageDraw.Draw(bevel)
+    for island in layout.islands:
+        if island.owner and island.role in _BEVEL_ROLES and len(island.polygon) >= 3:
+            bevel_draw.polygon(island.polygon, fill=255)
+    if bevel.getbbox():
+        inset = bevel.filter(ImageFilter.MinFilter(3))
+        wire = ImageChops.subtract(bevel.filter(ImageFilter.MinFilter(5)), inset.filter(ImageFilter.MinFilter(3)))
+        glow = Image.new("RGB", (width, height), (232, 230, 214))
+        canvas = Image.composite(Image.blend(canvas, glow, 0.42), canvas, wire.point(
+            [int(value * 0.55) for value in range(256)]
+        ))
+
+    # 4. Grit settled into the island rims (dirt collects where the surface meets an edge).
+    for island in layout.islands:
+        if not island.owner or len(island.polygon) < 3:
+            continue
+        seed = rng.randrange(2**32)
+        poly = [(x, y) for x, y in island.polygon]
+
+        def grit(draw: ImageDraw.ImageDraw, size: tuple[int, int], *, seed=seed, poly=poly,
+                 rect=island.rect) -> None:
+            local = random.Random(seed)
+            ox, oy = rect[0], rect[1]
+            for a, b in zip(poly, poly[1:] + poly[:1]):
+                length = math.dist(a, b)
+                for _ in range(int(length / 14)):
+                    t = local.uniform(0.02, 0.98)
+                    x = a[0] + (b[0] - a[0]) * t - ox
+                    y = a[1] + (b[1] - a[1]) * t - oy
+                    inward = local.uniform(1.0, 5.0)
+                    cx = sum(p[0] for p in poly) / len(poly) - ox
+                    cy = sum(p[1] for p in poly) / len(poly) - oy
+                    dx, dy = cx - x, cy - y
+                    norm = max(1.0, math.hypot(dx, dy))
+                    x += dx / norm * inward
+                    y += dy / norm * inward
+                    r = local.uniform(0.6, 2.0)
+                    shade = local.choice([(44, 38, 30), (70, 54, 38), (30, 32, 34)])
+                    draw.ellipse([x - r, y - r, x + r, y + r],
+                                 fill=shade + (local.randrange(40, 105),))
+
+        edit_island(
+            canvas, island, layout,
+            lambda patch, mask, poly, p=grit, s=seed: _detail_overlay(patch, mask, p, s),
+        )
+    return canvas
+
+
+# ---------------------------------------------------------------------------
 # Stage: bold linework (R5 / Bold ink pass)
 # ---------------------------------------------------------------------------
 def _polygon_area(poly: Sequence[Vec2]) -> float:

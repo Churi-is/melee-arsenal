@@ -48,6 +48,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ink-px", type=int, default=6, help="base ink stroke width in texture pixels")
     parser.add_argument("--padding", type=int, default=9, help="UV island padding in pixels")
     parser.add_argument("--seed", default="inkblade", help="master determinism seed")
+    parser.add_argument(
+        "--no-decals-art",
+        dest="decals_art",
+        action="store_false",
+        help="skip the built-in manufacturer markings (wordmarks, emblems, blood, dirt)",
+    )
     parser.add_argument("--decals", type=Path, default=None, help="optional decal art root (<root>/<part_id>/*.png)")
     parser.add_argument("--decal-fit", type=float, default=0.62, help="decal size as a fraction of its island")
     parser.add_argument("--parts", default="", help="comma-separated part ids to generate (default: all)")
@@ -102,6 +108,7 @@ def config_from_args(args: argparse.Namespace) -> RunConfig:
         seed=str(args.seed),
         linework_seed=str(args.linework_seed),
         quantize_colors=int(args.quantise) if args.quantise else None,
+        decal_art=bool(args.decals_art),
         decal_dir=Path(args.decals) if args.decals else None,
         decal_fit=float(args.decal_fit),
         bake_combinations=not args.no_combinations,
