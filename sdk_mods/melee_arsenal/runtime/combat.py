@@ -203,12 +203,16 @@ _POSE_STARTED_AT: float = 0.0
 POSE_GUARD = "guard"
 POSE_THROWN = "thrown"
 
-# Offsets in UE3 rotator units / UU, added to the captured rest transform.
+# Offsets in UE3 rotator units (65536/360 per degree) / UU, added to the captured rest transform.
+#
+# These are deliberately small: the first-person arms mesh pivots well behind the hands, so a
+# large `RotOrigin` delta swings the hands straight out of frame (that is exactly what a 25 degree
+# guard rotation did in playtesting). The guard therefore tilts the blade only ~8-10 degrees with
+# no translation, and the thrown pose is pure downward translation (no rotation at all), which can
+# always be restored exactly.
 _POSE_OFFSETS: dict[str, dict[str, float]] = {
-    # Raise the blade across the chest: pitch up, yaw inward, roll the flat toward the enemy.
-    POSE_GUARD: {"pitch": -4600.0, "yaw": 2600.0, "roll": 3400.0, "x": 0.0, "y": 5.0, "z": 4.0},
-    # Drop the hands (and the attached weapon) far below the camera so the hand is visibly empty.
-    POSE_THROWN: {"pitch": -9000.0, "yaw": 7000.0, "roll": 0.0, "x": 0.0, "y": 10.0, "z": -58.0},
+    POSE_GUARD: {"pitch": -1700.0, "yaw": 900.0, "roll": 1300.0, "x": 0.0, "y": 0.0, "z": 0.0},
+    POSE_THROWN: {"pitch": 0.0, "yaw": 0.0, "roll": 0.0, "x": 0.0, "y": 4.0, "z": -75.0},
 }
 
 _SHOT_SEQ: int = 0
@@ -824,7 +828,11 @@ def _capture_arms_rest_transform(arms: Any, sm: Any) -> dict[str, Any] | None:
         return None
     entry = _ARMS_REST_BASELINE.get(id(sm))
     if entry is not None:
-        return entry
+        # A recycled `id()` (map change / pawn respawn) must never be mistaken for the same mesh,
+        # or the pose would be restored onto a dead object and the live hands would stay offset.
+        if _deref_weak(entry.get("sm_ref")) is sm:
+            return entry
+        _ARMS_REST_BASELINE.pop(id(sm), None)
     try:
         ro0 = sm.RotOrigin
         origin0 = getattr(sm, "Origin", None)
@@ -878,6 +886,7 @@ def apply_first_person_pose(pc: Any, kind: str) -> bool:
     _POSE_KIND = kind
     _POSE_STARTED_AT = time.monotonic()
     update_first_person_pose(pc)
+    log_info(f"First-person pose applied: {kind}")
     return True
 
 
@@ -908,9 +917,9 @@ def update_first_person_pose(pc: Any, now: float | None = None) -> None:
     try:
         bp, by, br = entry["rot"]
         ro = copy.copy(sm.RotOrigin)
-        ro.Pitch = int(bp + offsets["pitch"] + 170.0 * bob)
+        ro.Pitch = int(bp + offsets["pitch"] + 90.0 * bob)
         ro.Yaw = int(by + offsets["yaw"])
-        ro.Roll = int(br + offsets["roll"] + 120.0 * bob)
+        ro.Roll = int(br + offsets["roll"] + 60.0 * bob)
         sm.RotOrigin = ro
         loc = entry.get("loc")
         if loc is not None and hasattr(sm, "Origin"):
@@ -933,8 +942,10 @@ def clear_first_person_pose(pc: Any = None, kind: str = "") -> bool:
         return True
     if kind and _POSE_KIND != kind:
         return False
+    cleared = _POSE_KIND
     _POSE_KIND = ""
     _write_rest_transforms()
+    log_info(f"First-person pose cleared: {cleared}")
     return True
 
 

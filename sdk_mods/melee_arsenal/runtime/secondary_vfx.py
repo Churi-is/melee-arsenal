@@ -80,6 +80,7 @@ class ThrownBladeVisual:
     # hand is visibly empty even if the procedural arms offset is unavailable on a build.
     held_mesh: Any = None
     spin_deg: float = 0.0
+    engine_xyz: tuple[float, float, float] | None = None
     last_update: float = field(default_factory=time.monotonic)
     alive: bool = True
 
@@ -90,16 +91,48 @@ class ThrownBladeVisual:
         dt = max(0.0, min(0.25, now - self.last_update))
         self.last_update = now
         self.spin_deg = (self.spin_deg + _THROWN_SPIN_DEG_PER_SEC * dt) % 360.0
+
+        location = _vec(*xyz)
+        # `AttachComponent` can clear the absolute flags again on some builds; re-assert them so
+        # the actor really moves in world space instead of staying pinned to the pawn.
         try:
-            self.comp.SetTranslation(_vec(*xyz))
+            self.comp.SetAbsolute(True, True, True)
         except Exception:
             pass
+        moved = False
+        try:
+            self.comp.SetTranslation(location)
+            moved = True
+        except Exception:
+            pass
+        if not moved:
+            # Direct property write, same transform the setter applies.
+            try:
+                self.comp.Translation = location
+            except Exception:
+                pass
+
         rot = _rot(self.spin_deg)
         if rot is not None:
             try:
                 self.comp.SetRotation(rot)
             except Exception:
-                pass
+                try:
+                    self.comp.Rotation = rot
+                except Exception:
+                    pass
+
+        # Read the transform the engine actually holds, for `melee_arsenal.log` diagnostics.
+        self.engine_xyz = None
+        try:
+            translation = self.comp.Translation
+            self.engine_xyz = (
+                float(translation.X),
+                float(translation.Y),
+                float(translation.Z),
+            )
+        except Exception:
+            pass
 
     def destroy(self) -> None:
         if not self.alive:
@@ -264,6 +297,17 @@ def destroy_thrown_blade() -> None:
 
 def has_thrown_blade_visual() -> bool:
     return _ACTIVE_VISUAL is not None
+
+
+def thrown_blade_debug_info() -> dict[str, Any]:
+    """Engine-side state of the live flying blade, for logging/diagnostics."""
+    visual = _ACTIVE_VISUAL
+    if visual is None:
+        return {}
+    return {
+        "spin_deg": round(visual.spin_deg, 1),
+        "engine_xyz": visual.engine_xyz,
+    }
 
 
 def lerp_xyz(

@@ -2121,9 +2121,12 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 # The brace is VISIBLE: the first-person hands (and the blade attached to them)
                 # rotate into a guard posture instead of staying in the idle pose.
                 self.assertEqual(combat.active_first_person_pose(), combat.POSE_GUARD)
-                self.assertLess(world.arms_skel_mesh.RotOrigin.Pitch, -4000)
+                # A *small* tilt: a large RotOrigin delta swings the hands out of frame.
+                self.assertLess(world.arms_skel_mesh.RotOrigin.Pitch, -1000)
+                self.assertGreater(world.arms_skel_mesh.RotOrigin.Pitch, -3000)
                 self.assertNotEqual(world.arms_skel_mesh.RotOrigin.Yaw, -16384)
-                self.assertGreater(world.arms_skel_mesh.Origin.Z, 3.0)
+                self.assertAlmostEqual(world.arms_skel_mesh.Origin.Z, 3.0, msg="guard must not translate the hands")
+                self.assertAlmostEqual(world.arms_skel_mesh.Origin.Y, -2.0)
                 # Hold the guard past the parry window, then eat one hit: mitigated, then consumed.
                 secondary_attacks._GUARD.started_at -= 0.60
                 self.assertIs(
@@ -2481,6 +2484,44 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                     any("RMB" in line for line in build_item_card_payload(phase_card).fun_stats_lines)
                 )
 
+                # 4K. The frame driver must run off a tick that actually fires in BL2.
+                #     `Engine.GameViewportClient:Tick` is not a UFunction on every build, so the
+                #     same body is mirrored on `WillowPlayerController:PlayerTick` (once per frame).
+                runtime_mod = melee_arsenal.runtime
+                self.assertIn(runtime_mod.hook_player_tick, runtime_mod.ALL_HOOKS)
+                self.assertIn(runtime_mod.hook_viewport_tick, runtime_mod.ALL_HOOKS)
+                # RMB release must not depend on the tick ever running: registered at load.
+                self.assertIn(secondary_attacks.on_melee_weapon_stop_zoom_pre, runtime_mod.ALL_HOOKS)
+                self.assertIn(
+                    secondary_attacks.on_melee_weapon_client_stop_zoom_pre, runtime_mod.ALL_HOOKS
+                )
+                runtime_mod._last_restored_pawn_id = id(world.pawn)
+                runtime_mod._last_frame_tick_at = 0.0
+                ticks_before = runtime_mod._tick_counter
+                runtime_mod.hook_player_tick(None, None, None, None)
+                self.assertEqual(runtime_mod._tick_counter, ticks_before + 1)
+                # Both tick hooks firing in the same frame must only run the body once.
+                runtime_mod.hook_viewport_tick(None, None, None, None)
+                self.assertEqual(runtime_mod._tick_counter, ticks_before + 1)
+
+                # 4L. Self-healing: a finished throw/guard can never leave the hands moved or a
+                #     copy of the blade hanging in the air — even if a state ended abnormally.
+                secondary_attacks._GUARD = None
+                secondary_attacks._THROW = None
+                self.assertTrue(combat.apply_first_person_pose(world.pc, combat.POSE_GUARD))
+                self.assertLess(world.arms_skel_mesh.RotOrigin.Pitch, -1000)
+                self.assertTrue(
+                    secondary_vfx.spawn_thrown_blade(world.pawn, cleaver, (10.0, 0.0, 64.0))
+                )
+                self.assertTrue(secondary_vfx.has_thrown_blade_visual())
+                runtime_mod._last_frame_tick_at = 0.0
+                runtime_mod.hook_player_tick(None, None, None, None)
+                self.assertFalse(secondary_vfx.has_thrown_blade_visual(), "orphan blade must be removed")
+                self.assertEqual(combat.active_first_person_pose(), "")
+                self.assertEqual(world.arms_skel_mesh.RotOrigin.Pitch, 0)
+                self.assertEqual(world.arms_skel_mesh.RotOrigin.Yaw, -16384)
+                self.assertAlmostEqual(world.arms_skel_mesh.Origin.Z, 3.0)
+
                 # 5. Item Card GFx Hooks — MUST NOT call AdjustHeight()!
                 top_rows_written: dict[int, tuple] = {}
                 gfx_card = types.SimpleNamespace(
@@ -2565,7 +2606,7 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 from melee_arsenal.core.schemas import MeleeWeaponInstance, MeleeWeaponParts
                 from melee_arsenal.runtime import commands, custom_assets, definitions, resolver, state
 
-                self.assertEqual(melee_arsenal.__version__, "0.4.1")
+                self.assertEqual(melee_arsenal.__version__, "0.4.2")
                 self.assertTrue(definitions.ensure_definitions_built())
                 self.assertTrue(state.STATE.custom_assets_active)
                 self.assertEqual(state.STATE.custom_kit_revision, "bold_ink_visual_revision_of_r4")

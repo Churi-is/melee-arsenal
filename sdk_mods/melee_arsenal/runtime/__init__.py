@@ -55,6 +55,8 @@ from .secondary import (
     describe_secondary_state,
     disable_optional_hooks,
     enable_optional_hooks,
+    on_melee_weapon_client_stop_zoom_pre,
+    on_melee_weapon_stop_zoom_pre,
     reset_secondary_state,
     tick_secondary_attacks,
 )
@@ -83,6 +85,7 @@ from .ui_item_card import (
 _tick_counter: int = 0
 _map_restore_ready_at: float = 0.0
 _last_restored_pawn_id: int = 0
+_last_frame_tick_at: float = 0.0
 
 
 def _notify_hud(title: str, message: str) -> None:
@@ -213,9 +216,19 @@ btn_spawn_all = ButtonOption(
 # Engine Hooks
 # ---------------------------------------------------------------------------
 
-@hook("Engine.GameViewportClient:Tick", Type.POST)
-def hook_viewport_tick(obj: Any, args: Any, ret: Any, func: Any) -> None:
-    global _tick_counter, _map_restore_ready_at, _last_restored_pawn_id
+def _run_frame_tick() -> None:
+    """One frame of runtime work, driven by whichever engine tick actually fires.
+
+    `Engine.GameViewportClient:Tick` is not a UFunction on every BL2 build (it is a native
+    method), so hooking it alone can silently never run — which froze thrown blades in mid-air
+    and left the guard pose stuck. `WillowPlayerController:PlayerTick` is the engine function
+    mods reliably hook, so the same body is driven from both, de-duplicated per frame.
+    """
+    global _tick_counter, _map_restore_ready_at, _last_restored_pawn_id, _last_frame_tick_at
+    now = time.monotonic()
+    if now - _last_frame_tick_at < 0.002:
+        return
+    _last_frame_tick_at = now
     _tick_counter += 1
 
     # 1. Drain staggered multi-weapon grants & restore reward mission template
@@ -224,9 +237,9 @@ def hook_viewport_tick(obj: Any, args: Any, ret: Any, func: Any) -> None:
     # 2. Enforce exact meter reach on active melee light projectiles
     tick_melee_projectiles()
 
-    # 2b. Advance thrown blades (Bandit/Torgue arcs) and keep the held guard honest. The
-    #     optional RMB-release hooks are enabled lazily, behind a try/except, so a build without
-    #     `WillowWeapon:StopZoom` can never prevent the mod from loading.
+    # 2b. Advance thrown blades (Bandit/Torgue arcs), keep the held guard honest, and self-heal
+    #     any first-person pose whose state has ended. The RMB-release hooks are registered with
+    #     `ALL_HOOKS` at load; `enable_optional_hooks()` only reports them.
     try:
         enable_optional_hooks()
     except Exception:
@@ -259,7 +272,6 @@ def hook_viewport_tick(obj: Any, args: Any, ret: Any, func: Any) -> None:
 
         pid = id(pawn)
         if pid != _last_restored_pawn_id:
-            now = time.monotonic()
             if _map_restore_ready_at == 0.0:
                 restore_all_arms_rest_transforms()
                 sync_loot_pools()
@@ -274,6 +286,16 @@ def hook_viewport_tick(obj: Any, args: Any, ret: Any, func: Any) -> None:
                 # Always re-sync on map load so SparkLevelPatchEntry / BLCMM / UCP hotfixes never wipe our pools
                 sync_loot_pools()
                 restore_player_melee_inventory(pc=pc)
+
+
+@hook("Engine.GameViewportClient:Tick", Type.POST)
+def hook_viewport_tick(obj: Any, args: Any, ret: Any, func: Any) -> None:
+    _run_frame_tick()
+
+
+@hook("WillowGame.WillowPlayerController:PlayerTick", Type.POST)
+def hook_player_tick(obj: Any, args: Any, ret: Any, func: Any) -> None:
+    _run_frame_tick()
 
 
 @hook("WillowGame.WillowWeapon:InitializeFromDefinitionData", Type.PRE)
@@ -583,6 +605,7 @@ def cmd_melee_check_pools(_args: Any) -> None:
 
 ALL_HOOKS = [
     hook_viewport_tick,
+    hook_player_tick,
     hook_weapon_init_from_def,
     hook_weapon_init_internal_pre,
     hook_weapon_init_internal_post,
@@ -603,6 +626,8 @@ ALL_HOOKS = [
     hook_display_recent_damage,
     hook_melee_start_zoom,
     hook_melee_client_start_zoom,
+    on_melee_weapon_stop_zoom_pre,
+    on_melee_weapon_client_stop_zoom_pre,
     hook_card_set_item_card_pre,
     hook_card_set_item_card_post,
     hook_card_set_item_card_ex_pre,

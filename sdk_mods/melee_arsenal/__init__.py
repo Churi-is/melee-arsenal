@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from . import core
 
-__version__ = "0.4.1"
+__version__ = "0.4.2"
 __author__ = "MeleeArsenal"
 
 try:

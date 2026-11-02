@@ -146,6 +146,7 @@ class ThrowState:
     return_started_at: float = 0.0
     hit_actor_name: str = ""
     damage_dealt: int = 0
+    visual_updates: int = 0
 
 
 @dataclass
@@ -328,14 +329,19 @@ def _finish_throw() -> None:
     if _THROW is None:
         return
     _play_throw_sfx(_deref_weak(_THROW.shooter_ref), "whoosh")
+    debug = secondary_vfx.thrown_blade_debug_info()
     secondary_vfx.destroy_thrown_blade()
     combat = _combat()
     try:
         combat.clear_first_person_pose(_deref_weak(_THROW.pc_ref), combat.POSE_THROWN)
     except Exception:
         pass
+    updates = _THROW.visual_updates
     _THROW = None
-    log_info("Thrown blade caught — Primary Fire unlocked.")
+    log_info(
+        f"Thrown blade caught — Primary Fire unlocked ({updates} flight frames, "
+        f"engine position {debug.get('engine_xyz', 'unreadable')})."
+    )
 
 
 def _select_throw_damage_type(wpn: Any, card: ComputedCardStats) -> Any:
@@ -495,6 +501,7 @@ def tick_throw() -> None:
     if wpn is None or shooter is None or _is_dead(shooter):
         secondary_vfx.destroy_thrown_blade()
         _THROW = None
+        _clear_pose("thrown")
         return
 
     if st.phase == "return":
@@ -523,6 +530,7 @@ def tick_throw() -> None:
             combat.apply_first_person_pose(_deref_weak(st.pc_ref), combat.POSE_THROWN)
         secondary_vfx.hide_held_blade()
     secondary_vfx.update_thrown_blade(point)
+    st.visual_updates += 1
     hit_actor, hit_xyz, _bone = combat._run_weapon_trace(wpn, st.vec_template, st.last_point, point)
 
     if hit_actor is not None:
@@ -851,8 +859,16 @@ def tick_guard() -> None:
     if pawn is None:
         end_guard(start_cooldown=False)
         return
-    resolved = resolve_melee_weapon(getattr(pawn, "Weapon", None), sync_weapon_props=False)
+    held = getattr(pawn, "Weapon", None)
+    resolved = resolve_melee_weapon(held, sync_weapon_props=False)
     if resolved is None or resolved[1].secondary_attack != SecondaryAttack.GUARD:
+        end_guard(start_cooldown=False)
+        return
+    # A held-weapon change must drop the brace even when the new blade is also a guard weapon.
+    guard_wpn = unwrap_weapon_object(_deref_weak(st.wpn_ref)) or _deref_weak(st.wpn_ref)
+    held_wpn = unwrap_weapon_object(held) or held
+    if guard_wpn is not None and held_wpn is not None and guard_wpn is not held_wpn:
+        log_info("Guard dropped (held weapon changed).")
         end_guard(start_cooldown=False)
         return
     try:
@@ -868,6 +884,34 @@ def tick_guard() -> None:
 # Frame driver & lifecycle
 # ---------------------------------------------------------------------------
 
+def _clear_pose(pose_kind: str) -> None:
+    """Best-effort pose restore that never depends on the throw/guard objects still existing."""
+    try:
+        combat = _combat()
+        combat.clear_first_person_pose(None, getattr(combat, f"POSE_{pose_kind.upper()}"))
+    except Exception:
+        pass
+
+
+def _reconcile_secondary_visuals() -> None:
+    """Self-heal: no live throw/guard may leave a pose or a flying actor behind.
+
+    A first-person pose is a raw transform on `Arms.SkeletalMesh`, so it must never be able to
+    outlive its state (a stuck hand needs a game restart). This runs every frame and clears any
+    pose or actor whose owner state has already ended.
+    """
+    combat = _combat()
+    if _THROW is None and secondary_vfx.has_thrown_blade_visual():
+        secondary_vfx.destroy_thrown_blade()
+    pose = combat.active_first_person_pose()
+    if not pose:
+        return
+    if pose == combat.POSE_THROWN and _THROW is None:
+        combat.clear_first_person_pose(None, combat.POSE_THROWN)
+    elif pose == combat.POSE_GUARD and _GUARD is None:
+        combat.clear_first_person_pose(None, combat.POSE_GUARD)
+
+
 def tick_secondary_attacks() -> None:
     """Per-frame driver: advance airborne throws and keep guard state honest."""
     try:
@@ -878,6 +922,10 @@ def tick_secondary_attacks() -> None:
         tick_guard()
     except Exception as exc:
         log_error(f"tick_guard failed: {exc!r}")
+    try:
+        _reconcile_secondary_visuals()
+    except Exception as exc:
+        log_error(f"secondary visual reconcile failed: {exc!r}")
 
 
 def describe_secondary_state() -> dict[str, Any]:
@@ -978,22 +1026,20 @@ OPTIONAL_HOOKS = (on_melee_weapon_stop_zoom_pre, on_melee_weapon_client_stop_zoo
 
 
 def enable_optional_hooks() -> None:
-    """Best-effort enablement of the StopZoom release hooks (idempotent)."""
+    """RMB-release hooks are registered with `ALL_HOOKS` at load; this only reports them.
+
+    Previously they were enabled lazily from the frame tick, which meant a build whose tick never
+    fired could hold a guard forever: the release was never wired up. Registering them at load
+    (unrealsdk accepts a hook name whether or not the UFunction exists) removes that dependency.
+    """
     global _OPTIONAL_HOOKS_ENABLED
     if _OPTIONAL_HOOKS_ENABLED:
         return
-    enabled = 0
-    for hook_fn in OPTIONAL_HOOKS:
-        enable = getattr(hook_fn, "enable", None)
-        if enable is None:
-            continue
-        try:
-            enable()
-            enabled += 1
-        except Exception as exc:
-            log_info(f"Optional secondary-attack hook unavailable ({getattr(hook_fn, '__name__', '?')}): {exc!r}")
     _OPTIONAL_HOOKS_ENABLED = True
-    log_info(f"Secondary attack release hooks active: {enabled}/{len(OPTIONAL_HOOKS)}")
+    log_info(
+        "RMB-release hooks registered at load: WillowWeapon:StopZoom / ClientStopZoom "
+        "(guard release no longer depends on the frame tick)."
+    )
 
 
 def disable_optional_hooks() -> None:
