@@ -28,16 +28,25 @@ from melee_arsenal.core import (  # noqa: E402
     PlayerMeleeContext,
     Rarity,
     Rotator,
+    SecondaryAttack,
     TargetCandidate,
     TargetingMode,
     Vec3,
+    GUARD_PARRY_WINDOW_SEC,
+    THROW_DAMAGE_MULTIPLIER,
+    apply_guard_damage_reduction,
     apply_incoming_damage_reduction,
     build_asset_sublibrary_manifest,
+    build_throw_flight_plan,
     build_item_card_payload,
     compute_attack_damage,
     compute_card_stats,
     compute_damage_reduction_pct,
+    compute_guard_cooldown_sec,
+    compute_parry_reflect_damage,
     compute_swing_speed_damage_scale,
+    compute_throw_weight_kg,
+    guard_effective_reduction_pct,
     damage_reduction_level_scale,
     deserialize_weapon,
     plan_swing_strikes,
@@ -402,6 +411,145 @@ class TestMeleeArsenalCore(unittest.TestCase):
         )
         self.assertGreaterEqual(fastest.swing_speed, 2.0)
         self.assertLess(fastest.card_damage, 40_000)
+
+    def test_secondary_attack_roster_and_throw_arcs(self) -> None:
+        # Manufacturer identities: Bandit/Torgue throw, Hyperion/Jakobs guard, Maliwan nothing.
+        self.assertEqual(MANUFACTURERS[Manufacturer.BANDIT].secondary_attack, SecondaryAttack.THROW)
+        self.assertEqual(MANUFACTURERS[Manufacturer.TORGUE].secondary_attack, SecondaryAttack.THROW)
+        self.assertEqual(MANUFACTURERS[Manufacturer.HYPERION].secondary_attack, SecondaryAttack.GUARD)
+        self.assertEqual(MANUFACTURERS[Manufacturer.JAKOBS].secondary_attack, SecondaryAttack.GUARD)
+        self.assertEqual(MANUFACTURERS[Manufacturer.MALIWAN].secondary_attack, SecondaryAttack.NONE)
+
+        # Thrown blades strike for exactly 200% of the normal LMB hit.
+        self.assertEqual(THROW_DAMAGE_MULTIPLIER, 2.0)
+        parts = MeleeWeaponParts("Blade_Bandit_Machete", "Grip_Bandit", "Acc_None", "Elem_None")
+        weapon = MeleeWeaponInstance(11, 50, Rarity.RARE, parts)
+        card = compute_card_stats(weapon)
+        self.assertEqual(card.secondary_attack, SecondaryAttack.THROW)
+        self.assertAlmostEqual(card.throw_weight_kg, compute_throw_weight_kg(weapon))
+        normal = compute_attack_damage(card)
+        thrown = compute_attack_damage(card, damage_scale=THROW_DAMAGE_MULTIPLIER)
+        self.assertAlmostEqual(thrown.final_hit_damage, normal.final_hit_damage * 2, delta=2)
+
+        # Weight is defined by the manufacturers of the actual parts: a Torgue blade is heavier
+        # than a Bandit one, and an off-manufacturer grip changes the mass again.
+        torgue = MeleeWeaponInstance(
+            12, 50, Rarity.RARE,
+            MeleeWeaponParts("Blade_Torgue_BlastCleaver", "Grip_Torgue", "Acc_HeavySpine", "Elem_Explosive"),
+        )
+        bandit_light = MeleeWeaponInstance(
+            13, 50, Rarity.RARE,
+            MeleeWeaponParts("Blade_Bandit_Machete", "Grip_Maliwan", "Acc_Counterweight", "Elem_None"),
+        )
+        self.assertLess(compute_throw_weight_kg(bandit_light), compute_throw_weight_kg(weapon))
+        self.assertLess(compute_throw_weight_kg(weapon), compute_throw_weight_kg(torgue))
+
+        # Heavier -> slower launch, higher loft, shorter reach & higher apex.
+        light_plan = build_throw_flight_plan(compute_throw_weight_kg(bandit_light))
+        heavy_plan = build_throw_flight_plan(compute_throw_weight_kg(torgue))
+        self.assertGreater(light_plan.launch_speed_uu_s, heavy_plan.launch_speed_uu_s)
+        self.assertLess(light_plan.launch_pitch_deg, heavy_plan.launch_pitch_deg)
+        self.assertGreater(light_plan.range_uu, heavy_plan.range_uu)
+        self.assertLess(light_plan.apex_uu, heavy_plan.apex_uu)
+        light_card = compute_card_stats(bandit_light)
+        heavy_card = compute_card_stats(torgue)
+        self.assertGreater(light_card.throw_range_m, heavy_card.throw_range_m)
+        self.assertLess(light_card.throw_arc_height_m, heavy_card.throw_arc_height_m)
+        # The arc actually moves forward and comes back down
+        fwd0, up0 = heavy_plan.offset_at(0.0)
+        fwd_mid, up_mid = heavy_plan.offset_at(heavy_plan.flight_time_sec * 0.5)
+        fwd_end, up_end = heavy_plan.offset_at(heavy_plan.flight_time_sec)
+        self.assertAlmostEqual(fwd0, 0.0)
+        self.assertAlmostEqual(fwd_mid, heavy_plan.horizontal_speed_uu_s * heavy_plan.flight_time_sec * 0.5)
+        self.assertGreater(up_mid, up0)
+        self.assertGreater(fwd_end, fwd_mid)
+        self.assertLessEqual(up_end, up_mid)
+        self.assertAlmostEqual(fwd_end, heavy_plan.range_uu, delta=heavy_plan.range_uu * 0.02)
+
+        # Guard blades expose no throw data & Maliwan exposes no secondary attack whatsoever
+        guard_card = compute_card_stats(
+            MeleeWeaponInstance(
+                14, 50, Rarity.RARE,
+                MeleeWeaponParts("Blade_Hyperion_Katana", "Grip_Hyperion", "Acc_None", "Elem_None"),
+            )
+        )
+        self.assertEqual(guard_card.throw_range_m, 0.0)
+        maliwan_card = compute_card_stats(
+            MeleeWeaponInstance(
+                15, 50, Rarity.RARE,
+                MeleeWeaponParts("Blade_Maliwan_Phaseblade", "Grip_Maliwan", "Acc_None", "Elem_Fire"),
+            )
+        )
+        self.assertEqual(maliwan_card.secondary_attack, SecondaryAttack.NONE)
+        self.assertEqual(maliwan_card.guard_cooldown_sec, 0.0)
+        self.assertEqual(maliwan_card.guard_reduction_pct, 0)
+        self.assertFalse(
+            any("RMB" in line for line in build_item_card_payload(maliwan_card).fun_stats_lines)
+        )
+
+        # Cards advertise the secondary attack right under the Damage Reduction line
+        throw_lines = build_item_card_payload(card).fun_stats_lines
+        self.assertTrue(any("RMB Throw: 200% Damage" in line for line in throw_lines))
+        guard_lines = build_item_card_payload(guard_card).fun_stats_lines
+        self.assertTrue(any("RMB Hold: Guard" in line for line in guard_lines))
+
+    def test_guard_reduction_parry_and_cooldown(self) -> None:
+        self.assertEqual(GUARD_PARRY_WINDOW_SEC, 0.33)
+
+        # Braced mitigation is the card DR applied twice: (damage * card DR) * card DR.
+        self.assertAlmostEqual(apply_guard_damage_reduction(1000.0, 50), 250.0)
+        self.assertAlmostEqual(apply_guard_damage_reduction(1000.0, 60), 160.0)
+        self.assertAlmostEqual(apply_guard_damage_reduction(1000.0, 0), 1000.0)
+        self.assertAlmostEqual(apply_guard_damage_reduction(0.0, 60), 0.0)
+        self.assertAlmostEqual(apply_guard_damage_reduction(-50.0, 60), -50.0)
+        self.assertEqual(guard_effective_reduction_pct(50), 75)
+        self.assertEqual(guard_effective_reduction_pct(60), 84)
+        self.assertEqual(guard_effective_reduction_pct(0), 0)
+
+        # A perfect parry reflects the melee hit as a forced critical: 2.0x base crit x the
+        # blade's own card crit bonus (Jakobs +100% -> 4x).
+        self.assertEqual(compute_parry_reflect_damage(1000.0, 0.0), 2000)
+        self.assertEqual(compute_parry_reflect_damage(1000.0, 100.0), 4000)
+        self.assertEqual(compute_parry_reflect_damage(0.0, 100.0), 0)
+
+        # Cooldown depends on parts and always stays inside sane bounds.
+        hyperion = MeleeWeaponInstance(
+            21, 50, Rarity.RARE,
+            MeleeWeaponParts("Blade_Hyperion_Katana", "Grip_Hyperion", "Acc_None", "Elem_None"),
+        )
+        jakobs = MeleeWeaponInstance(
+            22, 50, Rarity.RARE,
+            MeleeWeaponParts("Blade_Jakobs_Sabre", "Grip_Jakobs", "Acc_None", "Elem_None"),
+        )
+        jakobs_heavy = MeleeWeaponInstance(
+            23, 50, Rarity.RARE,
+            MeleeWeaponParts("Blade_Jakobs_Sabre", "Grip_Torgue", "Acc_HeavySpine", "Elem_None"),
+        )
+        jakobs_nimble = MeleeWeaponInstance(
+            24, 50, Rarity.RARE,
+            MeleeWeaponParts("Blade_Jakobs_Sabre", "Grip_Jakobs", "Acc_Counterweight", "Elem_None"),
+        )
+        cd_hyp = compute_guard_cooldown_sec(hyperion)
+        cd_jak = compute_guard_cooldown_sec(jakobs)
+        cd_heavy = compute_guard_cooldown_sec(jakobs_heavy)
+        cd_nimble = compute_guard_cooldown_sec(jakobs_nimble)
+        self.assertLess(cd_hyp, cd_jak)          # Hyperion tech recovers faster than Jakobs steel
+        self.assertLess(cd_jak, cd_heavy)        # heavy grip/accessory slows recovery
+        self.assertLess(cd_nimble, cd_jak)       # balanced pommel speeds it up
+        for maker in (Manufacturer.HYPERION, Manufacturer.JAKOBS):
+            for i in range(40):
+                wpn = roll_melee_weapon(
+                    game_stage=(1, 30, 50, 72, 90)[i % 5],
+                    rarity=(Rarity.COMMON, Rarity.RARE, Rarity.LEGENDARY)[i % 3],
+                    manufacturer=maker,
+                    seed=f"guard-cd:{i}",
+                    unique_id=3000 + i,
+                )
+                self.assertGreaterEqual(compute_guard_cooldown_sec(wpn), 1.0)
+                self.assertLessEqual(compute_guard_cooldown_sec(wpn), 4.0)
+                card = compute_card_stats(wpn)
+                self.assertEqual(card.guard_parry_window_sec, 0.33)
+                self.assertGreater(card.guard_reduction_pct, card.damage_reduction_pct)
 
     def test_incoming_damage_reduction_math(self) -> None:
         self.assertAlmostEqual(apply_incoming_damage_reduction(1000.0, 50), 500.0)

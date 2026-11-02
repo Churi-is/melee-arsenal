@@ -1,8 +1,8 @@
 # Melee Arsenal — Borderlands 2 PythonSDK Mod & UPK Pipeline
 
-**Melee Arsenal (`v0.3.5`)** adds a standalone **Melee Weapon** class to *Borderlands 2* (`pyunrealsdk` 1.10 / `unrealsdk` 3.2 / `mods_base` 1.12+) powered by a custom 22-part modular 3D **InkBlade (`r6`)** Gestalt mesh and six 2048×2048 elemental texture atlases compiled via a pure-Python Unreal Engine 3 `.upk` pipeline.
+**Melee Arsenal (`v0.4.0`)** adds a standalone **Melee Weapon** class to *Borderlands 2* (`pyunrealsdk` 1.10 / `unrealsdk` 3.2 / `mods_base` 1.12+) powered by a custom 22-part modular 3D **InkBlade (`r6`)** Gestalt mesh and six 2048×2048 elemental texture atlases compiled via a pure-Python Unreal Engine 3 `.upk` pipeline.
 
-Primary Fire swings your equipped Melee Weapon (precision single-target strikes or frontal cleave arcs) scaling with gun-level base damage, weakspot crits, elemental DoT/splash, **player Melee Damage bonuses**, and **Roid shield buffs**, while `[V]` remains your vanilla character melee. **Right Mouse Button is deliberately inert** on Melee Weapons in `v0.3.5` (no ADS zoom); the hook is kept as a stub for possible future secondary attacks.
+Primary Fire swings your equipped Melee Weapon (precision single-target strikes or frontal cleave arcs) scaling with gun-level base damage, weakspot crits, elemental DoT/splash, **player Melee Damage bonuses**, and **Roid shield buffs**, while `[V]` remains your vanilla character melee. **Right Mouse Button / Left Trigger now fires each manufacturer's secondary attack** (ADS zoom stays suppressed): **Bandit and Torgue throw their blade** for `200%` damage along a weight-driven arc, **Hyperion and Jakobs hold to guard** (double card Damage Reduction, `0.33 s` parry reflect), and **Maliwan gets nothing**.
 
 Every Melee Weapon also rolls **level-scaled Damage Reduction** (`~30%` at Lv 1 climbing to `70%` by Lv 80 / OP10, `76%` on uniques) that protects you while that blade is the weapon in hand — the trade-off for committing to close-quarters combat.
 
@@ -10,13 +10,13 @@ Every Melee Weapon also rolls **level-scaled Damage Reduction** (`~30%` at Lv 1 
 
 ## Weapon Archetypes
 
-| Manufacturer | Archetype | Targeting Profile | Element Policy | Signature Trait |
-| :--- | :--- | :--- | :--- | :--- |
-| **Hyperion** | **Katana** | Single-Target | Optional (Fire / Shock / Corrosive / Slag) | Fast precision strikes & weakspot crits |
-| **Jakobs** | **Sabre** | Single-Target | Non-Elemental | Fastest cadence & `x4` weakspot crit multiplier |
-| **Bandit** | **Machete** | Frontal Cleave | Optional (Fire / Shock / Corrosive / Slag) | Wide multi-target cleave arc |
-| **Maliwan** | **Phaseblade** | Frontal Cleave | Always Elemental (Fire / Shock / Corrosive / Slag) | High elemental DoT & status chance |
-| **Torgue** | **Blast-Cleaver** | Frontal Cleave | Always Explosive | Slow, heaviest per-swing damage + gyrojet explosive splash |
+| Manufacturer | Archetype | Targeting Profile | Element Policy | Signature Trait | Secondary (RMB / LT) |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Hyperion** | **Katana** | Single-Target | Optional (Fire / Shock / Corrosive / Slag) | Fast precision strikes & weakspot crits | **Guard** (hold to brace & parry) |
+| **Jakobs** | **Sabre** | Single-Target | Non-Elemental | Fastest cadence & `x4` weakspot crit multiplier | **Guard** (hold to brace & parry) |
+| **Bandit** | **Machete** | Frontal Cleave | Optional (Fire / Shock / Corrosive / Slag) | Wide multi-target cleave arc | **Throw** (200% damage arc) |
+| **Maliwan** | **Phaseblade** | Frontal Cleave | Always Elemental (Fire / Shock / Corrosive / Slag) | High elemental DoT & status chance | *None (RMB inert)* |
+| **Torgue** | **Blast-Cleaver** | Frontal Cleave | Always Explosive | Slow, heaviest per-swing damage + gyrojet explosive splash | **Throw** (200% damage arc) |
 
 Each weapon rolls a **Blade** (defines manufacturer & archetype), **Grip** (matching-grip bonus + handling stats), optional **Accessory** (7 physical mesh attachments with socket/bifacial twin fitting; guaranteed on Purple `VeryRare`), and **Element** (with matching elemental mesh emitter, atlas palette, and White/Green/Blue/Purple loot beam).
 
@@ -34,12 +34,39 @@ While a Melee Weapon is your held `Pawn.Weapon`, incoming damage on `WillowGame.
 
 ---
 
-## Combat Feel (`v0.3.5`)
+## Secondary Attacks (RMB / Left Trigger)
+
+ADS zoom is permanently suppressed on Melee Weapons, so the spare input drives the manufacturer's signature move. Every blade still keeps its rolled **Damage Reduction** while equipped — the secondary attack is layered on top.
+
+### Throw — Bandit Machete & Torgue Blast-Cleaver
+
+Press RMB to hurl the blade. It flies a real ballistic arc solved from the weapon's **weight**, which is built from the manufacturers of its actual parts: each manufacturer's blade/grip hardware has a mass (Torgue `3.8 kg` > Bandit `2.9 kg` > Jakobs `2.1 kg` > Hyperion `1.4 kg` > Maliwan `1.2 kg`), the blade contributes `72%`, the grip `28%`, and the accessory adds its own `0.08–0.32 kg`. A heavy Torgue slab therefore leaves the hand slower and lobs shorter/higher (`~9–10 m` out, `~0.95 m` apex), while a lighter Bandit blade flies flatter and further (`~11.5–12 m` out, `~0.7 m` apex).
+
+- A thrown hit uses the **exact same breakdown as the weapon's LMB swing** (player Melee bonuses, Roid shields, elemental DoT/chance, UVHM slag, and Torgue splash) multiplied to **`200%` damage**. Torgue's thrown slab still detonates its `1.8 m` explosive splash on impact.
+- It **rebounds to your hand** on the first enemy or wall impact, or once its arc expires without hitting anything (`~0.35 s` return flight).
+- **Primary Fire is locked out while the blade is airborne** — no swings, no damage, no first-person slash anim — and unlocks the moment you catch it. A blade already in flight cannot be thrown again.
+- The arc is swept with the weapon's own `CalcWeaponFire` trace plus a pure-Python swept-segment check, so a fast blade cannot tunnel past an enemy between frames.
+
+### Guard — Hyperion Katana & Jakobs Sabre
+
+Hold RMB to brace the blade. The **next incoming hit** has the blade's rolled card **Damage Reduction applied twice** — `(damage * card DR) * card DR` — before BL2 performs its normal shield/health split. At a `60%` card roll a `1,000` damage hit lands for `160`; the item card prints the resulting braced mitigation (`84%` in that example).
+
+- A hit landing within **`0.33 s` of raising the guard is a perfect parry**: `0` damage taken, and if the blow was a **melee** attack the damage is reflected back at the attacker automatically as a **forced critical hit** (BL2's `2.0x` crit multiplier amplified by the blade's own card crit bonus — a Jakobs Sabre's `+100%` reflects at `4x`, with the vanilla `CRITICAL` popup).
+- After a block, a parry, or a release, the guard enters a **cooldown that depends on its parts** (`~1.0–2.6 s`): blade manufacturer sets the base (Hyperion recovers faster than Jakobs), weapon mass stretches it, a matching-manufacturer grip shortens it by `15%`, and a Heavy Spine adds `+0.25 s` while a Balanced Pommel takes `-0.10 s` off.
+- Guard is dropped by the RMB release (`WillowWeapon:StopZoom`, enabled defensively so a build without it can never break the mod), by swapping weapons, or by the `6 s` safety brace limit.
+
+### Maliwan — nothing
+
+Phaseblades get no secondary attack. RMB stays inert, no line is printed on the card, and the manufacturer's identity remains pure elemental cleave.
+
+---
+
+## Combat Feel (`v0.4.0`)
 
 - **Weakspot crits show the vanilla `CRITICAL!` popup.** `Behavior_CauseDamage` never reports a hit region, so BL2's recent-damage tracker cannot flag our strikes on its own; the mod tags the damaged actor for `0.75 s` and re-issues `WillowDamageTypeDefinition:DisplayRecentDamageForPlayer` with `DamageEventFlags |= DAMAGE_EVENT_FLAG_CRIT`. Only your own local player's floating numbers are affected (co-op safe), stale tags expire, and any unexpected state falls back to untouched vanilla display.
 - **Camera shake is a slow, eased bump — not a flick.** Playback runs at `0.65–0.70x` so even the anim's own opening spike is stretched out, the blend-in window is `0.30 s` (a `0.10 s` ramp simply read as a jump: the old curve eased out but never in) and the fade-out matches it at `0.32 s`. Authoring amplitudes stay `0.50` (Torgue) / `0.30` (cleave) / `0.18` (single-target), damped by swing cadence (`min(1, max(0.45, 1.45 / swings-per-second))`) and by the **`Swing Camera Shake (%)`** dial, which is rescaled by `0.20` — so the **50%** default now equals what the old curve's **10%** felt like, `100%` is twice that and `150%` three times. `0%` is a true off switch.
 - **Faster blades hit softer.** Per-hit damage is scaled by `min(1.35, max(0.60, (1.50 / swing_speed) ** 0.55))` so a `2.35/s` Jakobs Sabre trades card damage for cadence while a `0.92/s` Torgue Blast-Cleaver trades cadence for damage — fast blades no longer out-DPS their slower peers while also being easiest to land.
-- **Right Mouse Button does nothing.** ADS zoom inherited from the donor pistol weapon type is fully suppressed at `WillowWeapon:StartZoom` / `ClientStartZoom`; `_try_melee_secondary_attack()` is the (currently disabled) stub for future unique-only secondary attacks.
+- **Right Mouse Button fires the secondary attack — never ADS.** Zoom inherited from the donor pistol weapon type is fully suppressed at `WillowWeapon:StartZoom` / `ClientStartZoom`, then `_try_melee_secondary_attack()` dispatches the manufacturer move: throw (Bandit/Torgue), guard (Hyperion/Jakobs), or nothing (Maliwan).
 
 ---
 
@@ -78,7 +105,7 @@ While a Melee Weapon is your held `Pawn.Weapon`, incoming damage on `WillowGame.
 | `./melee generate [options]` | Regenerate the Inkblade kit through the staged pipeline (`geometry -> uv -> flat -> mottle -> linework -> decals -> textures -> export -> render`) into `build/inkblade_kit`, with a per-stage cache in `build/inkblade_stages`. Supports `--list-stages`, `--only`, `--from`, `--force`, `--decals`, `--parts`, `--out <dir\|zip>`, and `--renders [dir]` for preview PNGs + overview sheets in `build/inkblade_renders` |
 | `./melee test [args]` | Byte-compile all modules and run `unittest` (e.g. `./melee test -q`, `./melee test -k world_drop`) |
 | `./melee preview` | Roll sample Level 50 Melee Arsenal weapons and print item cards, level-scaled Damage Reduction, and Roid/Crit/UVHM hit math |
-| `./melee package [--build]` | Build `build/dist/melee_arsenal.zip`, `build/dist/melee_arsenal-v0.3.5.zip`, and `build/dist/source.zip`; builds missing inputs automatically |
+| `./melee package [--build]` | Build `build/dist/melee_arsenal.zip`, `build/dist/melee_arsenal-v0.4.0.zip`, and `build/dist/source.zip`; builds missing inputs automatically |
 | `./melee install [--bl2-dir <dir>] [--probe]` | Stage `.upk` packages and sync `sdk_mods/melee_arsenal/` into Borderlands 2 (preserving `_melee_arsenal_saves` and `melee_arsenal.log`) |
 | `./melee dev` | Fast iteration loop: run quiet tests, then install to Borderlands 2 |
 | `./melee status` | Show mod version, Python/Pillow state, kit & UPK sizes, BL2 sync status, and sidecar save count |
@@ -97,9 +124,9 @@ While a Melee Weapon is your held `Pawn.Weapon`, incoming damage on `WillowGame.
 ├── build/                          # Ignored generated kit, cooked UPKs, manifest and release archives
 ├── sdk_mods/
 │   ├── melee_arsenal/              # Main Borderlands 2 PythonSDK mod
-│   │   ├── core/                   # Pure-Python catalog, schemas, card/hit math, targeting, persistence
+│   │   ├── core/                   # Pure-Python catalog, schemas, card/hit math, throw/guard math, targeting, persistence
 │   │   ├── data/                   # Compiler-generated Gestalt fragment/bounds/atlas manifest JSON
-│   │   └── runtime/                # Live UE3 definitions, Gestalt/MIC binding, combat, GFx cards, loot pools
+│   │   └── runtime/                # Live UE3 definitions, Gestalt/MIC binding, combat, secondary attacks, GFx cards, loot pools
 │   └── melee_arsenal_probe/        # Optional in-game UE3 diagnostics & Startup.upk donor extractor
 ├── tools/
 │   ├── generate_inkblade_kit.py    # Staged Inkblade kit generator CLI (pure Python + Pillow)
@@ -128,7 +155,7 @@ Pool lookup tolerates BL2 patch/DLC naming drift (exact paths → case-insensiti
 
 Every Melee Weapon's Material part is stamped with its exact rarity level (`1` White / `2` Green / `3` Blue / `4` Purple), and dropped pickups / inventory items get matching `WillowPickup.InventoryRarityLevel` / `WillowInventory.RarityLevel` values — so ground loot beams, item-card titles and sell values are always the rolled rarity's colour.
 
-Under **MODS -> Melee Arsenal**, **`Swing Camera Shake (%)`** defaults to **`50`** (`0%` removes the shake entirely, `150%` is three times the default) and **`1st-Person Slash Motion (%)`** likewise dials the arms' slash animation, so the swing feel can be tuned without restarting the game. **`World Drop Class Weight`** defaults to **`100`** (`100 / 620 = ~16.1%` of weapon drops — 1:1 parity with Pistols, SMGs, Assault Rifles, and Shotguns) and can be tuned anywhere from `10` up to `500` (or toggled off via **`Enable World Drops`**). **`Melee Weapon Damage Reduction`** (on by default) toggles the equipped blade's rolled level-scaled incoming-damage reduction (`~30%` at Lv 1 -> `70%` at Lv 80 / OP10), and **`Log Swing Damage Breakdown`** additionally logs each reduced hit to `melee_arsenal.log`.
+Under **MODS -> Melee Arsenal**, **`Swing Camera Shake (%)`** defaults to **`50`** (`0%` removes the shake entirely, `150%` is three times the default) and **`1st-Person Slash Motion (%)`** likewise dials the arms' slash animation, so the swing feel can be tuned without restarting the game. **`World Drop Class Weight`** defaults to **`100`** (`100 / 620 = ~16.1%` of weapon drops — 1:1 parity with Pistols, SMGs, Assault Rifles, and Shotguns) and can be tuned anywhere from `10` up to `500` (or toggled off via **`Enable World Drops`**). **`Melee Weapon Damage Reduction`** (on by default) toggles the equipped blade's rolled level-scaled incoming-damage reduction (Guard still applies the same card value twice while bracing) (`~30%` at Lv 1 -> `70%` at Lv 80 / OP10), and **`Log Swing Damage Breakdown`** additionally logs each reduced hit to `melee_arsenal.log`.
 
 ---
 
@@ -139,6 +166,7 @@ Open the PythonSDK console (`~`) in *Borderlands 2*:
 - `melee_spawn [maker] [rarity] [element] [accessory]` — Drop a customized Melee Weapon in front of you (e.g. `melee_spawn hyperion purple shock serrated`)
 - `melee_spawn_all [white|green|blue|purple]` — Drop all 5 manufacturer archetypes in front of you
 - `melee_check_pools` — Re-sync, re-roll every gun vendor's shelf from the injected pools, and print live per-pool Melee Arsenal weights, drop share `%`, and any pool paths the current map has not loaded
-- `melee_dump_held` *(alias `melee_debug_swing`)* — Inspect the currently held Melee Weapon's parts, Gestalt fragments, card stats (including its rolled `damage_reduction_pct`), and live player melee/Roid multiplier math
+- `melee_dump_held` *(alias `melee_debug_swing`)* — Inspect the currently held Melee Weapon's parts, Gestalt fragments, card stats (including its rolled `damage_reduction_pct` and secondary-attack values), and live player melee/Roid multiplier math
+- `melee_secondary` — Print the live secondary-attack state (airborne throw weight/arc, guard window & remaining cooldown)
 - `melee_save_now` — Manually snapshot carried Melee Arsenal weapons to `_melee_arsenal_saves`
 - `melee_preview [roll_deg] [scale] [focus_radius] [pitch_deg] [yaw_deg] [bounds_z]` — Live-tune 3D inventory/inspect framing

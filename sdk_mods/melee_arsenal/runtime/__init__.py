@@ -51,6 +51,13 @@ from .persistence_bridge import (
     restore_player_melee_inventory,
     snapshot_player_melee_inventory,
 )
+from .secondary import (
+    describe_secondary_state,
+    disable_optional_hooks,
+    enable_optional_hooks,
+    reset_secondary_state,
+    tick_secondary_attacks,
+)
 from .resolver import (
     get_local_player_controller,
     is_melee_weapon,
@@ -217,6 +224,15 @@ def hook_viewport_tick(obj: Any, args: Any, ret: Any, func: Any) -> None:
     # 2. Enforce exact meter reach on active melee light projectiles
     tick_melee_projectiles()
 
+    # 2b. Advance thrown blades (Bandit/Torgue arcs) and keep the held guard honest. The
+    #     optional RMB-release hooks are enabled lazily, behind a try/except, so a build without
+    #     `WillowWeapon:StopZoom` can never prevent the mod from loading.
+    try:
+        enable_optional_hooks()
+    except Exception:
+        pass
+    tick_secondary_attacks()
+
     # 3. Drive smooth 1st-person slash motion ONLY during active ~150ms swing window
     if STATE.swing_motion.active:
         pc = get_local_player_controller()
@@ -252,6 +268,7 @@ def hook_viewport_tick(obj: Any, args: Any, ret: Any, func: Any) -> None:
             if now >= _map_restore_ready_at:
                 _last_restored_pawn_id = pid
                 _map_restore_ready_at = 0.0
+                reset_secondary_state()
                 ensure_combat_resources_cached()
                 ensure_live_combat_cached()
                 # Always re-sync on map load so SparkLevelPatchEntry / BLCMM / UCP hotfixes never wipe our pools
@@ -487,6 +504,16 @@ def cmd_melee_debug_swing(args: Any) -> None:
 
 
 @command(
+    "melee_secondary",
+    description="Inspect live secondary-attack state: held throw arc / guard window & cooldown.",
+)
+def cmd_melee_secondary(_args: Any) -> None:
+    info = describe_secondary_state()
+    log_info(f"melee_secondary: {info}")
+    _notify_hud("Melee Secondary", str(info.get("detail", info.get("mode", "none"))))
+
+
+@command(
     "melee_save_now",
     description="Manually snapshot carried Melee Arsenal weapons to sidecar JSON.",
 )
@@ -594,6 +621,7 @@ ALL_COMMANDS = [
     cmd_melee_spawn_all,
     cmd_melee_dump_held,
     cmd_melee_debug_swing,
+    cmd_melee_secondary,
     cmd_melee_save_now,
     cmd_melee_preview,
     cmd_melee_check_pools,
@@ -613,6 +641,8 @@ ALL_OPTIONS = [
 def _on_mod_disable() -> None:
     restore_all_arms_rest_transforms()
     clear_all_pending_crit_feedback()
+    reset_secondary_state()
+    disable_optional_hooks()
 
 
 def build_runtime_mod(version: str, author: str) -> Any:
@@ -624,8 +654,9 @@ def build_runtime_mod(version: str, author: str) -> Any:
             "Adds a new Weapon Type: Melee Weapons across 5 Blade-defined manufacturers "
             "(Hyperion Katana, Bandit Machete, Jakobs Sabre, Maliwan Phaseblade, Torgue Blast-Cleaver). "
             "Primary Fire swings your Melee Weapon (Single-Target or Cleave) scaling with player Melee & Roid bonuses, "
-            "while [V] remains your vanilla character melee. Every Melee Weapon also grants level-scaled "
-            "incoming damage reduction (30% at Lv 1 up to 70%+ at OP10) while equipped."
+            "while [V] remains your vanilla character melee. RMB throws Bandit & Torgue blades for 200% damage, "
+            "or guards with Hyperion & Jakobs blades (parry inside 0.33s). Every Melee Weapon also grants "
+            "level-scaled incoming damage reduction (30% at Lv 1 up to 70%+ at OP10) while equipped."
         ),
         supported_games=Game.BL2,
         auto_enable=True,

@@ -4,7 +4,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import IntEnum
 
-from .enums import Element, TargetingMode
+from .enums import Element, SecondaryAttack, TargetingMode
+from .secondary import THROW_DAMAGE_MULTIPLIER
 from .stats import ComputedCardStats
 
 
@@ -180,6 +181,19 @@ def build_item_card_payload(
     lines: list[str] = [
         f"<font color='#7fd4ff'>Damage Reduction {card.damage_reduction_pct}% (Equipped)</font>"
     ]
+
+    # RMB / Left Trigger secondary attack (Maliwan deliberately prints nothing).
+    if card.secondary_attack == SecondaryAttack.THROW:
+        lines.append(
+            f"<font color='#ffc266'>RMB Throw: {THROW_DAMAGE_MULTIPLIER:.0%} Damage, "
+            f"{card.throw_range_m:.1f}m Arc ({card.throw_weight_kg:.1f}kg)</font>"
+        )
+    elif card.secondary_attack == SecondaryAttack.GUARD:
+        lines.append(
+            f"<font color='#9fd8ff'>RMB Hold: Guard {card.guard_reduction_pct}% DR, "
+            f"{card.guard_cooldown_sec:.1f}s Cooldown</font>"
+        )
+
     if card.targeting_mode == TargetingMode.SINGLE_TARGET:
         lines.append("<font color='#d8e6ff'>Single-Target Precision Strike</font>")
     else:

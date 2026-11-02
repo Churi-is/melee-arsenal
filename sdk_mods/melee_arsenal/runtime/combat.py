@@ -35,7 +35,18 @@ Built 100% on empirical results from `melee_combat_probe_report.json` (Sanctuary
      `Arms.SkeletalMesh.RotOrigin` + `Arms.ForceUpdate(False)` if a modded rig ever lacks `Bladed_Melee`.
    - Regular melee (`[V]`) is completely untouched so Maya Scorn, Zer0 Execute, Krieg Buzz Axe, etc. work natively.
 
-4. **Defensive Blade Guard: Level- & Part-Scaled Damage Reduction While Equipped**:
+4. **Manufacturer Secondary Attacks (RMB / Left Trigger, `runtime/secondary.py`)**:
+   - Bandit Machetes and Torgue Blast-Cleavers are **thrown** along a ballistic arc whose speed,
+     loft, flight time and reach come from the weapon's real part mass (blade + grip manufacturer
+     hardware + accessory). A thrown blade strikes for exactly `200%` of its normal LMB hit, then
+     rebounds to your hand after an impact — or after its arc expires — and Primary Fire is locked
+     out for the whole flight.
+   - Hyperion Katanas and Jakobs Sabres **guard** while RMB is held: the next incoming hit has the
+     blade's rolled card Damage Reduction applied twice, and any hit inside the first `0.33 s`
+     deals zero damage and is reflected back at a melee attacker as a forced critical hit.
+   - Maliwan Phaseblades have no secondary attack; RMB stays inert.
+
+5. **Defensive Blade Guard: Level- & Part-Scaled Damage Reduction While Equipped**:
    - Every Melee Weapon rolls an incoming-damage reduction (printed on its item card) that protects you
      while it is the held `Pawn.Weapon`. The floor climbs from `30%` at Lv 1 to `61%` at Lv 80 + OP10,
      with parts deciding the rest up to a `70%` cap (`76%` for unique rarities).
@@ -56,7 +67,7 @@ import unrealsdk
 from mods_base import get_pc
 from unrealsdk.hooks import Block, prevent_hooking_direct_calls
 
-from ..core.enums import Element, Manufacturer, TargetingMode
+from ..core.enums import Element, Manufacturer, SecondaryAttack, TargetingMode
 from ..core.schemas import MeleeWeaponInstance, PlayerMeleeContext
 from ..core.stats import (
     ComputedCardStats,
@@ -66,6 +77,12 @@ from ..core.stats import (
 from ..core.targeting import TargetCandidate, Vec3
 from .log import log_error, log_info
 from .resolver import get_local_player_controller, resolve_melee_weapon
+from .secondary import (
+    begin_throw,
+    handle_guard_incoming_damage,
+    is_weapon_thrown,
+    try_begin_guard,
+)
 from .state import STATE
 
 DEAD_OBJECT_FLAGS = 0x0000200000000000 | 0x0000000200000000 | 0x8000 | 0x10000
@@ -138,9 +155,10 @@ DAMAGE_EVENT_FLAG_CRIT = 1
 CRIT_FEEDBACK_WINDOW_SEC = 0.75
 _PENDING_CRIT_FEEDBACK: dict[int, float] = {}
 
-# Right Mouse Button / ADS zoom is intentionally disabled on Melee Weapons for now (see
-# `on_melee_weapon_start_zoom_pre`); RMB is reserved for a future secondary attack.
-MELEE_SECONDARY_ATTACK_ENABLED = False
+# ADS zoom stays suppressed on Melee Weapons (see `on_melee_weapon_start_zoom_pre`) because RMB /
+# Left Trigger now drives each manufacturer's secondary attack: Bandit & Torgue throw their blade,
+# Hyperion & Jakobs guard with it, and Maliwan keeps RMB inert.
+MELEE_SECONDARY_ATTACK_ENABLED = True
 
 WEAKSPOT_BONE_KEYWORDS = (
     "head",
@@ -545,11 +563,17 @@ def on_player_take_damage_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
     The rolled percentage starts at `30%` for a Lv 1 blade and climbs to the `70%` cap (76% for
     unique rarities) at Lv 80 + OP10 — see `core.stats.compute_damage_reduction_pct`.
     """
-    if not STATE.damage_reduction_enabled:
-        return None
     try:
         pc = get_local_player_controller()
         if pc is None or obj is None or getattr(pc, "Pawn", None) is not obj:
+            return None
+
+        # RMB Guard (Hyperion / Jakobs) supersedes the passive perk: a braced hit has the card
+        # Damage Reduction applied twice, and a hit inside the parry window is reflected instead.
+        if handle_guard_incoming_damage(obj, args, func):
+            return Block
+
+        if not STATE.damage_reduction_enabled:
             return None
 
         resolved = resolve_melee_weapon(getattr(obj, "Weapon", None), sync_weapon_props=False)
@@ -686,18 +710,29 @@ def on_display_recent_damage_pre(obj: Any, args: Any, ret: Any, func: Any) -> An
 # ---------------------------------------------------------------------------
 
 def _try_melee_secondary_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCardStats) -> bool:
-    """Dispatch a Melee Weapon secondary attack (RMB). Returns True once one was performed.
+    """Dispatch a Melee Weapon secondary attack on RMB / Left Trigger.
 
-    STUB: every Melee Weapon used to inherit the donor pistol's ADS zoom on Right Mouse Button, which
-    felt wrong for a blade and wasted the only spare input the weapon has. Zoom is now suppressed on
-    Melee Weapons (see `on_melee_weapon_start_zoom_pre`) so RMB is free for secondary attacks —
-    unique weapon skills (Krieg-style thrown blades), dash-cleave lunges, spins, ground slams, etc.
+    - `THROW` (Bandit, Torgue): hurl the blade. Returns False if it is already airborne.
+    - `GUARD` (Hyperion, Jakobs): raise the guard; it is held until RMB is released (`StopZoom`)
+      and is refused while its part-driven cooldown is still running.
+    - `NONE` (Maliwan): nothing happens, RMB stays inert.
 
-    Implement them here and return True when an attack was dispatched; returning False keeps RMB
-    inert (zoom stays blocked either way).
+    Zoom is blocked either way, so returning False never re-enables ADS on a blade.
     """
     if not MELEE_SECONDARY_ATTACK_ENABLED:
         return False
+    if card.secondary_attack == SecondaryAttack.THROW:
+        started = begin_throw(wpn, inst, card)
+        if started:
+            # Give the throw a real arm motion + whoosh + camera bump (the blade itself leaves the
+            # hand logically: state is authoritative, the 1st-person swing sells the release).
+            shooter, pc = _resolve_shooter_and_pc(wpn)
+            if shooter is not None and not _is_dead(shooter):
+                ctx = read_player_melee_context(shooter, pc)
+                _trigger_first_person_blade_swing(pc, shooter, card, ctx.swing_speed_scale)
+        return started
+    if card.secondary_attack == SecondaryAttack.GUARD:
+        return try_begin_guard(wpn, inst, card)
     return False
 
 
@@ -714,7 +749,7 @@ def on_melee_weapon_start_zoom_pre(obj: Any, args: Any, ret: Any, func: Any) -> 
     if STATE.debug_attack_log:
         log_info(
             f"RMB zoom suppressed [{card.manufacturer.value} {card.archetype_name}] "
-            "(secondary attack not implemented yet)"
+            f"(secondary attack: {card.secondary_attack.value})"
         )
     return Block
 
@@ -1592,6 +1627,12 @@ def on_weapon_instant_fire_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
     resolved = resolve_melee_weapon(obj)
     if resolved is None:
         return None
+    # The blade is in the air (Bandit / Torgue throw): Primary Fire is locked until it rebounds.
+    # Consume the shot sequence too, so the `SharedFireAmmunition` backup never fires a delayed
+    # swing once the blade comes back.
+    if is_weapon_thrown(obj):
+        _HANDLED_SHOT_SEQ = _SHOT_SEQ
+        return Block
     inst, card = resolved
     _HANDLED_SHOT_SEQ = _SHOT_SEQ
     try:
@@ -1622,6 +1663,11 @@ def on_weapon_shared_fire_post(obj: Any, args: Any, ret: Any, func: Any) -> Any:
         return None
     resolved = resolve_melee_weapon(obj)
     if resolved is None:
+        return None
+    # Swallow any backup `SharedFireAmmunition` path while the thrown blade is still airborne,
+    # consuming the shot sequence so no delayed swing fires after the blade comes back.
+    if is_weapon_thrown(obj):
+        _HANDLED_SHOT_SEQ = _SHOT_SEQ
         return None
     inst, card = resolved
     _HANDLED_SHOT_SEQ = _SHOT_SEQ

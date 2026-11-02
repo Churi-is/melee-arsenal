@@ -1516,9 +1516,22 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
             with mock.patch.dict(sys.modules, sdk_mods):
                 import melee_arsenal  # type: ignore[import-not-found]
                 from melee_arsenal.core.catalog import ACCESSORIES
-                from melee_arsenal.core.schemas import PlayerMeleeContext
+                from melee_arsenal.core.enums import Rarity
+                from melee_arsenal.core.item_card import build_item_card_payload
+                from melee_arsenal.core.schemas import (
+                    MeleeWeaponInstance,
+                    MeleeWeaponParts,
+                    PlayerMeleeContext,
+                )
+                from melee_arsenal.core.secondary import (
+                    THROW_DAMAGE_MULTIPLIER,
+                    compute_parry_reflect_damage,
+                    compute_throw_weight_kg,
+                )
                 from melee_arsenal.core.stats import (
+                    apply_guard_damage_reduction,
                     compute_attack_damage,
+                    compute_card_stats,
                     compute_damage_reduction_pct,
                 )
                 from melee_arsenal.runtime import (
@@ -1528,6 +1541,7 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                     loot_pools,
                     persistence_bridge,
                     resolver,
+                    secondary as secondary_attacks,
                     state,
                     ui_item_card,
                 )
@@ -1925,11 +1939,23 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                         vanilla_wpn, None, None, lambda *a: zoom_func_calls.append(a)
                     )
                 )
-                self.assertFalse(combat.MELEE_SECONDARY_ATTACK_ENABLED)
-                self.assertFalse(
+                # RMB is now spent on the manufacturer secondary attack: a Jakobs Sabre guards.
+                self.assertTrue(combat.MELEE_SECONDARY_ATTACK_ENABLED)
+                secondary_attacks.reset_secondary_state()
+                self.assertTrue(
                     combat._try_melee_secondary_attack(sabre, sabre_inst_dr, sabre_dr_card)
                 )
+                self.assertTrue(secondary_attacks.is_guarding(sabre))
+                secondary_attacks.end_guard(sabre)
+                secondary_attacks._GUARD_COOLDOWN_UNTIL = 0.0
+                # Maliwan gets nothing: RMB is inert on a Phaseblade.
+                _, phase_card = resolver.resolve_melee_weapon(phaseblade, sync_weapon_props=False)
+                self.assertFalse(
+                    combat._try_melee_secondary_attack(phaseblade, sabre_inst_dr, phase_card)
+                )
+                self.assertFalse(secondary_attacks.is_guarding())
                 self.assertIn(melee_arsenal.runtime.hook_melee_start_zoom, melee_arsenal.runtime.ALL_HOOKS)
+                self.assertIn(melee_arsenal.runtime.cmd_melee_secondary, melee_arsenal.runtime.ALL_COMMANDS)
                 self.assertIn(
                     melee_arsenal.runtime.hook_display_recent_damage, melee_arsenal.runtime.ALL_HOOKS
                 )
@@ -1976,6 +2002,289 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 state.STATE.camera_shake_scale = 0.5
                 world.camera_anim_calls.clear()
                 world.played_canims.clear()
+
+                # 4H. Secondary Attack 1 — GUARD (Hyperion / Jakobs): hold RMB to brace.
+                #     The next hit has the card DR applied twice, a hit inside 0.33s is a perfect
+                #     zero-damage parry reflected back at a melee attacker as a forced crit, and the
+                #     part-driven cooldown locks the guard out afterwards.
+                secondary_attacks.reset_secondary_state()
+                world.pawn.Weapon = sabre
+                sabre_inst_g, sabre_card_g = resolver.resolve_melee_weapon(
+                    sabre, sync_weapon_props=False
+                )
+                self.assertEqual(sabre_card_g.secondary_attack.value, "guard")
+                self.assertAlmostEqual(sabre_card_g.guard_parry_window_sec, 0.33)
+                self.assertGreater(sabre_card_g.guard_cooldown_sec, 0.0)
+                self.assertGreater(sabre_card_g.guard_reduction_pct, sabre_card_g.damage_reduction_pct)
+                # Guard mitigation really is the card DR applied twice
+                self.assertAlmostEqual(
+                    apply_guard_damage_reduction(1000.0, sabre_card_g.damage_reduction_pct),
+                    1000.0
+                    * (1.0 - sabre_card_g.damage_reduction_pct / 100.0)
+                    * (1.0 - sabre_card_g.damage_reduction_pct / 100.0),
+                )
+
+                guard_re_calls = []
+                guard_args = FakeWrappedStruct("WillowPlayerPawn.TakeDamage", Damage=1000.0)
+                self.assertTrue(secondary_attacks.try_begin_guard(sabre, sabre_inst_g, sabre_card_g))
+                self.assertTrue(secondary_attacks.is_guarding(sabre))
+                # Hold the guard past the parry window, then eat one hit: mitigated, then consumed.
+                secondary_attacks._GUARD.started_at -= 0.60
+                self.assertIs(
+                    combat.on_player_take_damage_pre(
+                        world.pawn,
+                        guard_args,
+                        None,
+                        lambda *a: guard_re_calls.append(a),
+                    ),
+                    world.block_sentinel,
+                )
+                self.assertEqual(len(guard_re_calls), 1)
+                self.assertAlmostEqual(
+                    guard_args.Damage,
+                    apply_guard_damage_reduction(1000.0, sabre_card_g.damage_reduction_pct),
+                )
+                self.assertFalse(secondary_attacks.is_guarding())
+                self.assertGreater(secondary_attacks.guard_cooldown_remaining(), 0.0)
+                # ...and the part-driven cooldown refuses a fresh guard
+                self.assertTrue(secondary_attacks.try_begin_guard(sabre, sabre_inst_g, sabre_card_g))
+                self.assertFalse(secondary_attacks.is_guarding())
+
+                # Perfect parry: inside 0.33s the hit is nullified and a melee blow is reflected
+                # back at a forced critical.
+                secondary_attacks._GUARD_COOLDOWN_UNTIL = 0.0
+                self.assertTrue(secondary_attacks.try_begin_guard(sabre, sabre_inst_g, sabre_card_g))
+                melee_attacker = types.SimpleNamespace(
+                    Name="WillowAIPawn_Pyscho_Melee", ObjectFlags=0, Location=world._vec(140.0, 0.0, 64.0)
+                )
+                parry_args = FakeWrappedStruct(
+                    "WillowPlayerPawn.TakeDamage",
+                    Damage=1000.0,
+                    DamageType=types.SimpleNamespace(
+                        _path_name=lambda: "WillowGame.WillowDmgSource_Melee"
+                    ),
+                    EventInstigator=types.SimpleNamespace(Pawn=melee_attacker),
+                )
+                world.caused_damages.clear()
+                guard_re_calls.clear()
+                combat.clear_all_pending_crit_feedback()
+                self.assertIs(
+                    combat.on_player_take_damage_pre(
+                        world.pawn, parry_args, None, lambda *a: guard_re_calls.append(a)
+                    ),
+                    world.block_sentinel,
+                )
+                # Zero damage: the blocked original call is never re-issued
+                self.assertEqual(guard_re_calls, [])
+                self.assertEqual(len(world.caused_damages), 1)
+                reflected = world.caused_damages[0]
+                self.assertIs(reflected["Target"], melee_attacker)
+                self.assertEqual(
+                    reflected["DamageAmount"],
+                    float(compute_parry_reflect_damage(1000.0, sabre_card_g.crit_bonus_pct)),
+                )
+                # ...and the reflected hit is tagged so BL2 prints a CRITICAL popup
+                self.assertIn(id(melee_attacker), combat._PENDING_CRIT_FEEDBACK)
+                combat.clear_all_pending_crit_feedback()
+                self.assertFalse(secondary_attacks.is_guarding())
+                self.assertGreater(secondary_attacks.guard_cooldown_remaining(), 0.0)
+
+                # A non-melee hit inside the parry window is still fully absorbed, but nothing is
+                # reflected (only melee blows are parried back).
+                secondary_attacks._GUARD_COOLDOWN_UNTIL = 0.0
+                self.assertTrue(secondary_attacks.try_begin_guard(sabre, sabre_inst_g, sabre_card_g))
+                ranged_args = FakeWrappedStruct(
+                    "WillowPlayerPawn.TakeDamage",
+                    Damage=1000.0,
+                    DamageType=types.SimpleNamespace(
+                        _path_name=lambda: "WillowGame.WillowDmgSource_Bullet"
+                    ),
+                    EventInstigator=types.SimpleNamespace(Pawn=melee_attacker),
+                )
+                world.caused_damages.clear()
+                guard_re_calls.clear()
+                self.assertIs(
+                    combat.on_player_take_damage_pre(
+                        world.pawn, ranged_args, None, lambda *a: guard_re_calls.append(a)
+                    ),
+                    world.block_sentinel,
+                )
+                self.assertEqual(guard_re_calls, [])
+                self.assertEqual(world.caused_damages, [])
+                self.assertFalse(secondary_attacks.is_guarding())
+
+                # Release (StopZoom), co-op safety and weapon-swap auto-drop
+                secondary_attacks._GUARD_COOLDOWN_UNTIL = 0.0
+                self.assertTrue(secondary_attacks.try_begin_guard(sabre, sabre_inst_g, sabre_card_g))
+                # A same-frame StartZoom/StopZoom pair is engine noise and must not drop the guard
+                secondary_attacks.on_melee_weapon_stop_zoom_pre(sabre, None, None, None)
+                self.assertTrue(secondary_attacks.is_guarding(sabre))
+                secondary_attacks._GUARD.started_at -= 0.40
+                secondary_attacks.on_melee_weapon_stop_zoom_pre(sabre, None, None, None)
+                self.assertFalse(secondary_attacks.is_guarding())
+                self.assertGreater(secondary_attacks.guard_cooldown_remaining(), 0.0)
+                secondary_attacks._GUARD_COOLDOWN_UNTIL = 0.0
+                self.assertTrue(secondary_attacks.try_begin_guard(sabre, sabre_inst_g, sabre_card_g))
+                co_op_pawn = types.SimpleNamespace(
+                    Name="WillowPlayerPawn_CoOp", ObjectFlags=0, Weapon=sabre
+                )
+                self.assertIsNone(
+                    combat.on_player_take_damage_pre(
+                        co_op_pawn, guard_args, None, lambda *a: guard_re_calls.append(a)
+                    )
+                )
+                self.assertTrue(secondary_attacks.is_guarding(sabre))
+                world.pawn.Weapon = phaseblade
+                secondary_attacks.tick_secondary_attacks()
+                self.assertFalse(secondary_attacks.is_guarding())
+                world.pawn.Weapon = sabre
+                secondary_attacks._GUARD_COOLDOWN_UNTIL = 0.0
+                secondary_attacks.reset_secondary_state()
+
+                # 4I. Secondary Attack 2 — THROW (Bandit / Torgue): the blade leaves your hand for
+                #     200% of its normal LMB hit, arcs by weight, rebounds on impact or arc expiry,
+                #     and locks Primary Fire while airborne.
+                world.pawn.Weapon = cleaver
+                bl_inst, bl_card = resolver.resolve_melee_weapon(cleaver, sync_weapon_props=False)
+                self.assertEqual(bl_card.secondary_attack.value, "throw")
+                self.assertAlmostEqual(bl_card.throw_weight_kg, compute_throw_weight_kg(bl_inst))
+                self.assertGreater(bl_card.throw_range_m, 0.0)
+                self.assertGreater(bl_card.throw_arc_height_m, 0.0)
+                self.assertGreater(bl_card.throw_flight_time_sec, 0.0)
+
+                # Heavier part builds throw shorter/higher than lighter ones (manufacturer mass)
+                light_parts = MeleeWeaponParts("Blade_Bandit_Machete", "Grip_Maliwan", "Acc_None", "Elem_None")
+                heavy_parts = MeleeWeaponParts("Blade_Torgue_BlastCleaver", "Grip_Torgue", "Acc_HeavySpine", "Elem_Explosive")
+                light_w = compute_throw_weight_kg(MeleeWeaponInstance(1, 50, Rarity.RARE, light_parts))
+                heavy_w = compute_throw_weight_kg(MeleeWeaponInstance(2, 50, Rarity.RARE, heavy_parts))
+                self.assertLess(light_w, heavy_w)
+                light_card = compute_card_stats(MeleeWeaponInstance(1, 50, Rarity.RARE, light_parts))
+                heavy_card = compute_card_stats(MeleeWeaponInstance(2, 50, Rarity.RARE, heavy_parts))
+                self.assertGreater(light_card.throw_range_m, heavy_card.throw_range_m)
+                self.assertLess(light_card.throw_arc_height_m, heavy_card.throw_arc_height_m)
+
+                # Maliwan never throws nor guards
+                self.assertFalse(
+                    secondary_attacks.begin_throw(phaseblade, sabre_inst_g, phase_card)
+                )
+                self.assertFalse(secondary_attacks.is_weapon_thrown(phaseblade))
+
+                world.caused_damages.clear()
+                world.caused_radius_damages.clear()
+                combat._LAST_SWING_AT = 0.0
+                world.played_custom_anims.clear()
+                # RMB dispatch: the throw starts with a real Bladed_Melee release motion
+                self.assertTrue(combat._try_melee_secondary_attack(cleaver, bl_inst, bl_card))
+                self.assertEqual(len(world.played_custom_anims), 1)
+                self.assertEqual(world.played_custom_anims[0][1], "Bladed_Melee")
+                # ...and a blade already in flight cannot be thrown again
+                self.assertFalse(combat._try_melee_secondary_attack(cleaver, bl_inst, bl_card))
+                self.assertTrue(secondary_attacks.is_weapon_thrown(cleaver))
+                live_state = secondary_attacks.describe_secondary_state()
+                self.assertTrue(live_state["thrown"])
+                self.assertEqual(live_state["throw_phase"], "outbound")
+                self.assertIn("Throw", live_state["detail"])
+                # LMB is locked out while the blade is airborne — no swing, no damage, no anim
+                world.played_custom_anims.clear()
+                self.assertIs(
+                    combat.on_weapon_instant_fire_pre(cleaver, None, None, None),
+                    world.block_sentinel,
+                )
+                self.assertIsNone(combat.on_weapon_shared_fire_post(cleaver, None, None, None))
+                self.assertEqual(world.caused_damages, [])
+                self.assertEqual(world.played_custom_anims, [])
+
+                # First arc segment connects with the target dummy -> exact 200% LMB damage
+                throw_ctx = combat.read_player_melee_context(world.pawn, world.pc)
+                expected_throw = compute_attack_damage(
+                    bl_card, throw_ctx, damage_scale=THROW_DAMAGE_MULTIPLIER
+                )
+                self.assertEqual(THROW_DAMAGE_MULTIPLIER, 2.0)
+                world.next_center_trace_override = (dummy_pawn, world._vec(210.0, 0.0, 95.0), "None")
+                secondary_attacks.tick_secondary_attacks()
+                self.assertEqual(len(world.caused_damages), 1)
+                self.assertIs(world.caused_damages[0]["Target"], dummy_pawn)
+                self.assertAlmostEqual(
+                    world.caused_damages[0]["DamageAmount"], float(expected_throw.final_hit_damage)
+                )
+                self.assertGreater(
+                    expected_throw.final_hit_damage,
+                    compute_attack_damage(bl_card, throw_ctx).final_hit_damage,
+                )
+                # Torgue's thrown slab detonates on impact too
+                self.assertEqual(len(world.caused_radius_damages), 1)
+                self.assertAlmostEqual(
+                    world.caused_radius_damages[0]["DamageAmount"],
+                    float(expected_throw.splash_hit_damage),
+                )
+                # ...and the blade is now rebounding, still locking LMB until it is caught
+                self.assertEqual(secondary_attacks._THROW.phase, "return")
+                self.assertTrue(secondary_attacks.is_weapon_thrown(cleaver))
+                secondary_attacks._THROW.return_started_at -= 1.0
+                secondary_attacks.tick_secondary_attacks()
+                self.assertFalse(secondary_attacks.is_weapon_thrown(cleaver))
+                self.assertEqual(world.played_custom_anims, [])
+
+                # 4I-2. Arc expiry without touching anything: no damage, then the rebound timer
+                world.caused_damages.clear()
+                world.caused_radius_damages.clear()
+                self.assertTrue(secondary_attacks.begin_throw(cleaver, bl_inst, bl_card))
+                # Aim away from every enemy so the swept-segment check finds nothing
+                original_rot = world.pc.Rotation
+                world.pc.Rotation = FakeWrappedStruct("Rotator", Pitch=0, Yaw=16384, Roll=0)
+                world.next_center_trace_override = None
+                try:
+                    secondary_attacks._THROW.started_at -= bl_card.throw_flight_time_sec + 0.01
+                    secondary_attacks.tick_secondary_attacks()
+                    self.assertEqual(world.caused_damages, [])
+                    self.assertEqual(secondary_attacks._THROW.phase, "return")
+                    secondary_attacks._THROW.return_started_at -= 1.0
+                    secondary_attacks.tick_secondary_attacks()
+                    self.assertFalse(secondary_attacks.is_any_weapon_thrown())
+                finally:
+                    world.pc.Rotation = original_rot
+                # 4I-3. A physical Bandit Machete throw hits for 200% with no splash at all.
+                world.ground_pickups.clear()
+                commands.spawn_single_command("bandit", "purple", "")
+                bandit_wpn = world.ground_pickups[-1].Inventory
+                bandit_inst, bandit_card = resolver.resolve_melee_weapon(
+                    bandit_wpn, sync_weapon_props=False
+                )
+                self.assertEqual(bandit_card.secondary_attack.value, "throw")
+                self.assertEqual(bandit_card.splash_damage, 0)
+                world.pawn.Weapon = bandit_wpn
+                world.caused_damages.clear()
+                world.caused_radius_damages.clear()
+                self.assertTrue(secondary_attacks.begin_throw(bandit_wpn, bandit_inst, bandit_card))
+                bandit_ctx = combat.read_player_melee_context(world.pawn, world.pc)
+                expected_bandit = compute_attack_damage(
+                    bandit_card, bandit_ctx, damage_scale=THROW_DAMAGE_MULTIPLIER
+                )
+                world.next_center_trace_override = (dummy_pawn, world._vec(210.0, 0.0, 95.0), "None")
+                secondary_attacks.tick_secondary_attacks()
+                self.assertEqual(len(world.caused_damages), 1)
+                self.assertAlmostEqual(
+                    world.caused_damages[0]["DamageAmount"],
+                    float(expected_bandit.final_hit_damage),
+                )
+                self.assertEqual(world.caused_radius_damages, [])
+                secondary_attacks.reset_secondary_state()
+                world.pawn.Weapon = cleaver
+                idle_state = secondary_attacks.describe_secondary_state()
+                self.assertNotIn("thrown", idle_state)
+
+                # 4J. Secondary attack state is part of the item card payload, and Maliwan shows none
+                cleaver_payload = build_item_card_payload(bl_card)
+                self.assertTrue(
+                    any("RMB Throw: 200% Damage" in line for line in cleaver_payload.fun_stats_lines)
+                )
+                sabre_payload = build_item_card_payload(sabre_card_g)
+                self.assertTrue(
+                    any("RMB Hold: Guard" in line for line in sabre_payload.fun_stats_lines)
+                )
+                self.assertFalse(
+                    any("RMB" in line for line in build_item_card_payload(phase_card).fun_stats_lines)
+                )
 
                 # 5. Item Card GFx Hooks — MUST NOT call AdjustHeight()!
                 top_rows_written: dict[int, tuple] = {}
@@ -2061,7 +2370,7 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 from melee_arsenal.core.schemas import MeleeWeaponInstance, MeleeWeaponParts
                 from melee_arsenal.runtime import commands, custom_assets, definitions, resolver, state
 
-                self.assertEqual(melee_arsenal.__version__, "0.3.5")
+                self.assertEqual(melee_arsenal.__version__, "0.4.0")
                 self.assertTrue(definitions.ensure_definitions_built())
                 self.assertTrue(state.STATE.custom_assets_active)
                 self.assertEqual(state.STATE.custom_kit_revision, "bold_ink_visual_revision_of_r4")
