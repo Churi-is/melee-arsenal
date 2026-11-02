@@ -928,15 +928,19 @@ def update_first_person_pose(pc: Any, now: float | None = None) -> None:
         reset_first_person_pose("held past its safety limit")
         return
     bob = 0.0
+    tilt = 1.0
     if _POSE_KIND == POSE_GUARD:
         # A slow, shallow bob keeps the brace alive instead of reading as a frozen T-pose.
         bob = math.sin((now - _POSE_STARTED_AT) * 6.2)
+        # `Guard Blade Tilt (%)` lets the player flip/cut the inward swing in game if the
+        # RotOrigin sign convention reads backwards on their install.
+        tilt = float(getattr(STATE, "guard_pose_scale", 1.0))
     try:
         bp, by, br = entry["rot"]
         ro = copy.copy(sm.RotOrigin)
         ro.Pitch = _rotator_add(bp, offsets["pitch"] + 90.0 * bob)
-        ro.Yaw = _rotator_add(by, offsets["yaw"])
-        ro.Roll = _rotator_add(br, offsets["roll"] + 60.0 * bob)
+        ro.Yaw = _rotator_add(by, offsets["yaw"] * tilt)
+        ro.Roll = _rotator_add(br, offsets["roll"] * tilt + 60.0 * bob)
         sm.RotOrigin = ro
         loc = entry.get("loc")
         if loc is not None and hasattr(sm, "Origin"):

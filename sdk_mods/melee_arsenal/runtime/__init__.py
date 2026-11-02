@@ -129,6 +129,10 @@ def _on_debug_log_changed(_opt: Any, new_val: bool) -> None:
     STATE.debug_attack_log = bool(new_val)
 
 
+def _on_guard_pose_changed(_opt: Any, new_val: float) -> None:
+    STATE.guard_pose_scale = max(-1.0, min(1.0, float(new_val) / 100.0))
+
+
 def _on_damage_reduction_changed(_opt: Any, new_val: bool) -> None:
     STATE.damage_reduction_enabled = bool(new_val)
 
@@ -186,6 +190,22 @@ opt_camera_shake = SliderOption(
         "entirely). 50% matches the old soft curve's 10% feel; up to 150% for a heavier thump."
     ),
     on_change_anytime=_on_camera_shake_changed,
+)
+
+opt_guard_pose = SliderOption(
+    "Guard Blade Tilt (%)",
+    100,
+    -100,
+    100,
+    10,
+    True,
+    description=(
+        "How far raising the guard swings the blade in toward the middle of the screen. "
+        "100% lifts the tip and pulls it across the crosshair; negative values lean it the "
+        "other way instead (use this if the brace leans away from the centre for you). "
+        "0% leaves the hands almost idle."
+    ),
+    on_change_anytime=_on_guard_pose_changed,
 )
 
 opt_debug_log = BoolOption(
@@ -666,6 +686,7 @@ ALL_OPTIONS = [
     opt_drop_weight,
     opt_slash_scale,
     opt_camera_shake,
+    opt_guard_pose,
     opt_debug_log,
     opt_damage_reduction,
     btn_spawn_all,
@@ -704,6 +725,9 @@ def build_runtime_mod(version: str, author: str) -> Any:
     STATE.world_drop_weight = float(getattr(opt_drop_weight, "value", 100.0))
     STATE.slash_motion_scale = float(getattr(opt_slash_scale, "value", 100)) / 100.0
     STATE.camera_shake_scale = float(getattr(opt_camera_shake, "value", 50)) / 100.0
+    STATE.guard_pose_scale = max(
+        -1.0, min(1.0, float(getattr(opt_guard_pose, "value", 100)) / 100.0)
+    )
     STATE.debug_attack_log = bool(getattr(opt_debug_log, "value", False))
     STATE.damage_reduction_enabled = bool(getattr(opt_damage_reduction, "value", True))
     log_info(f"Melee Arsenal v{version} loaded and armed.")

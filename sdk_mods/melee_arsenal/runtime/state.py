@@ -117,6 +117,7 @@ class RuntimeRegistry:
     world_drop_weight: float = 100.0
     slash_motion_scale: float = 1.0
     camera_shake_scale: float = 0.5   # `Swing Camera Shake (%)` / 100
+    guard_pose_scale: float = 1.0     # `Guard Blade Tilt (%)` / 100 (-1..1; negative flips inward/outward)
     stack_player_melee_bonuses: bool = True
     stack_roid_shields: bool = True
     damage_reduction_enabled: bool = True

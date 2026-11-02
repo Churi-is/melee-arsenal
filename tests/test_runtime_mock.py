@@ -2542,6 +2542,19 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 secondary_attacks._THROW = None
                 self.assertTrue(combat.apply_first_person_pose(world.pc, combat.POSE_GUARD))
                 self.assertGreater(world.arms_skel_mesh.RotOrigin.Pitch, 1000)
+
+                # 4L-1. `Guard Blade Tilt (%)` is the in-game escape hatch if the RotOrigin
+                #       sign convention reads backwards: -100% leans the blade the other way.
+                self.assertIn(runtime_mod.opt_guard_pose, runtime_mod.ALL_OPTIONS)
+                runtime_mod._on_guard_pose_changed(None, -100)
+                combat.update_first_person_pose(world.pc)
+                self.assertGreater(
+                    world.arms_skel_mesh.RotOrigin.Yaw, -16384, "negative tilt must lean outward"
+                )
+                runtime_mod._on_guard_pose_changed(None, 100)
+                combat.update_first_person_pose(world.pc)
+                self.assertLess(world.arms_skel_mesh.RotOrigin.Yaw, -16384)
+
                 self.assertTrue(
                     secondary_vfx.spawn_thrown_blade(world.pawn, cleaver, (10.0, 0.0, 64.0))
                 )
