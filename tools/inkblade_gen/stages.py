@@ -349,7 +349,7 @@ def _load_canvases(state: KitState, folder: Path) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Stage: textures (seal padding, quantise, write the final PNGs)
+# Stage: textures (seal padding, optional quantise, write the final PNGs)
 # ---------------------------------------------------------------------------
 def _restore_colours(state: KitState) -> None:
     if state.colours:
