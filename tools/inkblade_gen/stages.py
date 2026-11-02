@@ -29,7 +29,9 @@ from .config import ELEMENTS, RunConfig
 from .geometry import (
     ACCESSORIES,
     ACCESSORY_FACE_CLIP_M,
+    ACCESSORY_LENGTH_SCALE,
     BLADE_CORE_DEPTH_MULTIPLIER,
+    BLADE_LENGTH_BOOST,
     BLADE_LENGTH_SCALE,
     BLADE_SPINE_SCALE,
     BLADES,
@@ -460,6 +462,8 @@ def build_manifest(state: KitState) -> dict[str, Any]:
             "blade_core_depth_multiplier": BLADE_CORE_DEPTH_MULTIPLIER,
             "blade_spine_scale": BLADE_SPINE_SCALE,
             "blade_length_scale": BLADE_LENGTH_SCALE,
+            "blade_length_boost_r8": BLADE_LENGTH_BOOST,
+            "accessory_length_scale": ACCESSORY_LENGTH_SCALE,
             "jakobs_blade": "frontier sabre: straight full-width run, subtle late curve, small clipped tip taper",
             "flared_cleave_guard": "end caps seated into the continuous plate",
             "accessory_clip_m": ACCESSORY_FACE_CLIP_M,

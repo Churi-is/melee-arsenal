@@ -23,6 +23,11 @@ frontier sabre (straight and full-width out of the hilt, subtle late curve,
 small clipped point), and the Flared Cleave Guard's end caps are seated into
 the plate.
 
+R8 is the blade/handle ratio pass: `BLADE_LENGTH_BOOST` makes the blades 1.5x
+longer than R7, and `ACCESSORY_LENGTH_SCALE` stretches the four blade-mounted
+accessory strips by the same factor so they keep covering the blade. Grips,
+compact accessory modules, element emitters, guards and sockets are untouched.
+
 Coordinates here are Blender working space (metres, `+Z` blade tip, `-Y` display/front face);
 `glb.py` performs the glTF conversion (`x, z, -y`) at export time.
 """
@@ -59,8 +64,23 @@ BLADE_THICKNESS_M: dict[str, float] = {
 # consumers and socketed accessories stay where they expect them.
 # ---------------------------------------------------------------------------
 BLADE_SPINE_SCALE: float = 0.80
-BLADE_LENGTH_SCALE: float = 1.12
+#: R8 blade/handle ratio pass: 1.5x the blade length as it stood in R7.
+BLADE_LENGTH_BOOST: float = 1.5
+#: Applied to R3 tip heights on top of the R7 1.12 stretch. Only the part above
+#: BLADE_LENGTH_PIVOT_Z counts as "blade", so the hilt, guards and sockets stay
+#: put and the grip does not grow with it.
+BLADE_LENGTH_SCALE: float = round(1.12 * BLADE_LENGTH_BOOST, 6)
 BLADE_LENGTH_PIVOT_Z: float = 0.12
+#: Accessories that are strips running up the blade must grow with it, or they
+#: become stubs near the guard. Compact modules (pommel, coil, crossguard) and
+#: all element emitters are deliberately left at their original size.
+ACCESSORY_LENGTH_SCALE: float = BLADE_LENGTH_BOOST
+BLADE_MOUNTED_ACCESSORIES: frozenset[str] = frozenset({
+    "accessory_serrated_edge",
+    "accessory_extended_blade_fuller",
+    "accessory_monofilament_honing",
+    "accessory_reinforced_heavy_spine",
+})
 
 HEAVY_SPINE_DEPTH_DIVISOR: float = 3.0
 CLEAVE_GUARD_PLATE_SHIFT: float = 0.025       # centres the guard's continuous plate
@@ -257,7 +277,7 @@ class Geo:
 
 
 # ---------------------------------------------------------------------------
-# R3 part shapes (verbatim silhouettes / dimensions) + the R7 silhouette pass
+# R3 part shapes (verbatim silhouettes / dimensions) + the R7/R8 blade passes
 # ---------------------------------------------------------------------------
 def _blade_z(z: float) -> float:
     """Lengthen the blade above the hilt line, leaving every socket where it was."""
@@ -267,6 +287,16 @@ def _blade_z(z: float) -> float:
 def _blade_pts(pts: Sequence[Sequence[float]]) -> list[tuple[float, float]]:
     """Stretch an (x, z) silhouette / overlay without changing its face width."""
     return [(float(x), _blade_z(z)) for x, z in pts]
+
+
+def _blade_box(
+    c: Sequence[float], s: Sequence[float]
+) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
+    """Stretch a blade-mounted box's position *and* z size, so detail keeps its proportions."""
+    return (
+        (float(c[0]), float(c[1]), _blade_z(c[2])),
+        (float(s[0]), float(s[1]), float(s[2]) * BLADE_LENGTH_SCALE),
+    )
 
 
 def _blade(maker: str) -> Geo:
@@ -283,7 +313,7 @@ def _blade(maker: str) -> Geo:
         g.profile(_blade_pts(pts), thick, sharp=True)
         g.profile(_blade_pts([(-0.09, 0.22), (-0.045, 0.25), (0.015, 1.24), (-0.025, 1.18)]), 0.016, -0.048, "paint", 0.004)
         for z in (0.34, 0.44, 0.54):
-            g.box((0.06, -0.047, _blade_z(z)), (0.065, 0.018, 0.025), "accent")
+            g.box(*_blade_box((0.06, -0.047, z), (0.065, 0.018, 0.025)), "accent")
         g.box((0, 0, 0.005), (0.44, 0.18, 0.065), "paint")
     elif maker == "Bandit":
         pts = [
@@ -332,7 +362,7 @@ def _blade(maker: str) -> Geo:
         g.profile(_blade_pts(pts), thick, sharp=True)
         g.profile(_blade_pts([(-0.1, 0.27), (0.08, 0.29), (0.15, 1.09), (-0.12, 1.09)]), 0.045, -0.098, "paint")
         for z in (0.44, 0.58, 0.72, 0.86):
-            g.box((0, -0.13, _blade_z(z)), (0.12, 0.025, 0.06), "dark")
+            g.box(*_blade_box((0, -0.13, z), (0.12, 0.025, 0.06)), "dark")
         for x in (-0.23, 0.23):
             g.cyl((x, 0, -0.01), 0.065, 0.16, "trim", axis="y")
         g.box((0, 0, -0.005), (0.45, 0.23, 0.095), "paint")
@@ -434,29 +464,29 @@ def _element() -> Geo:
 # ---------------------------------------------------------------------------
 BLADES: dict[str, dict[str, Any]] = {
     "Hyperion": {
-        "archetype": "Precision tanto", "targeting_mode": "SINGLE_TARGET", "base_reach_m": 1.6096,
+        "archetype": "Precision tanto", "targeting_mode": "SINGLE_TARGET", "base_reach_m": 2.3544,
         "base_damage": 82, "base_swings_per_second": 1.65,
         "element_policy": {"mode": "OPTIONAL", "allowed": ["Shock"]}, "signature_title": "Ronin",
     },
     "Bandit": {
-        "archetype": "Scrap cleaver", "targeting_mode": "FRONTAL_CLEAVE", "base_reach_m": 1.3856,
+        "archetype": "Scrap cleaver", "targeting_mode": "FRONTAL_CLEAVE", "base_reach_m": 2.0184,
         "base_damage": 106, "base_swings_per_second": 1.05,
         "element_policy": {"mode": "OPTIONAL", "allowed": ["Fire", "Corrosive", "Slag"]},
         "signature_title": "Chopper",
     },
     "Jakobs": {
-        "archetype": "Frontier sabre", "targeting_mode": "SINGLE_TARGET", "base_reach_m": 1.5536,
+        "archetype": "Frontier sabre", "targeting_mode": "SINGLE_TARGET", "base_reach_m": 2.2704,
         "base_damage": 98, "base_swings_per_second": 1.4,
         "element_policy": {"mode": "FORBIDDEN", "allowed": []}, "signature_title": "Cavalier",
     },
     "Maliwan": {
-        "archetype": "Ion falchion", "targeting_mode": "FRONTAL_CLEAVE", "base_reach_m": 1.5312,
+        "archetype": "Ion falchion", "targeting_mode": "FRONTAL_CLEAVE", "base_reach_m": 2.2368,
         "base_damage": 72, "base_swings_per_second": 1.5,
         "element_policy": {"mode": "REQUIRED", "allowed": ["Fire", "Shock", "Corrosive", "Slag"]},
         "signature_title": "Seraphim",
     },
     "Torgue": {
-        "archetype": "Breach cutter", "targeting_mode": "FRONTAL_CLEAVE", "base_reach_m": 1.3184,
+        "archetype": "Breach cutter", "targeting_mode": "FRONTAL_CLEAVE", "base_reach_m": 1.9176,
         "base_damage": 132, "base_swings_per_second": 0.82,
         "element_policy": {"mode": "OPTIONAL", "allowed": ["Explosive"]}, "signature_title": "Detonator",
     },
@@ -573,6 +603,8 @@ def apply_final_revisions(part_id: str, geo: Geo, bifacial: bool) -> tuple[list[
                     vert[1] /= HEAVY_SPINE_DEPTH_DIVISOR
                 if special_guard:
                     vert[1] += CLEAVE_GUARD_PLATE_SHIFT
+                if part_id in BLADE_MOUNTED_ACCESSORIES:
+                    vert[2] *= ACCESSORY_LENGTH_SCALE
                 if is_blade:
                     vert[1] *= BLADE_CORE_DEPTH_MULTIPLIER * BLADE_SPINE_SCALE
                     if is_receiver:

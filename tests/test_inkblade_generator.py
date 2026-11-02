@@ -702,6 +702,52 @@ class R7BladeSilhouetteTests(unittest.TestCase):
         self.assertLess(tip_right - tip_left, 0.50 * widths[0], "small clipped point at the tip")
 
 
+class R8BladeLengthTests(unittest.TestCase):
+    """The 1.5x blade/handle ratio pass and its matching accessory stretch."""
+
+    R3_TIP_Z = {"Hyperion": 1.45, "Bandit": 1.25, "Jakobs": 1.40, "Maliwan": 1.38, "Torgue": 1.19}
+
+    @staticmethod
+    def _z_span(part) -> tuple[float, float]:
+        values = [vertex[2] for face in part.faces for vertex in face.verts]
+        return min(values), max(values)
+
+    def test_blades_are_one_and_a_half_times_the_r7_length(self) -> None:
+        parts = build_parts()
+        pivot = geometry.BLADE_LENGTH_PIVOT_Z
+        grip_len = self._z_span(parts["grip_hyperion"])[1] - self._z_span(parts["grip_hyperion"])[0]
+        for maker, r3_tip in self.R3_TIP_Z.items():
+            with self.subTest(maker=maker):
+                r7_tip = pivot + (r3_tip - pivot) * 1.12
+                expected = pivot + (r7_tip - pivot) * geometry.BLADE_LENGTH_BOOST
+                part = parts[f"blade_{maker.lower()}"]
+                tip = self._z_span(part)[1]
+                self.assertAlmostEqual(tip, expected, places=4)
+                self.assertAlmostEqual(tip, part.meta["base_reach_m"], places=4)
+                self.assertGreater(tip / grip_len, 3.5, "should read as a sword, not a knife")
+
+    def test_blade_mounted_accessories_grow_with_the_blade(self) -> None:
+        final = build_parts()
+        with mock.patch.object(geometry, "ACCESSORY_LENGTH_SCALE", 1.0):
+            baseline = build_parts()
+        for part_id in geometry.BLADE_MOUNTED_ACCESSORIES:
+            with self.subTest(part=part_id):
+                top = self._z_span(final[part_id])[1]
+                base = self._z_span(baseline[part_id])[1]
+                self.assertAlmostEqual(top, base * geometry.BLADE_LENGTH_BOOST, places=6)
+
+    def test_compact_modules_keep_their_size(self) -> None:
+        final = build_parts()
+        with mock.patch.object(geometry, "ACCESSORY_LENGTH_SCALE", 1.0):
+            baseline = build_parts()
+        for part_id in (
+            "accessory_balanced_pommel", "accessory_overclocked_elemental_coil",
+            "accessory_flared_cleave_guard", "grip_jakobs", "element_fire",
+        ):
+            with self.subTest(part=part_id):
+                self.assertEqual(self._z_span(final[part_id]), self._z_span(baseline[part_id]))
+
+
 class FlaredCleaveGuardTests(unittest.TestCase):
     """The yellow end caps must be seated in the plate, not floating in front of it."""
 
