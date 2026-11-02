@@ -1,8 +1,6 @@
 """Shared palette, part metadata and run configuration for the staged Inkblade generator.
 
-Everything that used to be a module-level constant in the R3 (`generate_blender.py` /
-`physical_uv.py`) and R5/Bold (`reink_bold.py`) scripts lives here exactly once, so every stage
-reads the same numbers instead of carrying its own copy.
+Configuration lives here so every stage reads the same values.
 """
 from __future__ import annotations
 
@@ -76,11 +74,10 @@ class RunConfig:
     padding: int = 9
     # Deterministic master seed mixed into every per-face / per-stage RNG.
     seed: str = "inkblade"
-    # Extra salt for the two ink passes only. Empty reproduces the shipped Inkblade Bold strokes
-    # exactly; any other value re-rolls hatch corners, stroke breaks, shadows and scratches.
+    # Extra salt for the two ink passes only. Empty uses the default seed; any other value
+    # re-rolls hatch corners, stroke breaks, shadows and scratches.
     linework_seed: str = ""
-    # Optional indexed-palette quantisation of the finished atlas. Off by default: the shipped kit's
-    # atlases are RGB PNGs, so a palette would only add snapping on top of the painted art.
+    # Optional indexed-palette quantisation; off by default to avoid palette snapping.
     quantize_colors: int | None = None
     # Optional decal directory (`<decal_dir>/<part_id>/*.png`); empty means the decals stage is a
     # no-op passthrough, which keeps the stage in the stack without changing existing art.

@@ -287,11 +287,11 @@ def paint_linework(
     ink_px: int = 6,
     seed_salt: str = "",
 ) -> Image.Image:
-    """Both ink passes of the shipped kit, in their original order.
+    """Both ink passes in their rendering order.
 
-    1. `physical_uv.texture_face`'s finishing block: six converging hatch strokes off the first one
+    1. Face ink: six converging hatch strokes off the first one
        (or two) polygon corners, then a `INK_PX` stroke around the true polygon boundary.
-    2. `reink_bold.make_overlay`: translucent shadow planes, 3/5/7px weighted perimeters, broken pen
+    2. Overlay: translucent shadow planes, 3/5/7px weighted perimeters, broken pen
        strokes, corner hatch clusters, fractured accents, scratch groups and highlight nicks, drawn
        onto two layers, clipped to a 1px-eroded mask and composited over the atlas.
     """
@@ -321,7 +321,7 @@ def _paint_face_ink(
             continue
         if seed_salt:
             # The reference hatches off the face's first one or two vertices, so rotating the vertex
-            # order is what moves a cluster to a different corner. Empty salt keeps the shipped order.
+            # order is what moves a cluster to a different corner. Empty salt uses the default order.
             offset = rng.randrange(len(poly))
             poly = poly[offset:] + poly[:offset]
         hatch = Image.new("RGBA", (w, h))
@@ -351,7 +351,7 @@ def _paint_face_ink(
 def linework_layers(
     part_id: str, layout: PartLayout, seed_salt: str = ""
 ) -> tuple[Image.Image, Image.Image]:
-    """The R5 overlay as `(shade, ink)`: translucent shadow planes beneath, ink on top, both clipped.
+    """The ink overlay as `(shade, ink)`: translucent shadow planes beneath, ink on top, both clipped.
 
     Split out of `paint_linework` so the port can be compared layer-for-layer with the reference
     implementation in the tests.
@@ -606,7 +606,7 @@ def recolor_accent(
 ) -> Image.Image:
     """Bake an element tint into the `accent` islands only (keeps ink and `SURFACE` untouched).
 
-    Matches `recolor_palette` from the shipped builder: every accent pixel at least `56` bright is
+    Every accent pixel at least `56` bright is
     recoloured to the tint scaled by its own luminance, so the painted shading survives the tint.
     """
     rgb = hex_to_rgb(hex_colour)

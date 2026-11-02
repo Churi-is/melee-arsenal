@@ -3,8 +3,9 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEFAULT_KIT="$REPO_ROOT/assets/inkblade_bold_kit"
-COOKED_REL="WillowGame/CookedPCConsole"
+DEFAULT_KIT="$REPO_ROOT/build/inkblade_kit"
+COOKED_REL="build/WillowGame/CookedPCConsole"
+BUILD_MANIFEST="$REPO_ROOT/build/inkblade_compiled_manifest.json"
 MOD_REL="sdk_mods/melee_arsenal"
 PROBE_REL="sdk_mods/melee_arsenal_probe"
 BL2_CACHE_FILE="$REPO_ROOT/.bl2_dir"
@@ -172,7 +173,10 @@ cmd_build() {
 
   local -a extra_args=()
   if [ "$has_kit_arg" -eq 0 ]; then
-    [ -e "$DEFAULT_KIT" ] || die "Default kit not found at $DEFAULT_KIT (pass --kit <path>)."
+    if [ ! -f "$DEFAULT_KIT/socket_manifest.json" ]; then
+      info "Default kit missing; generating it first"
+      cmd_generate
+    fi
     extra_args+=(--kit "$DEFAULT_KIT")
   fi
 
@@ -183,12 +187,7 @@ cmd_build() {
   info "Compiling InkBlade UPK packages & manifest"
   "$py" "$REPO_ROOT/tools/compile_inkblade_upk.py" "${extra_args[@]}" "$@"
 
-  local cooked_mesh="$REPO_ROOT/$COOKED_REL/MeleeArsenalMeshes.upk"
-  if [ -f "$cooked_mesh" ]; then
-    mkdir -p "$REPO_ROOT/$MOD_REL/upk"
-    cp -f "$cooked_mesh" "$REPO_ROOT/$MOD_REL/upk/MeleeArsenalMeshes.upk"
-    ok "Synced $MOD_REL/upk/MeleeArsenalMeshes.upk"
-  fi
+
 }
 
 cmd_test() {
@@ -222,17 +221,17 @@ cmd_package() {
     esac
   done
 
-  if [ "$do_build" -eq 1 ] || [ ! -f "$REPO_ROOT/$COOKED_REL/MeleeArsenalTextures.upk" ]; then
+  if [ "$do_build" -eq 1 ] || [ ! -f "$REPO_ROOT/$COOKED_REL/MeleeArsenalTextures.upk" ] || [ ! -f "$REPO_ROOT/$COOKED_REL/MeleeArsenalMeshes.upk" ] || [ ! -f "$BUILD_MANIFEST" ]; then
     cmd_build
   fi
 
   local py ver
   py="$(pick_python)"
   ver="$(mod_version)"
-  mkdir -p "$REPO_ROOT/dist"
-  ensure_gitignored "dist/"
+  mkdir -p "$REPO_ROOT/build/dist"
+  ensure_gitignored "build/"
 
-  info "Building release archives (v$ver) -> dist/"
+  info "Building release archives (v$ver) -> build/dist/"
   "$py" - "$REPO_ROOT" "$ver" <<'PY'
 from pathlib import Path
 import sys
@@ -240,7 +239,7 @@ import zipfile
 
 repo = Path(sys.argv[1])
 ver = sys.argv[2]
-dist = repo / "dist"
+dist = repo / "build" / "dist"
 
 SKIP_DIRS = {"__pycache__", ".git", ".venv", ".pytest_cache", "dist", "assets", "reports"}
 SKIP_SUFFIXES = {".pyc", ".pyo", ".pyd", ".log"}
@@ -255,22 +254,22 @@ def should_skip(rel_parts: tuple[str, ...], path: Path) -> bool:
 mod_zip = dist / "melee_arsenal.zip"
 ver_zip = dist / f"melee_arsenal-v{ver}.zip"
 
-meshes_upk = repo / "WillowGame" / "CookedPCConsole" / "MeleeArsenalMeshes.upk"
-tex_upk = repo / "WillowGame" / "CookedPCConsole" / "MeleeArsenalTextures.upk"
+meshes_upk = repo / "build" / "WillowGame" / "CookedPCConsole" / "MeleeArsenalMeshes.upk"
+tex_upk = repo / "build" / "WillowGame" / "CookedPCConsole" / "MeleeArsenalTextures.upk"
 if not meshes_upk.is_file() or not tex_upk.is_file():
-    raise SystemExit("Missing cooked UPKs in WillowGame/CookedPCConsole/. Run './melee build' first.")
-
-bundled_mesh = repo / "sdk_mods" / "melee_arsenal" / "upk" / "MeleeArsenalMeshes.upk"
-bundled_mesh.parent.mkdir(parents=True, exist_ok=True)
-bundled_mesh.write_bytes(meshes_upk.read_bytes())
+    raise SystemExit("Missing cooked UPKs in build/WillowGame/CookedPCConsole/. Run './melee build' first.")
 
 with zipfile.ZipFile(mod_zip, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
     zf.write(meshes_upk, "WillowGame/CookedPCConsole/MeleeArsenalMeshes.upk")
     zf.write(tex_upk, "WillowGame/CookedPCConsole/MeleeArsenalTextures.upk")
+    zf.write(meshes_upk, "sdk_mods/melee_arsenal/upk/MeleeArsenalMeshes.upk")
+    zf.write(repo / "build" / "inkblade_compiled_manifest.json", "sdk_mods/melee_arsenal/data/inkblade_compiled_manifest.json")
     mod_dir = repo / "sdk_mods" / "melee_arsenal"
     for f in sorted(mod_dir.rglob("*")):
         if f.is_file():
             rel = f.relative_to(repo)
+            if "upk" in rel.parts or rel.as_posix() == "sdk_mods/melee_arsenal/data/inkblade_compiled_manifest.json":
+                continue
             if not should_skip(rel.parts, f):
                 zf.write(f, rel.as_posix())
 
@@ -278,7 +277,7 @@ ver_zip.write_bytes(mod_zip.read_bytes())
 
 src_zip = dist / "source.zip"
 with zipfile.ZipFile(src_zip, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zs:
-    for top in ("README.md", "melee", "sdk_mods", "tests", "tools"):
+    for top in ("README.md", ".gitignore", "melee", "sdk_mods", "tests", "tools"):
         target = repo / top
         if target.is_file():
             zs.write(target, target.name)
@@ -295,7 +294,7 @@ print(f"  melee_arsenal.zip        : {mod_zip.stat().st_size:>10,} bytes")
 print(f"  melee_arsenal-v{ver}.zip : {ver_zip.stat().st_size:>10,} bytes")
 print(f"  source.zip               : {src_zip.stat().st_size:>10,} bytes")
 PY
-  ok "Release packages written to $REPO_ROOT/dist/"
+  ok "Release packages written to $REPO_ROOT/build/dist/"
 }
 
 sync_python_mod_dir() {
@@ -310,6 +309,7 @@ sync_python_mod_dir() {
       --exclude ".DS_Store" \
       --exclude "melee_arsenal.log" \
       --exclude "reports/" \
+      --exclude "upk/" \
       "$src_dir/" "$dst_dir/"
   else
     local py
@@ -334,7 +334,7 @@ dst.mkdir(parents=True, exist_ok=True)
 
 for f in src.rglob("*"):
     rel = f.relative_to(src)
-    if "__pycache__" in rel.parts or "reports" in rel.parts or f.name == ".DS_Store" or f.suffix in {".pyc", ".pyo"}:
+    if "__pycache__" in rel.parts or "reports" in rel.parts or "upk" in rel.parts or f.name == ".DS_Store" or f.suffix in {".pyc", ".pyo"}:
         continue
     out = dst / rel
     if f.is_dir():
@@ -363,7 +363,7 @@ cmd_install() {
 
   local meshes_upk="$REPO_ROOT/$COOKED_REL/MeleeArsenalMeshes.upk"
   local tex_upk="$REPO_ROOT/$COOKED_REL/MeleeArsenalTextures.upk"
-  if [ ! -f "$meshes_upk" ] || [ ! -f "$tex_upk" ]; then
+  if [ ! -f "$meshes_upk" ] || [ ! -f "$tex_upk" ] || [ ! -f "$BUILD_MANIFEST" ]; then
     warn "Cooked UPKs missing in $COOKED_REL — building first..."
     cmd_build
   fi
@@ -373,13 +373,15 @@ cmd_install() {
   local cooked_dst="$bl2/WillowGame/CookedPCConsole"
 
   info "Installing Melee Arsenal v$(mod_version) -> $bl2"
-  mkdir -p "$cooked_dst" "$sdk_dir" "$REPO_ROOT/$MOD_REL/upk"
+  mkdir -p "$cooked_dst" "$sdk_dir"
   cp -f "$meshes_upk" "$cooked_dst/MeleeArsenalMeshes.upk"
   cp -f "$tex_upk" "$cooked_dst/MeleeArsenalTextures.upk"
-  cp -f "$meshes_upk" "$REPO_ROOT/$MOD_REL/upk/MeleeArsenalMeshes.upk"
   ok "Staged UPKs -> $cooked_dst/"
 
   sync_python_mod_dir "$REPO_ROOT/$MOD_REL" "$sdk_dir/melee_arsenal"
+  mkdir -p "$sdk_dir/melee_arsenal/upk" "$sdk_dir/melee_arsenal/data"
+  cp -f "$meshes_upk" "$sdk_dir/melee_arsenal/upk/MeleeArsenalMeshes.upk"
+  cp -f "$BUILD_MANIFEST" "$sdk_dir/melee_arsenal/data/inkblade_compiled_manifest.json"
   ok "Synced mod -> $sdk_dir/melee_arsenal/ (sidecar saves in _melee_arsenal_saves preserved)"
 
   if [ "$with_probe" -eq 1 ]; then
@@ -468,7 +470,7 @@ cmd_status() {
     printf "  InkBlade kit    : %s✗ missing%s (%s)\n" "$C_YELLOW" "$C_RESET" "$DEFAULT_KIT"
   fi
 
-  local manifest="$REPO_ROOT/$MOD_REL/data/inkblade_compiled_manifest.json"
+  local manifest="$BUILD_MANIFEST"
   if [ -f "$manifest" ]; then
     local rev
     rev="$("$py" -c "import json,sys; d=json.load(open(sys.argv[1])); print(f\"{d.get('kit_revision','?')} ({len(d.get('fragments',[]))} fragments)\")" "$manifest")"
@@ -513,7 +515,7 @@ cmd_clean() {
   info "Cleaning bytecode caches & build artifacts"
   find "$REPO_ROOT" \( -name "__pycache__" -o -name ".pytest_cache" \) -type d -prune -exec rm -rf {} +
   find "$REPO_ROOT" \( -name "*.pyc" -o -name "*.pyo" -o -name ".DS_Store" \) -type f -delete
-  rm -rf "$REPO_ROOT/$PROBE_REL/reports" "$REPO_ROOT/dist"
+  rm -rf "$REPO_ROOT/$PROBE_REL/reports" "$REPO_ROOT/build"
   ok "Workspace cleaned."
 }
 
@@ -557,8 +559,8 @@ ${C_BOLD}Usage:${C_RESET}
 
 ${C_BOLD}Commands:${C_RESET}
   ${C_CYAN}setup${C_RESET}                     Create .venv and install Pillow for UPK compilation
-  ${C_CYAN}build${C_RESET} [--kit <path>]      Compile InkBlade kit -> CookedPCConsole/*.upk + manifest JSON
-                            (defaults to ./assets/inkblade_bold_kit and syncs upk/ fallback)
+  ${C_CYAN}build${C_RESET} [--kit <path>]      Compile InkBlade kit -> build/ UPKs + manifest JSON
+                            (generates ./build/inkblade_kit automatically if absent)
   ${C_CYAN}generate${C_RESET} [options]        Regenerate the InkBlade kit (stages: geometry -> uv -> flat ->
                             mottle -> linework -> decals -> textures -> export)
                             Options: --list-stages, --only <s>, --from <s>, --force <s>,
@@ -566,14 +568,14 @@ ${C_BOLD}Commands:${C_RESET}
                                      --renders [dir] (default build/inkblade_renders)
   ${C_CYAN}test${C_RESET} [unittest-args]      Syntax-check all modules and run unit tests (e.g. -k world_drop)
   ${C_CYAN}preview${C_RESET}                   Roll & print sample Level 50 Melee Arsenal item cards & hit math
-  ${C_CYAN}package${C_RESET} [--build]         Build dist/melee_arsenal.zip, dist/melee_arsenal-vX.Y.Z.zip & dist/source.zip
+  ${C_CYAN}package${C_RESET} [--build]         Build release archives in build/dist/
   ${C_CYAN}install${C_RESET} [options]         Install UPKs + sdk_mods/melee_arsenal into Borderlands 2
                             Options: --bl2-dir <path> (cached in .bl2_dir), --probe
   ${C_CYAN}dev${C_RESET} [install-options]     Quick iterate: run quiet tests, then install to Borderlands 2
   ${C_CYAN}uninstall${C_RESET} [options]       Remove mod & UPKs from Borderlands 2 (--purge-saves to wipe saves)
   ${C_CYAN}status${C_RESET}                    Show repo, kit, UPK, Borderlands 2 sync, and sidecar save status
   ${C_CYAN}logs${C_RESET} [-f] [-n <lines>]    View or follow live in-game melee_arsenal.log
-  ${C_CYAN}clean${C_RESET}                     Remove __pycache__, .pyc, probe scratch reports, and dist/
+  ${C_CYAN}clean${C_RESET}                     Remove __pycache__, .pyc, probe scratch reports, and build/
   ${C_CYAN}all${C_RESET} [install-options]     Full pipeline: build -> test -> package -> install (if BL2 found)
 
 ${C_BOLD}Environment:${C_RESET}

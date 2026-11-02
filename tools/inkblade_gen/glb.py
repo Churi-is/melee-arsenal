@@ -1,6 +1,6 @@
 """GLB assembly: non-indexed flat-shaded primitive export plus a portable part merger.
 
-The export mirrors what the shipped kits contain: one `<part>.glb` per part with a `__ROOT` node,
+The export contains one `<part>.glb` per part with a `__ROOT` node,
 `MOUNT` / `SOCKET_*` empties, `FACE_FRONT` / `FACE_BACK` instances for bifacial parts, an embedded
 base-colour atlas, and two materials (`SURFACE` and `ELEMENT_ACCENT`) that drive the runtime's
 element recolouring.

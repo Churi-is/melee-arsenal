@@ -8,3 +8,8 @@ dist/
 
 # Staged Inkblade generator output & stage cache (./melee generate)
 build/
+
+# Local game outputs and cached install path
+/WillowGame/CookedPCConsole/
+/sdk_mods/melee_arsenal/upk/
+.bl2_dir
