@@ -18,16 +18,7 @@ from typing import Callable, Iterable, Sequence
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
-from .config import (
-    ATLAS_BACKGROUND,
-    ELEMENTS,
-    HATCH_RGB,
-    INK_RGB,
-    INK_SOFT_RGB,
-    PALETTE,
-    SHADOW_RGB,
-    hex_to_rgb,
-)
+from .config import ATLAS_BACKGROUND, ELEMENTS, INK_RGB, PALETTE, hex_to_rgb
 from .geometry import Part
 from .uv import Island, PartLayout, Vec2
 
@@ -115,26 +106,6 @@ def edit_island(
     size = (box[2] - box[0], box[3] - box[1])
     mask = _island_mask(island, size, origin)
     canvas.paste(fn(patch, mask, _local_polygon(island, origin)), box[:2])
-
-
-def draw_island(
-    canvas: Image.Image,
-    island: Island,
-    layout: PartLayout,
-    painter: Callable[[ImageDraw.ImageDraw, list[Vec2], tuple[int, int]], None],
-) -> None:
-    """Draw a transparent overlay clipped to the island and composite it in one go."""
-    box, origin = _island_box(island, layout, 0)
-    if box[2] <= box[0] or box[3] <= box[1]:
-        return
-    size = (box[2] - box[0], box[3] - box[1])
-    poly = _local_polygon(island, origin)
-    layer = Image.new("RGBA", size, (0, 0, 0, 0))
-    painter(ImageDraw.Draw(layer), poly, size)
-    mask = _island_mask(island, size, origin)
-    masked = Image.composite(layer, Image.new("RGBA", size, (0, 0, 0, 0)), mask)
-    out = Image.alpha_composite(canvas.crop(box).convert("RGBA"), masked)
-    canvas.paste(out.convert("RGB"), box[:2])
 
 
 # ---------------------------------------------------------------------------
@@ -310,149 +281,227 @@ def _polygon_area(poly: Sequence[Vec2]) -> float:
 
 
 def paint_linework(part: Part, layout: PartLayout, canvas: Image.Image, ink_px: int = 6) -> Image.Image:
-    """Weighted contours, angular shadow planes, corner hatching and directional scratches."""
-    rng = stage_rng(part.part_id, "linework")
-    stroke_large = max(2, int(ink_px))
-    stroke_medium = max(2, int(ink_px) - 1)
-    stroke_small = max(1, int(ink_px) - 3)
+    """Both ink passes of the shipped kit, in their original order.
+
+    1. `physical_uv.texture_face`'s finishing block: six converging hatch strokes off the first one
+       (or two) polygon corners, then a `INK_PX` stroke around the true polygon boundary.
+    2. `reink_bold.make_overlay`: translucent shadow planes, 3/5/7px weighted perimeters, broken pen
+       strokes, corner hatch clusters, fractured accents, scratch groups and highlight nicks, drawn
+       onto two layers, clipped to a 1px-eroded mask and composited over the atlas.
+    """
+    if ink_px:
+        _paint_face_ink(part.part_id, layout, canvas, int(ink_px))
+    shade, ink = linework_layers(part.part_id, layout)
+    return Image.alpha_composite(canvas.convert("RGBA"), Image.alpha_composite(shade, ink)).convert("RGB")
+
+
+def _paint_face_ink(part_id: str, layout: PartLayout, canvas: Image.Image, ink_px: int) -> None:
+    """`texture_face`'s hatch + perimeter block, per owned face in atlas order.
+
+    The reference keeps one `random.Random(part-seed)` stream for the whole part, so the hatch
+    jitter is drawn face by face.
+    """
+    rng = random.Random(int.from_bytes(hashlib.sha256(part_id.encode()).digest()[:8], "little"))
+    for island in layout.islands:
+        if not island.owner:
+            continue
+        x, y, w, h = island.rect
+        area = w * h
+        poly = _local_polygon(island, (x, y))
+        if len(poly) < 3:
+            continue
+        hatch = Image.new("RGBA", (w, h))
+        hatch_draw = ImageDraw.Draw(hatch)
+        if min(w, h) > 30:
+            for vx, vy in poly[: 1 if area < 16000 else 2]:
+                towardx = 1 if vx < w / 2 else -1
+                towardy = 1 if vy < h / 2 else -1
+                for j in range(6):
+                    hx = vx + towardx * (7 + j * 5)
+                    hy = vy + towardy * 7
+                    hatch_draw.line(
+                        (hx, hy, hx - towardx * 4, hy + towardy * (11 + rng.randrange(5))),
+                        fill=(34, 39, 43, 235),
+                        width=2,
+                    )
+        mask = Image.new("L", (w, h), 0)
+        ImageDraw.Draw(mask).polygon(poly, fill=255)
+        face = canvas.crop((x, y, x + w, y + h)).convert("RGBA")
+        face = Image.alpha_composite(face, hatch).convert("RGB")
+        # A shared-width stroke follows the true polygon boundary; the visible half is ~2px on either
+        # incident face, and very narrow faces can become all ink.
+        ImageDraw.Draw(face).line(poly + [poly[0]], fill=(11, 15, 21), width=ink_px, joint="curve")
+        canvas.paste(face, (x, y))
+
+
+def linework_layers(part_id: str, layout: PartLayout) -> tuple[Image.Image, Image.Image]:
+    """The R5 overlay as `(shade, ink)`: translucent shadow planes beneath, ink on top, both clipped.
+
+    Split out of `paint_linework` so the port can be compared layer-for-layer with the reference
+    implementation in the tests.
+    """
+    width, height = layout.atlas_size
+    shade = Image.new("RGBA", (width, height))
+    ink = Image.new("RGBA", (width, height))
+    sd = ImageDraw.Draw(shade)
+    draw = ImageDraw.Draw(ink)
+    mask = Image.new("L", (width, height), 0)
+    mask_draw = ImageDraw.Draw(mask)
+    for island in layout.islands:
+        if island.owner and len(island.polygon) >= 3:
+            mask_draw.polygon(island.polygon, fill=255)
+    mask_px = mask.load()
+
+    rng = random.Random(int(hashlib.sha256(("bold5" + part_id).encode()).hexdigest()[:12], 16))
 
     for island in layout.islands:
         if not island.owner:
             continue
-        _, _, w, h = island.rect
-        area = _polygon_area(island.polygon)
-        if area < 1.0 or min(w, h) < 2:
+        poly = [(float(px), float(py)) for px, py in island.polygon]
+        if len(poly) < 3:
             continue
-        seed = rng.randrange(2**32)
+        area = _polygon_area(poly)
+        x, y, ww, hh = island.rect
+        # Same acceptance test as `if area<85 or min(ww,hh)<6: continue`: slivers stay unpainted.
+        if area < 85 or min(ww, hh) < 6:
+            continue
+        centroid = (
+            sum(point[0] for point in poly) / len(poly),
+            sum(point[1] for point in poly) / len(poly),
+        )
+        short = min(ww, hh)
 
-        def painter(draw: ImageDraw.ImageDraw, poly: list[Vec2], size: tuple[int, int], *, seed=seed, area=area, w=w, h=h) -> None:
-            local = random.Random(seed)
-            if len(poly) < 3:
-                return
-            short = min(w, h)
-            cx = sum(p[0] for p in poly) / len(poly)
-            cy = sum(p[1] for p in poly) / len(poly)
-
-            # Two bands of flat, translucent shadow form angular comic-book value planes.
-            if area > 1100:
-                candidates = sorted(
-                    range(len(poly)),
-                    key=lambda i: math.dist(poly[i], poly[(i + 1) % len(poly)]),
-                    reverse=True,
+        # Two bands of flat, translucent shadow form angular comic-book value planes.
+        if area > 1100:
+            candidates = sorted(
+                range(len(poly)),
+                key=lambda i: math.hypot(
+                    poly[(i + 1) % len(poly)][0] - poly[i][0],
+                    poly[(i + 1) % len(poly)][1] - poly[i][1],
+                ),
+                reverse=True,
+            )
+            for ii in candidates[: 1 if area < 7000 else 2]:
+                p = poly[ii]
+                q = poly[(ii + 1) % len(poly)]
+                center = ((p[0] + q[0]) / 2, (p[1] + q[1]) / 2)
+                tx, ty = centroid[0] - center[0], centroid[1] - center[1]
+                norm = math.hypot(tx, ty) + 1e-9
+                tx, ty = tx / norm, ty / norm
+                inset = min(20, max(5, short * 0.13))
+                shallow = inset * 0.25
+                sd.polygon(
+                    [
+                        (p[0] + tx * shallow, p[1] + ty * shallow),
+                        (q[0] + tx * shallow, q[1] + ty * shallow),
+                        (q[0] + tx * inset, q[1] + ty * inset),
+                        (p[0] + tx * inset, p[1] + ty * inset),
+                    ],
+                    fill=(24, 29, 34, rng.randint(28, 52)),
                 )
-                for index in candidates[: 1 if area < 7000 else 2]:
-                    p = poly[index]
-                    q = poly[(index + 1) % len(poly)]
-                    centre = ((p[0] + q[0]) / 2, (p[1] + q[1]) / 2)
-                    tx, ty = cx - centre[0], cy - centre[1]
-                    norm = math.hypot(tx, ty) + 1e-9
-                    tx, ty = tx / norm, ty / norm
-                    inset = min(20.0, max(5.0, short * 0.13))
-                    shallow = inset * 0.25
-                    draw.polygon(
-                        [
-                            (p[0] + tx * shallow, p[1] + ty * shallow),
-                            (q[0] + tx * shallow, q[1] + ty * shallow),
-                            (q[0] + tx * inset, q[1] + ty * inset),
-                            (p[0] + tx * inset, p[1] + ty * inset),
-                        ],
-                        fill=(*SHADOW_RGB, local.randint(28, 52)),
+
+        # Weighted dark perimeter. This retraces UV island boundaries only: no triangle diagonals.
+        draw.line(
+            list(poly) + [poly[0]],
+            fill=(13, 15, 20, 230),
+            width=3 if short < 22 else 5 if short < 65 else 7,
+            joint="curve",
+        )
+
+        # Broken second pen-strokes follow edges, with a little variation in placement.
+        for i, p in enumerate(poly):
+            q = poly[(i + 1) % len(poly)]
+            length = math.hypot(q[0] - p[0], q[1] - p[1])
+            if length < 25 or rng.random() > 0.82:
+                continue
+            ix = centroid[0] - (p[0] + q[0]) * 0.5
+            iy = centroid[1] - (p[1] + q[1]) * 0.5
+            norm = math.hypot(ix, iy) + 1e-9
+            ix, iy = ix / norm, iy / norm
+            fa = rng.uniform(0.06, 0.2)
+            oa = rng.uniform(5, 9)
+            a = (p[0] + (q[0] - p[0]) * fa + ix * oa, p[1] + (q[1] - p[1]) * fa + iy * oa)
+            fz = rng.uniform(0.68, 0.94)
+            oz = rng.uniform(5, 9)
+            z = (p[0] + (q[0] - p[0]) * fz + ix * oz, p[1] + (q[1] - p[1]) * fz + iy * oz)
+            jitter = rng.uniform(-1.2, 1.2)
+            mid = ((a[0] + z[0]) * 0.5 + ix * jitter, (a[1] + z[1]) * 0.5 + iy * jitter)
+            draw.line([a, mid, z], fill=(17, 17, 21, rng.randint(150, 220)), width=rng.choice([2, 2, 3]))
+
+        # Corner shadows are layered beneath clusters of converging, uneven hatch strokes.
+        if area > 550:
+            eligible = []
+            for i, corner in enumerate(poly):
+                la = math.hypot(poly[i - 1][0] - corner[0], poly[i - 1][1] - corner[1])
+                lb = math.hypot(poly[(i + 1) % len(poly)][0] - corner[0], poly[(i + 1) % len(poly)][1] - corner[1])
+                if min(la, lb) >= 12:
+                    eligible.append(i)
+            rng.shuffle(eligible)
+            n = min(len(eligible), 2 if area < 3500 else 3 if area < 14000 else 5)
+            for i in eligible[:n]:
+                corner = poly[i]
+                vax, vay = poly[i - 1][0] - corner[0], poly[i - 1][1] - corner[1]
+                vbx, vby = poly[(i + 1) % len(poly)][0] - corner[0], poly[(i + 1) % len(poly)][1] - corner[1]
+                la = math.hypot(vax, vay)
+                lb = math.hypot(vbx, vby)
+                vax, vay = vax / la, vay / la
+                vbx, vby = vbx / lb, vby / lb
+                span = min(105, max(16, math.sqrt(area) * 0.42), la * 0.5, lb * 0.5)
+                sd.polygon(
+                    [
+                        (corner[0], corner[1]),
+                        (corner[0] + vax * span * 0.9, corner[1] + vay * span * 0.9),
+                        (corner[0] + vbx * span * 0.9, corner[1] + vby * span * 0.9),
+                    ],
+                    fill=(22, 25, 29, rng.randint(35, 66)),
+                )
+                steps = max(4, min(13, int(span / 6)))
+                for j in range(1, steps + 1):
+                    f = (j + 0.4) / float(steps + 2)
+                    jitter = rng.uniform(-1.0, 1.0)
+                    u = span * f
+                    scale = rng.uniform(0.75, 1.05)
+                    start = (corner[0] + vax * u + vbx * 2, corner[1] + vay * u + vby * 2)
+                    end = (
+                        corner[0] + vbx * (u * scale) + vax * 2,
+                        corner[1] + vby * (u * scale) + vay * 2,
                     )
-
-            # Weighted dark perimeter: retraces the island boundary only, never triangle diagonals.
-            weight = stroke_small if short < 22 else stroke_medium if short < 65 else stroke_large
-            draw.line(list(poly) + [poly[0]], fill=(*INK_SOFT_RGB, 230), width=weight, joint="curve")
-
-            # Broken second pen-strokes follow the edges with a little variation in placement.
-            for i, p in enumerate(poly):
-                q = poly[(i + 1) % len(poly)]
-                length = math.dist(p, q)
-                if length < 25 or local.random() > 0.82:
-                    continue
-                ix, iy = cx - (p[0] + q[0]) * 0.5, cy - (p[1] + q[1]) * 0.5
-                norm = math.hypot(ix, iy) + 1e-9
-                ix, iy = ix / norm, iy / norm
-                a = (
-                    p[0] + (q[0] - p[0]) * local.uniform(0.06, 0.2) + ix * local.uniform(5, 9),
-                    p[1] + (q[1] - p[1]) * local.uniform(0.06, 0.2) + iy * local.uniform(5, 9),
-                )
-                z = (
-                    p[0] + (q[0] - p[0]) * local.uniform(0.68, 0.94) + ix * local.uniform(5, 9),
-                    p[1] + (q[1] - p[1]) * local.uniform(0.68, 0.94) + iy * local.uniform(5, 9),
-                )
-                mid = (
-                    (a[0] + z[0]) * 0.5 + ix * local.uniform(-1.2, 1.2),
-                    (a[1] + z[1]) * 0.5 + iy * local.uniform(-1.2, 1.2),
-                )
-                draw.line([a, mid, z], fill=(17, 17, 21, local.randint(150, 220)), width=local.choice([2, 2, 3]))
-
-            # Corner shadows under clustered, uneven hatch strokes.
-            if area > 550:
-                eligible = []
-                for i, corner in enumerate(poly):
-                    la = math.dist(poly[i - 1], corner)
-                    lb = math.dist(poly[(i + 1) % len(poly)], corner)
-                    if min(la, lb) >= 12:
-                        eligible.append(i)
-                local.shuffle(eligible)
-                count = min(len(eligible), 2 if area < 3500 else 3 if area < 14000 else 5)
-                for i in eligible[:count]:
-                    corner = poly[i]
-                    px, py = poly[i - 1][0] - corner[0], poly[i - 1][1] - corner[1]
-                    qx, qy = poly[(i + 1) % len(poly)][0] - corner[0], poly[(i + 1) % len(poly)][1] - corner[1]
-                    la = math.hypot(px, py) or 1.0
-                    lb = math.hypot(qx, qy) or 1.0
-                    px, py = px / la, py / la
-                    qx, qy = qx / lb, qy / lb
-                    span = min(105.0, max(16.0, math.sqrt(area) * 0.42), la * 0.5, lb * 0.5)
-                    draw.polygon(
-                        [
-                            corner,
-                            (corner[0] + px * span * 0.9, corner[1] + py * span * 0.9),
-                            (corner[0] + qx * span * 0.9, corner[1] + qy * span * 0.9),
-                        ],
-                        fill=(*SHADOW_RGB, local.randint(35, 66)),
-                    )
-                    steps = max(4, min(13, int(span / 6)))
-                    for j in range(1, steps + 1):
-                        f = (j + 0.4) / float(steps + 2)
-                        jitter = local.uniform(-1.0, 1.0)
-                        u = span * f
-                        start = (corner[0] + px * u + qx * 2, corner[1] + py * u + qy * 2)
-                        end = (
-                            corner[0] + qx * (u * local.uniform(0.75, 1.05)) + px * 2,
-                            corner[1] + qy * (u * local.uniform(0.75, 1.05)) + py * 2,
-                        )
-                        mid = ((start[0] + end[0]) * 0.5 + jitter, (start[1] + end[1]) * 0.5 - jitter)
-                        draw.line(
-                            [start, mid, end],
-                            fill=(*HATCH_RGB, local.randint(180, 240)),
-                            width=local.choice([2, 2, 3]),
-                        )
-                    if span > 30 and local.random() < 0.55:
-                        p = (corner[0] + px * span * 0.66 + qx * span * 0.1, corner[1] + py * span * 0.66 + qy * span * 0.1)
-                        q = (p[0] + qx * min(14, span * 0.22), p[1] + qy * min(14, span * 0.22))
-                        draw.line([p, q], fill=(17, 17, 22, 185), width=2)
-
-            # Grouped directional scratches, including offset highlight nicks.
-            if area > 2500:
-                x0, y0 = min(p[0] for p in poly), min(p[1] for p in poly)
-                for _ in range(min(22, int(area / 5000) + 4)):
-                    px = local.uniform(x0 + 1, x0 + w - 2)
-                    py = local.uniform(y0 + 1, y0 + h - 2)
-                    angle = local.uniform(-0.35, 0.35) if w >= h else local.uniform(1.18, 1.94)
-                    length = local.uniform(5, min(45, max(7, max(w, h) * 0.10)))
-                    dx, dy = math.cos(angle) * length, math.sin(angle) * length
+                    mid = ((start[0] + end[0]) * 0.5 + jitter, (start[1] + end[1]) * 0.5 - jitter)
                     draw.line(
-                        [(px, py), (px + dx * 0.55, py + dy * 0.55), (px + dx, py + dy)],
-                        fill=(20, 19, 23, local.randint(125, 205)),
-                        width=local.choice([1, 2, 2]),
+                        [start, mid, end],
+                        fill=(15, 16, 20, rng.randint(180, 240)),
+                        width=rng.choice([2, 2, 3]),
                     )
-                    if local.random() < 0.35:
-                        draw.line([(px + 1, py + 3), (px + dx * 0.6, py + dy * 0.6 + 3)], fill=(255, 240, 210, 130), width=1)
+                # A small fractured accent helps the hatching read as hand-inked wear.
+                if span > 30 and rng.random() < 0.55:
+                    p = (corner[0] + vax * span * 0.66 + vbx * span * 0.1, corner[1] + vay * span * 0.66 + vby * span * 0.1)
+                    reach = min(14, span * 0.22)
+                    q = (p[0] + vbx * reach, p[1] + vby * reach)
+                    draw.line([p, q], fill=(17, 17, 22, 185), width=2)
 
-        draw_island(canvas, island, layout, painter)
-    return canvas
+        # Grouped directional scratches, including offset highlight nicks.
+        if area > 2500:
+            for _ in range(min(22, int(area / 5000) + 4)):
+                px = rng.randint(x, x + ww - 1)
+                py = rng.randint(y, y + hh - 1)
+                if px < 0 or py < 0 or px >= width or py >= height or not mask_px[px, py]:
+                    continue
+                angle = rng.uniform(-0.35, 0.35) if ww >= hh else rng.uniform(1.18, 1.94)
+                length = rng.uniform(5, min(45, max(7, max(ww, hh) * 0.10)))
+                dx, dy = math.cos(angle) * length, math.sin(angle) * length
+                draw.line(
+                    [(px, py), (px + dx * 0.55, py + dy * 0.55), (px + dx, py + dy)],
+                    fill=(20, 19, 23, rng.randint(125, 205)),
+                    width=rng.choice([1, 2, 2]),
+                )
+                if rng.random() < 0.35:
+                    draw.line([(px + 1, py + 3), (px + dx * 0.6, py + dy * 0.6 + 3)], fill=(255, 240, 210, 130), width=1)
+
+    # Clip both layers to the islands, one pixel inside the boundary.
+    clip = mask.filter(ImageFilter.MinFilter(3))
+    for layer in (shade, ink):
+        layer.putalpha(ImageChops.darker(layer.getchannel("A"), clip))
+    return shade, ink
 
 
 # ---------------------------------------------------------------------------
@@ -522,9 +571,9 @@ def finalise_atlas(
     canvas: Image.Image,
     layout: PartLayout,
     colours: dict[int, RGB],
-    quantize_colors: int | None = 64,
+    quantize_colors: int | None = None,
 ) -> Image.Image:
-    """Seal padding and apply the shipped indexed-palette quantisation."""
+    """Seal padding and, when asked, reduce the atlas to an indexed palette."""
     sealed = seal_padding(canvas, layout, colours)
     if quantize_colors:
         return sealed.quantize(colors=quantize_colors, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE)

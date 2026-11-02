@@ -46,7 +46,7 @@ from .uv import Island, PartLayout, unwrap_parts
 MANIFEST_SCHEMA = "inkblade.socket-kit/1.0"
 TEXTURE_NOTES = (
     "Staged atlas: flat palette, mottled wear, bold ink contours, polygonal shadow planes, "
-    "hatch clusters and scratches baked into one 64-colour RGB PNG."
+    "hatch clusters and scratches baked into one RGB PNG."
 )
 
 
@@ -687,7 +687,7 @@ def default_stages() -> list[Stage]:
             _load_canvases,
             extra_key=_decals_key,
         ),
-        Stage("textures", "Seal padding, quantise and write PNGs", _run_textures, _save_finals, _load_finals),
+        Stage("textures", "Seal padding and write the final PNGs", _run_textures, _save_finals, _load_finals),
         Stage(
             "export",
             "Write GLBs, UV layouts and the socket manifest",

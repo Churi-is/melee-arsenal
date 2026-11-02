@@ -13,6 +13,7 @@ inserted without editing anything that already exists.
 ./melee generate --from textures      # re-run from a stage onwards, keeping earlier cache
 ./melee generate --decals assets/inkblade_decals --parts blade_jakobs,grip_hyperion
 ./melee generate --renders                 # + preview PNGs in build/inkblade_renders
+./melee generate --quantise 64             # optional indexed palette (shipped atlases are RGB)
 ./melee generate --out dist/Inkblade_Modular_Kit_r6.zip
 ./melee build --kit build/inkblade_kit
 ```
@@ -27,9 +28,9 @@ inserted without editing anything that already exists.
 | 2 | `uv` | Newell-normal face projection at one shared texel density, padded shelf packing into a pow2 atlas, island template reuse for mirrored rear faces. | `*.json` (`inkblade.physical-uv/2.0`) |
 | 3 | `flat` | **Flat textures saved as PNGs**: one solid palette colour per UV island (per-island brightness jitter, lightened `edge` role). | `<part>.png` (**the flat pass on disk**) |
 | 4 | `mottle` | Paint wash (three-octave field), deposits, dry-brush streaks, gouges, chipped paint, tally marks, edge chips. | `<part>.png` |
-| 5 | `linework` | The bold ink look: weighted contours, angular shadow planes, broken pen strokes, corner hatch clusters, scratches and highlight nicks. | `<part>.png` |
+| 5 | `linework` | The bold ink look, ported line-for-line from the shipped kit: `reink_bold.py`'s overlay (translucent shadow planes, 3/5/7px weighted perimeters, broken pen strokes, corner hatch clusters, fractured accents, scratch groups, highlight nicks, all clipped to a 1px-eroded island mask) over `physical_uv.texture_face`'s corner hatch strokes and `INK_PX` boundary. | `<part>.png` |
 | 6 | `decals` | Optional external decal art (extension point, no-op without art). | `<part>.png` |
-| 7 | `textures` | Seal island colour into the UV padding, quantise to 64 colours, write the shipped atlases. | `<part>_basecolor.png` |
+| 7 | `textures` | Seal island colour into the UV padding and write the final atlases (`--quantise N` optionally reduces them to an indexed palette; off by default because the shipped kit's atlases are RGB). | `<part>_basecolor.png` |
 | 8 | `export` | GLBs (embedded atlas, sockets, `FACE_FRONT`/`FACE_BACK`), assembled combinations, UV layout JSONs, `socket_manifest.json`, kit README. | `models/`, `textures/`, manifest |
 | 9 | `render` | Preview PNGs via the built-in software rasteriser: 720×720 part and combination tiles plus labelled overview sheets. Optional (`--renders`). | `build/inkblade_renders/{parts,combinations,overview_*.png}` |
 

@@ -55,7 +55,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--from", dest="start", default="", help="run the stack from this stage onwards")
     parser.add_argument("--force", default="", help="comma-separated stages to ignore cached output for")
     parser.add_argument("--no-combinations", action="store_true", help="skip the assembled example GLBs")
-    parser.add_argument("--no-quantise", action="store_true", help="keep 24-bit atlases instead of palettes")
+    parser.add_argument(
+        "--quantise",
+        type=int,
+        default=None,
+        metavar="COLORS",
+        help="quantise finished atlases to an indexed palette (e.g. 64); off by default",
+    )
     parser.add_argument(
         "--renders",
         nargs="?",
@@ -88,7 +94,7 @@ def config_from_args(args: argparse.Namespace) -> RunConfig:
         ink_px=int(args.ink_px),
         padding=int(args.padding),
         seed=str(args.seed),
-        quantize_colors=None if args.no_quantise else 64,
+        quantize_colors=int(args.quantise) if args.quantise else None,
         decal_dir=Path(args.decals) if args.decals else None,
         decal_fit=float(args.decal_fit),
         bake_combinations=not args.no_combinations,

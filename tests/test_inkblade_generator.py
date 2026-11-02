@@ -1,13 +1,15 @@
 """Tests for the staged Inkblade kit generator (`tools/inkblade_gen`)."""
 from __future__ import annotations
 
+import hashlib
 import json
+import random
 from pathlib import Path
 import struct
 import tempfile
 import unittest
 
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from tools.inkblade_gen import Pipeline, RunConfig
 from tools.inkblade_gen.config import ELEMENTS
@@ -324,10 +326,225 @@ def _paint_atlas_bytes(cfg: RunConfig, parts, layouts) -> bytes:
     canvas = textures.new_canvas(layout)
     canvas = textures.paint_flat_colours(part, layout, canvas, cfg.seed)
     canvas = textures.paint_mottle(part, layout, canvas)
-    canvas = textures.paint_linework(part, layout, canvas, ink_px=cfg.ink_px)
+    canvas = textures.paint_linework(part, layout, canvas)
     colours = textures.role_colours(part, layout, cfg.seed)
     final = textures.finalise_atlas(canvas, layout, colours, cfg.quantize_colors).convert("RGB")
     return final.tobytes()
+
+
+class LineworkPortTests(unittest.TestCase):
+    """The ink pass must be the bold kit's overlay, not an approximation of it.
+
+    `reink_bold.py` draws its overlay with numpy `float64` polygons and cv2 masks. This test runs that
+    exact algorithm (transcribed below with numpy kept, only the contour source swapped for the UV
+    island polygon) and compares it to the pure-Python port layer by layer.
+    """
+
+    @staticmethod
+    def _reference_layers(layout, part_id):
+        """Verbatim R5 overlay loop, from `assets/inkblade_bold_kit/tools/reink_bold.py`.
+
+        One RNG stream for the whole atlas and islands in layout order, exactly like the original.
+        """
+        import hashlib
+        import math
+        import random
+
+        import numpy as np
+        from PIL import Image, ImageDraw, ImageFilter
+
+        width, height = layout.atlas_size
+        shade = Image.new("RGBA", (width, height))
+        ink = Image.new("RGBA", (width, height))
+        sd = ImageDraw.Draw(shade)
+        draw = ImageDraw.Draw(ink)
+        rng = random.Random(int(hashlib.sha256(("bold5" + part_id).encode()).hexdigest()[:12], 16))
+        # `cv2.fillConvexPoly(mask, ...)`: the union of the island's triangles, as one filled polygon.
+        mask_image = Image.new("L", (width, height), 0)
+        mask_draw = ImageDraw.Draw(mask_image)
+        for island in layout.islands:
+            if island.owner and len(island.polygon) >= 3:
+                mask_draw.polygon([tuple(v) for v in island.polygon], fill=255)
+        mask = np.array(mask_image)
+        for island in layout.islands:
+          if not island.owner or len(island.polygon) < 3:
+            continue
+          poly = list(island.polygon)
+          x, y, ww, hh = island.rect
+          area = 0.5 * abs(sum(poly[i][0] * poly[(i + 1) % len(poly)][1] - poly[(i + 1) % len(poly)][0] * poly[i][1] for i in range(len(poly))))
+          if area < 85 or min(ww, hh) < 6:
+            continue
+          poly = np.array(poly, dtype=float)
+          centroid = poly.mean(axis=0)
+          short = min(ww, hh)
+          if area > 1100:
+              candidates = sorted(
+                  range(len(poly)),
+                  key=lambda i: np.linalg.norm(poly[(i + 1) % len(poly)] - poly[i]),
+                  reverse=True,
+              )
+              for ii in candidates[: 1 if area < 7000 else 2]:
+                  p_ = poly[ii]
+                  q = poly[(ii + 1) % len(poly)]
+                  center = (p_ + q) / 2
+                  t = centroid - center
+                  t = t / (np.linalg.norm(t) + 1e-9)
+                  inset = min(20, max(5, short * 0.13))
+                  shallow = inset * 0.25
+                  sd.polygon(
+                      [tuple(p_ + t * shallow), tuple(q + t * shallow), tuple(q + t * inset), tuple(p_ + t * inset)],
+                      fill=(24, 29, 34, rng.randint(28, 52)),
+                  )
+          perimeter = [tuple(v) for v in poly] + [tuple(poly[0])]
+          weight = 3 if short < 22 else 5 if short < 65 else 7
+          draw.line(perimeter, fill=(13, 15, 20, 230), width=weight, joint="curve")
+          for i, p_ in enumerate(poly):
+              q = poly[(i + 1) % len(poly)]
+              length = float(np.linalg.norm(q - p_))
+              if length < 25 or rng.random() > 0.82:
+                  continue
+              inward = centroid - (p_ + q) * 0.5
+              inward /= np.linalg.norm(inward) + 1e-9
+              a = p_ + (q - p_) * rng.uniform(0.06, 0.2) + inward * rng.uniform(5, 9)
+              z = p_ + (q - p_) * rng.uniform(0.68, 0.94) + inward * rng.uniform(5, 9)
+              mid = (a + z) * 0.5 + inward * rng.uniform(-1.2, 1.2)
+              draw.line([tuple(a), tuple(mid), tuple(z)], fill=(17, 17, 21, rng.randint(150, 220)), width=rng.choice([2, 2, 3]))
+          if area > 550:
+              eligible = []
+              for i, corner in enumerate(poly):
+                  la = np.linalg.norm(poly[i - 1] - corner)
+                  lb = np.linalg.norm(poly[(i + 1) % len(poly)] - corner)
+                  if min(la, lb) >= 12:
+                      eligible.append(i)
+              rng.shuffle(eligible)
+              count = min(len(eligible), 2 if area < 3500 else 3 if area < 14000 else 5)
+              for i in eligible[:count]:
+                  corner = poly[i]
+                  va = poly[i - 1] - corner
+                  vb = poly[(i + 1) % len(poly)] - corner
+                  la = np.linalg.norm(va)
+                  lb = np.linalg.norm(vb)
+                  va /= la
+                  vb /= lb
+                  span = min(105, max(16, math.sqrt(area) * 0.42), la * 0.5, lb * 0.5)
+                  sd.polygon(
+                      [tuple(corner), tuple(corner + va * span * 0.9), tuple(corner + vb * span * 0.9)],
+                      fill=(22, 25, 29, rng.randint(35, 66)),
+                  )
+                  steps = max(4, min(13, int(span / 6)))
+                  for j in range(1, steps + 1):
+                      f = (j + 0.4) / float(steps + 2)
+                      jitter = rng.uniform(-1.0, 1.0)
+                      u = span * f
+                      start = corner + va * u + vb * 2
+                      end = corner + vb * (u * rng.uniform(0.75, 1.05)) + va * 2
+                      mid = (start + end) * 0.5 + np.array([jitter, -jitter])
+                      draw.line([tuple(start), tuple(mid), tuple(end)], fill=(15, 16, 20, rng.randint(180, 240)), width=rng.choice([2, 2, 3]))
+                  if span > 30 and rng.random() < 0.55:
+                      p_ = corner + va * span * 0.66 + vb * span * 0.1
+                      q = p_ + vb * min(14, span * 0.22)
+                      draw.line([tuple(p_), tuple(q)], fill=(17, 17, 22, 185), width=2)
+          if area > 2500:
+              for _ in range(min(22, int(area / 5000) + 4)):
+                  px = rng.randint(x, x + ww - 1)
+                  py = rng.randint(y, y + hh - 1)
+                  if px < 0 or py < 0 or px >= width or py >= height or not mask[py, px]:
+                      continue
+                  angle = rng.uniform(-0.35, 0.35) if ww >= hh else rng.uniform(1.18, 1.94)
+                  length = rng.uniform(5, min(45, max(7, max(ww, hh) * 0.1)))
+                  dx = math.cos(angle) * length
+                  dy = math.sin(angle) * length
+                  draw.line(
+                      [(px, py), (px + dx * 0.55, py + dy * 0.55), (px + dx, py + dy)],
+                      fill=(20, 19, 23, rng.randint(125, 205)),
+                      width=rng.choice([1, 2, 2]),
+                  )
+                  if rng.random() < 0.35:
+                      draw.line([(px + 1, py + 3), (px + dx * 0.6, py + dy * 0.6 + 3)], fill=(255, 240, 210, 130), width=1)
+          # `cv2.erode(mask, np.ones((3,3),np.uint8), iterations=1)`; Pillow's MinFilter(3) is the same
+          # 3x3 erosion, substituted in both the port and here so this test compares the drawing code.
+        clip = np.array(mask_image.filter(ImageFilter.MinFilter(3)))
+        for layer in (shade, ink):
+            alpha = np.minimum(np.asarray(layer.getchannel("A")), clip)
+            layer.putalpha(Image.fromarray(alpha.astype("uint8")))
+        return shade, ink
+
+    def test_port_matches_the_reference_overlay(self) -> None:
+        try:
+            import numpy  # noqa: F401
+        except ImportError:  # pragma: no cover - numpy is only needed for this cross-check
+            self.skipTest("numpy unavailable")
+
+        from PIL import ImageChops
+
+        from tools.inkblade_gen import textures
+
+        cfg = RunConfig(
+            density=768.0, parts=("blade_jakobs", "grip_torgue", "accessory_serrated_edge")
+        )
+        parts = build_parts(cfg.parts)
+        layouts = unwrap_parts(parts, cfg)
+        for part_id, layout in layouts.items():
+            mine_shade, mine_ink = textures.linework_layers(part_id, layout)
+            ref_shade, ref_ink = self._reference_layers(layout, part_id)
+            for name, mine, ref in (("shade", mine_shade, ref_shade), ("ink", mine_ink, ref_ink)):
+                difference = ImageChops.difference(mine, ref)
+                mismatched = sum(1 for value in difference.tobytes() if value)
+                self.assertEqual(mismatched, 0, f"{part_id}: {name} layer differs from the R5 overlay")
+
+
+class FaceInkPortTests(unittest.TestCase):
+    """The `texture_face` hatch/perimeter block must match the reference line for line."""
+
+    def _reference_canvas(self, layout, part_id: str, ink_px: int):
+        """Verbatim transcription of `source/r3/tools/physical_uv.py::texture_face`'s ink block."""
+        rng = random.Random(int.from_bytes(hashlib.sha256(part_id.encode()).digest()[:8], "little"))
+        canvas = Image.new("RGB", layout.atlas_size, (13, 17, 23))
+        for island in layout.islands:
+            if not island.owner:
+                continue
+            x, y, w, h = island.rect
+            area = w * h
+            polygon = [(float(px - x), float(py - y)) for px, py in island.polygon]
+            canvas.paste(Image.new("RGB", (w, h), (200, 200, 200)), (x, y))
+            hatch = Image.new("RGBA", (w, h))
+            hd = ImageDraw.Draw(hatch)
+            if min(w, h) > 30:
+                for vx, vy in polygon[: 1 if area < 16000 else 2]:
+                    towardx = 1 if vx < w / 2 else -1
+                    towardy = 1 if vy < h / 2 else -1
+                    for j in range(6):
+                        hx = vx + towardx * (7 + j * 5)
+                        hy = vy + towardy * 7
+                        hd.line(
+                            (hx, hy, hx - towardx * 4, hy + towardy * (11 + rng.randrange(5))),
+                            fill=(34, 39, 43, 235),
+                            width=2,
+                        )
+            face = canvas.crop((x, y, x + w, y + h)).convert("RGBA")
+            face = Image.alpha_composite(face, hatch).convert("RGB")
+            ImageDraw.Draw(face).line(polygon + [polygon[0]], fill=(11, 15, 21), width=int(ink_px), joint="curve")
+            canvas.paste(face, (x, y))
+        return canvas
+
+    def test_face_ink_matches_the_reference(self) -> None:
+        from PIL import ImageChops
+
+        from tools.inkblade_gen import textures
+
+        cfg = RunConfig(density=768.0, parts=("grip_jakobs", "blade_jakobs", "accessory_serrated_edge"))
+        parts = build_parts(cfg.parts)
+        layouts = unwrap_parts(parts, cfg)
+        for part_id, layout in layouts.items():
+            mine = Image.new("RGB", layout.atlas_size, (13, 17, 23))
+            for island in layout.islands:
+                if island.owner:
+                    mine.paste(Image.new("RGB", island.rect[2:], (200, 200, 200)), island.rect[:2])
+            textures._paint_face_ink(part_id, layout, mine, int(cfg.ink_px))
+            ref = self._reference_canvas(layout, part_id, int(cfg.ink_px))
+            difference = ImageChops.difference(mine, ref)
+            mismatched = sum(1 for value in difference.tobytes() if value)
+            self.assertEqual(mismatched, 0, f"{part_id}: face ink differs from the reference")
 
 
 class RenderStageTests(unittest.TestCase):
@@ -424,7 +641,7 @@ def _painted_state(cfg: RunConfig, parts, layouts):
         canvas = textures.new_canvas(layout)
         canvas = textures.paint_flat_colours(parts[part_id], layout, canvas, cfg.seed)
         canvas = textures.paint_mottle(parts[part_id], layout, canvas)
-        canvas = textures.paint_linework(parts[part_id], layout, canvas, ink_px=cfg.ink_px)
+        canvas = textures.paint_linework(parts[part_id], layout, canvas)
         colours = textures.role_colours(parts[part_id], layout, cfg.seed)
         state.colours[part_id] = colours
         state.finals[part_id] = textures.finalise_atlas(canvas, layout, colours, cfg.quantize_colors)

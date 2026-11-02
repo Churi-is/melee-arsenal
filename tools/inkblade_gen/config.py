@@ -42,9 +42,6 @@ RARITY_TINTS: dict[str, str] = {
 ATLAS_BACKGROUND: tuple[int, int, int] = (13, 17, 23)
 # Ink colour used by every line stage, and the charcoal used by the shading/hatch stage.
 INK_RGB: tuple[int, int, int] = (11, 15, 21)
-INK_SOFT_RGB: tuple[int, int, int] = (13, 15, 20)
-SHADOW_RGB: tuple[int, int, int] = (22, 25, 29)
-HATCH_RGB: tuple[int, int, int] = (15, 16, 20)
 
 
 def hex_to_rgb(value: str) -> tuple[int, int, int]:
@@ -79,8 +76,9 @@ class RunConfig:
     padding: int = 9
     # Deterministic master seed mixed into every per-face / per-stage RNG.
     seed: str = "inkblade"
-    # Atlas is quantised to an indexed palette like the shipped kits (None disables quantisation).
-    quantize_colors: int | None = 64
+    # Optional indexed-palette quantisation of the finished atlas. Off by default: the shipped kit's
+    # atlases are RGB PNGs, so a palette would only add snapping on top of the painted art.
+    quantize_colors: int | None = None
     # Optional decal directory (`<decal_dir>/<part_id>/*.png`); empty means the decals stage is a
     # no-op passthrough, which keeps the stage in the stack without changing existing art.
     decal_dir: Path | None = None
