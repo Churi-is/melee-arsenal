@@ -3,8 +3,9 @@
 Every stage declares what it does, how to persist its output to the work directory and how to reload
 it. That is what makes the pipeline modular:
 
-* adding an art pass (decals, stencils, grime, ...) = add a `Stage` entry between `linework` and
+* adding an art pass (decals, stencils, grime, ...) = add a `Stage` entry between `mottle` and
   `textures`; nothing else changes,
+* marking art is painted *before* the ink pass, so contours and hatching sit on top of the prints,
 * editing one stage only invalidates that stage and the ones downstream of it,
 * each stage leaves inspectable artifacts on disk (`--work`).
 
@@ -24,6 +25,7 @@ from typing import Any, Callable, Sequence
 
 from PIL import Image
 
+from . import decals as decal_art
 from . import textures
 from .config import ELEMENTS, RunConfig
 from .geometry import (
@@ -49,8 +51,9 @@ from .uv import Island, PartLayout, unwrap_parts
 
 MANIFEST_SCHEMA = "inkblade.socket-kit/1.0"
 TEXTURE_NOTES = (
-    "Staged atlas: flat palette, mottled wear, bold ink contours, polygonal shadow planes, "
-    "hatch clusters and scratches baked into one RGB PNG."
+    "Staged atlas: flat palette, mottled wear, brushed sheet metal with rim occlusion and honed "
+    "bevels, manufacturer markings (wordmarks, emblems, stencils, blood, dirt) painted underneath "
+    "bold ink contours, polygonal shadow planes, hatch clusters and scratches, baked into one RGB PNG."
 )
 
 
@@ -68,6 +71,7 @@ class KitState:
     finals: dict[str, Image.Image] = field(default_factory=dict)
     colours: dict[str, dict[int, tuple[int, int, int]]] = field(default_factory=dict)
     decals_applied: dict[str, int] = field(default_factory=dict)
+    markings_applied: dict[str, int] = field(default_factory=dict)
     element_atlases: dict[tuple[str, str], Image.Image] = field(default_factory=dict)
     reports: list["StageReport"] = field(default_factory=list)
     renders: dict[str, int] = field(default_factory=dict)
@@ -274,7 +278,7 @@ def _load_uv(state: KitState, folder: Path) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Stage: texture canvases (flat / mottle / linework / decals all share one persistence format)
+# Stage: texture canvases (flat / mottle / detail / decals / linework share one persistence format)
 # ---------------------------------------------------------------------------
 def _ensure_canvases(state: KitState) -> None:
     for part_id, layout in state.layouts.items():
@@ -301,6 +305,14 @@ def _run_mottle(state: KitState) -> None:
         )
 
 
+def _run_detail(state: KitState) -> None:
+    _ensure_canvases(state)
+    for part_id, layout in state.layouts.items():
+        state.canvases[part_id] = textures.paint_surface_detail(
+            state.parts[part_id], layout, state.canvases[part_id]
+        )
+
+
 def _run_linework(state: KitState) -> None:
     _ensure_canvases(state)
     for part_id, layout in state.layouts.items():
@@ -314,14 +326,27 @@ def _run_linework(state: KitState) -> None:
 
 
 def _run_decals(state: KitState) -> None:
+    """Manufacturer markings (wordmarks, emblems, blood, dirt) then any external decal art.
+
+    Both run *before* `linework`, so the ink contours, shadow planes and scratches are drawn over the
+    prints: paint on metal rather than a sticker on top of the art.
+    """
     _ensure_canvases(state)
     state.decals_applied = {}
+    state.markings_applied = {}
     for part_id, layout in state.layouts.items():
+        part = state.parts[part_id]
+        applied = 0
+        if state.cfg.decal_art:
+            applied = decal_art.paint_manufacturer_decals(
+                part, layout, state.canvases[part_id], decal_art.stage_seed(part_id)
+            )
+        state.markings_applied[part_id] = applied
         if state.cfg.decal_dir is None:
             state.decals_applied[part_id] = 0
             continue
         state.decals_applied[part_id] = textures.paint_decals(
-            state.parts[part_id],
+            part,
             layout,
             state.canvases[part_id],
             state.cfg.decal_dir,
@@ -668,8 +693,10 @@ def _kit_readme(state: KitState) -> str:
         "  combinations already push them out by the blade's `accessory_face_gap_m` /",
         "  `element_face_gap_m`, so their plates sit on the blade skin instead of inside it.",
         "- The Torgue grip is a hexagonal shell with four continuous wraparound ribs.",
-        "- Textures are painted as a stack of independent layers (flat colours -> mottle/wear -> bold",
-        "  ink -> optional decals), so new art passes can be inserted without touching older ones.",
+        "- Textures are painted as a stack of independent layers (flat colours -> mottle/wear ->",
+        "  surface detail -> manufacturer decals -> bold ink -> optional external decals), so new art",
+        "  passes can be inserted without touching older ones. The decals stage runs *before*",
+        "  `linework`, so contours and hatching are drawn over the prints rather than under them.",
         "",
     ]
     return "\n".join(lines)
@@ -698,7 +725,7 @@ def _run_render(state: KitState) -> None:
 # Stage catalogue
 # ---------------------------------------------------------------------------
 def default_stages() -> list[Stage]:
-    """The ordered stack. Insert new art passes anywhere between `linework` and `textures`."""
+    """The ordered stack. Insert new art passes anywhere between `mottle` and `textures`."""
     return [
         Stage(
             "geometry", "Build final part geometry", _run_geometry, _save_geometry, _load_geometry,
@@ -721,20 +748,28 @@ def default_stages() -> list[Stage]:
             sources=("config.py", "textures.py"),
         ),
         Stage(
-            "linework",
-            "Draw bold contours, shading and hatching",
-            _run_linework,
+            "detail",
+            "Brush sheet metal, ring island rims and settle grit",
+            _run_detail,
             _save_canvases,
             _load_canvases,
             sources=("config.py", "textures.py"),
         ),
         Stage(
             "decals",
-            "Stamp optional external decal art",
+            "Stamp manufacturer markings, blood and dirt",
             _run_decals,
             _save_canvases,
             _load_canvases,
             extra_key=_decals_key,
+            sources=("config.py", "textures.py", "decals.py"),
+        ),
+        Stage(
+            "linework",
+            "Draw bold contours, shading and hatching",
+            _run_linework,
+            _save_canvases,
+            _load_canvases,
             sources=("config.py", "textures.py"),
         ),
         Stage(

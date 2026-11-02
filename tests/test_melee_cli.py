@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -42,3 +43,69 @@ class BuildOutputTests(unittest.TestCase):
             self.assertEqual((installed / "data/inkblade_compiled_manifest.json").read_text(), "generated")
             self.assertEqual((installed / "upk/MeleeArsenalMeshes.upk").read_bytes(), b"mesh")
             self.assertEqual((game / "WillowGame/CookedPCConsole/MeleeArsenalTextures.upk").read_bytes(), b"textures")
+
+    def test_install_recompiles_the_upks_when_the_kit_changed(self):
+        """`./melee dev` after `./melee generate` must ship the new textures, not the old packages.
+
+        Regression: install used to reuse whatever UPKs happened to exist, so a repainted kit kept
+        its old, valid-looking packages and the game showed the previous art.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            (repo / "tools").mkdir(parents=True)
+            (repo / "build/inkblade_kit").mkdir(parents=True)
+            shutil.copy2(ROOT / "melee", repo / "melee")
+            (repo / ".gitignore").write_text("build/\n")
+            mod = repo / "sdk_mods/melee_arsenal"
+            (mod / "data").mkdir(parents=True)
+            (mod / "upk").mkdir()
+            (mod / "__init__.py").write_text('__version__ = "1.0"\n')
+            (repo / "build/inkblade_kit/socket_manifest.json").write_text("{}")
+
+            # Stand-in compiler: prints the kit fingerprint, otherwise writes new packages.
+            (repo / "tools/compile_inkblade_upk.py").write_text(
+                "import sys, json\n"
+                "from pathlib import Path\n"
+                "args = sys.argv[1:]\n"
+                "if '--fingerprint-only' in args:\n"
+                "    print('fresh-kit')\n"
+                "    raise SystemExit(0)\n"
+                "cooked = Path('build/WillowGame/CookedPCConsole')\n"
+                "cooked.mkdir(parents=True, exist_ok=True)\n"
+                "(cooked / 'MeleeArsenalMeshes.upk').write_bytes(b'rebuilt-mesh')\n"
+                "(cooked / 'MeleeArsenalTextures.upk').write_bytes(b'rebuilt-textures')\n"
+                "Path('build/inkblade_compiled_manifest.json').write_text("
+                "json.dumps({'kit_fingerprint': 'fresh-kit'}))\n"
+            )
+
+            # Packages that exist, look fine, and were built from an older kit.
+            cooked = repo / "build/WillowGame/CookedPCConsole"
+            cooked.mkdir(parents=True)
+            (cooked / "MeleeArsenalMeshes.upk").write_bytes(b"old-mesh")
+            (cooked / "MeleeArsenalTextures.upk").write_bytes(b"old-textures")
+            (repo / "build/inkblade_compiled_manifest.json").write_text(
+                '{"kit_fingerprint": "stale-kit"}')
+
+            game = Path(tmp) / "game"
+            (game / "WillowGame/CookedPCConsole").mkdir(parents=True)
+            env = {**os.environ, "BL2_DIR": str(game), "PYTHON": sys.executable}
+            result = subprocess.run([str(repo / "melee"), "install"], cwd=repo,
+                                    capture_output=True, text=True, env=env)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("recompiling", result.stdout)
+            self.assertEqual((game / "WillowGame/CookedPCConsole/MeleeArsenalTextures.upk").read_bytes(),
+                             b"rebuilt-textures")
+            self.assertEqual((game / "sdk_mods/melee_arsenal/upk/MeleeArsenalMeshes.upk").read_bytes(),
+                             b"rebuilt-mesh")
+
+            # `--no-rebuild` keeps the packages on disk but says so, loudly.
+            (repo / "build/inkblade_compiled_manifest.json").write_text(
+                '{"kit_fingerprint": "stale-again"}')
+            result = subprocess.run([str(repo / "melee"), "install", "--no-rebuild"], cwd=repo,
+                                    capture_output=True, text=True, env=env)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("do not match the kit", result.stdout + result.stderr)
+
+
+if __name__ == "__main__":  # pragma: no cover
+    unittest.main()

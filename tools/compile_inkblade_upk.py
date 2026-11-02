@@ -11,7 +11,11 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tools.inkblade_upk.kit import WeaponFrameCalibration, compile_inkblade_kit_to_upks
+from tools.inkblade_upk.kit import (
+    WeaponFrameCalibration,
+    compile_inkblade_kit_to_upks,
+    kit_fingerprint,
+)
 
 
 def main() -> int:
@@ -48,7 +52,17 @@ def main() -> int:
     )
     parser.add_argument("--pitch-deg", type=float, default=24.0)
     parser.add_argument("--yaw-deg", type=float, default=90.0)
+    parser.add_argument(
+        "--fingerprint-only",
+        action="store_true",
+        help="Print the kit's content fingerprint and exit (used by './melee install' to detect "
+             "a kit that has been regenerated since the UPKs were last compiled)",
+    )
     args = parser.parse_args()
+
+    if args.fingerprint_only:
+        print(kit_fingerprint(args.kit))
+        return 0
 
     cooked_dir = Path(args.out_cooked_dir)
     out_meshes = cooked_dir / "MeleeArsenalMeshes.upk"

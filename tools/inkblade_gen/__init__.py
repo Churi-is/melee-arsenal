@@ -6,11 +6,12 @@ The kit is produced by a stack of independent, individually cacheable stages (se
 2. `uv`        — shared-density face projection, padded island packing, template reuse
 3. `flat`      — flat palette colour per UV island (saved as PNG atlases)
 4. `mottle`    — paint wash, deposits, wear, chips
-5. `linework`  — two seedable ink passes
-6. `decals`    — optional external decal art (the template for future art passes)
-7. `textures`  — padding fill inside each island rect, optional quantisation, final PNGs
-8. `export`    — `<part>.glb`, combinations, UV layout JSON and `socket_manifest.json`
-9. `render`    — optional preview PNGs (`--renders`), rendered without Blender
+5. `detail`    — brushed sheet metal, rim occlusion, honed bevels, settled grit
+6. `decals`    — manufacturer markings: wordmarks, emblems, stencils, blood and dirt
+7. `linework`  — two seedable ink passes (drawn *over* the decals)
+8. `textures`  — padding fill inside each island rect, optional quantisation, final PNGs
+9. `export`    — `<part>.glb`, combinations, UV layout JSON and `socket_manifest.json`
+10. `render`   — optional preview PNGs (`--renders`), rendered without Blender
 
 Public API::
 

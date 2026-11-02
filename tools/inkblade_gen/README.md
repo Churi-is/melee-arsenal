@@ -10,6 +10,8 @@ inserted without editing anything that already exists.
 ./melee generate                      # full kit -> build/inkblade_kit (+ stage cache in build/inkblade_stages)
 ./melee generate --list-stages
 ./melee generate --only linework      # re-paint ink, everything before it comes from cache
+./melee generate --only decals        # re-stamp the markings on a cached surface pass
+./melee generate --no-decals-art      # clean palette-and-wear pass, no manufacturer markings
 ./melee generate --from textures      # re-run from a stage onwards, keeping earlier cache
 ./melee generate --decals path/to/inkblade_decals --parts blade_jakobs,grip_hyperion
 ./melee generate --renders                 # + preview PNGs in build/inkblade_renders
@@ -29,15 +31,38 @@ inserted without editing anything that already exists.
 | 2 | `uv` | Newell-normal face projection at one shared texel density, padded shelf packing into a pow2 atlas, island template reuse for mirrored rear faces. | `*.json` (`inkblade.physical-uv/2.0`) |
 | 3 | `flat` | **Flat textures saved as PNGs**: one solid palette colour per UV island (per-island brightness jitter, lightened `edge` role). | `<part>.png` (**the flat pass on disk**) |
 | 4 | `mottle` | Paint wash (three-octave field), deposits, dry-brush streaks, gouges, chipped paint, tally marks, edge chips. | `<part>.png` |
-| 5 | `linework` | The bold ink look: an overlay (translucent shadow planes, 3/5/7px weighted perimeters, broken pen strokes, corner hatch clusters, fractured accents, scratch groups, highlight nicks, all clipped to a 1px-eroded island mask) over corner hatch strokes and the `INK_PX` boundary. `--linework-seed TEXT` salts the RNG that picks hatch corners and stroke breaks; empty uses the default seed. | `<part>.png` |
-| 6 | `decals` | Optional external decal art (extension point, no-op without art). | `<part>.png` |
-| 7 | `textures` | Fill each island's own padded rectangle with its flat colour (never beyond it) and write the final atlases (`--quantise N` optionally reduces them to an indexed palette; off by default to avoid palette snapping). | `<part>_basecolor.png` |
-| 8 | `export` | GLBs (embedded atlas, sockets, `FACE_FRONT`/`FACE_BACK`), assembled combinations, UV layout JSONs, `socket_manifest.json`, kit README. | `models/`, `textures/`, manifest |
-| 9 | `render` | Preview PNGs via the built-in software rasteriser: 720×720 part and combination tiles plus labelled overview sheets. Optional (`--renders`). | `build/inkblade_renders/{parts,combinations,overview_*.png}` |
+| 5 | `detail` | Micro-texture: brushed/polished sheet metal (strokes follow each island's long axis), rim occlusion that seats every island in the atlas, a honed wire just inside the cutting bevels, and grit settled along island rims. | `<part>.png` |
+| 6 | `decals` | Manufacturer markings, painted **before** the ink pass. Hyperion is the only house that prints its own name: a yellow corporate band with the slanted wordmark, a serial stencil and the four-parallelogram cluster. Everyone else marks hardware instead of lettering it - Jakobs gets a watered-steel etch, a gilt pinline, scrollwork and hex proof stamps, Torgue a nameless hex badge with a blast monogram plus hazard bands, rivets and warning triangles, Bandit blood, grime, a weld seam, kill tallies (one group scratched in at an angle) and a sprayed arrow, Maliwan the droplet sigil on the grips with cyan hairlines, pips and diamonds on the blades. Blades get a plate on each broad face (plus a `panel` plate on a bolted-on panel such as Bandit's red slab), grips get a wrap pattern on every facet big enough for a plate, accessory strips get milled grooves and rivets. Optional external PNG art (`--decals <dir>`) is stamped in the same pass. `--no-decals-art` turns the built-in art off. | `<part>.png` |
+| 7 | `linework` | The bold ink look: an overlay (translucent shadow planes, 3/5/7px weighted perimeters, broken pen strokes, corner hatch clusters, fractured accents, scratch groups, highlight nicks, all clipped to a 1px-eroded island mask) over corner hatch strokes and the `INK_PX` boundary. `--linework-seed TEXT` salts the RNG that picks hatch corners and stroke breaks; empty uses the default seed. | `<part>.png` |
+| 8 | `textures` | Fill each island's own padded rectangle with its flat colour (never beyond it) and write the final atlases (`--quantise N` optionally reduces them to an indexed palette; off by default to avoid palette snapping). | `<part>_basecolor.png` |
+| 9 | `export` | GLBs (embedded atlas, sockets, `FACE_FRONT`/`FACE_BACK`), assembled combinations, UV layout JSONs, `socket_manifest.json`, kit README. | `models/`, `textures/`, manifest |
+| 10 | `render` | Preview PNGs via the built-in software rasteriser: 720×720 part and combination tiles plus labelled overview sheets. Optional (`--renders`). | `build/inkblade_renders/{parts,combinations,overview_*.png}` |
 
 Ordering note: an atlas cannot be *painted* before the island layout exists, so the painting stages
 follow the UV stage. What the split buys is that each painting pass is independent, inspectable and
 re-runnable against the same layout — `--only linework` re-inks a kit in seconds.
+
+`detail` and `decals` deliberately run **before** `linework`: the ink contours, shadow planes and
+hatch clusters are then drawn on top of the printing, so a wordmark reads as paint on metal instead of
+a sticker floating over the art. (`--only decals` is the fast loop for art tweaks: it re-stamps the
+markings and re-runs everything downstream of them.)
+
+### Marking placement
+
+`decals.py` sizes and rotates art from the mesh rather than from the atlas: `island_frame()` solves the
+same orthonormal projection the UV stage used (`pixel = A · vertex + b`) and recovers, per island, the
+image-space directions of the part's `+X` and `+Z`, plus whether the face looks at the front or the
+rear. That gives real-world placement — a 0.22 m wordmark is 0.22 m on every blade regardless of atlas
+resolution — with the lettering running hilt-to-point (a half turn away from the plain
+right/down basis) and mirrored correctly on the rear face. Faces pointing along the blade axis
+(pommel caps, emitter plates) and warped quads whose fitted axes are nearly parallel are skipped rather
+than smeared.
+
+Blade faces keep their art out of the middle band (that is where a raised fuller or a bolted-on panel
+usually sits) and a panel that covers a big share of the face gets its own `variant="panel"` plate.
+Text is auto-shrunk to the width of its plate (`fit_height`), which is what stops a wordmark from
+being cut into fragments by a narrow facet. `MarkingArtTests` locks the house rule in: only Hyperion
+may call `draw_text`, so a stray slogan on someone else's blade fails the suite.
 
 ## Previews without Blender
 
@@ -118,7 +143,8 @@ tools/inkblade_gen/
 ├── config.py     # palettes, ELEMENTS, ink/shadow/hatch colours, RunConfig
 ├── geometry.py   # final geometry: R3 shapes + all revisions in one pass
 ├── uv.py         # projection, packing, template reuse -> PartLayout + layout JSON
-├── textures.py   # the painting layers (flat / mottle / linework / decals / seal / quantise)
+├── textures.py   # the painting layers (flat / mottle / detail / linework / external decals / seal)
+├── decals.py     # marking art: stroke font, emblems, blood/dirt, physical island frames + stamping
 ├── glb.py        # GLB read/write, ear-clipping triangulation, per-part export, merge
 ├── render.py     # Blender-free software rasteriser + contact sheets
 ├── stages.py     # Stage definitions, KitState, manifest builder, stage catalogue

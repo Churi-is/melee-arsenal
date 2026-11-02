@@ -79,8 +79,11 @@ class RunConfig:
     linework_seed: str = ""
     # Optional indexed-palette quantisation; off by default to avoid palette snapping.
     quantize_colors: int | None = None
-    # Optional decal directory (`<decal_dir>/<part_id>/*.png`); empty means the decals stage is a
-    # no-op passthrough, which keeps the stage in the stack without changing existing art.
+    # Procedural manufacturer markings (wordmarks, emblems, stencils, blood, dirt). Painted before the
+    # ink pass; turn off for a clean palette-and-wear pass.
+    decal_art: bool = True
+    # Optional external decal directory (`<decal_dir>/<part_id>/*.png`); empty means only the built-in
+    # markings run.
     decal_dir: Path | None = None
     decal_fit: float = 0.62
     # Bake per-element accent recolours into the example combinations (R3 behaviour).
@@ -106,6 +109,7 @@ class RunConfig:
             "padding": self.padding,
             "seed": self.seed,
             "quantize_colors": self.quantize_colors,
+            "decal_art": bool(self.decal_art),
             "decals": str(self.decal_dir) if self.decal_dir else "",
             "decal_fit": self.decal_fit,
             "bake_combinations": self.bake_combinations,

@@ -25,6 +25,7 @@ from tools.inkblade_upk.kit import (
     InkbladeModularKit,
     _repair_outward_manifold_winding,
     compile_inkblade_kit_to_upks,
+    kit_fingerprint,
 )
 from tools.inkblade_upk.lzo1x import lzo1x_decompress
 
@@ -233,6 +234,10 @@ class TestInkbladeUpkPipeline(unittest.TestCase):
             )
             self.assertEqual(mf["total_triangles"], 3188)
             self.assertEqual(len(mf["fragments"]), 22)
+            # The manifest records what the packages were built from, so install can tell a repainted
+            # kit from an untouched one.
+            self.assertRegex(mf["kit_fingerprint"], r"^[0-9a-f]{32}$")
+            self.assertEqual(mf["kit_fingerprint"], kit_fingerprint(r3_zip))
             meshes_raw = (Path(tmp) / "MeleeArsenalMeshes.upk").read_bytes()
             textures_raw = (Path(tmp) / "MeleeArsenalTextures.upk").read_bytes()
             self.assertEqual(struct.unpack_from("<I", meshes_raw, 29)[0], 129)
@@ -341,6 +346,44 @@ class TestInkbladeUpkPipeline(unittest.TestCase):
                         vis_back,
                         f"Asymmetric front/back face culling on {frag['fragment_name']}: {vis_front} vs {vis_back}",
                     )
+
+
+class KitFingerprintTests(unittest.TestCase):
+    """The kit fingerprint is what tells `melee install` that the generator repainted the atlases."""
+
+    def _make_kit(self, root: Path) -> Path:
+        kit = root / "kit"
+        (kit / "textures").mkdir(parents=True)
+        (kit / "socket_manifest.json").write_text('{"schema": "inkblade.socket-kit/1.0"}')
+        (kit / "textures/blade_bandit_basecolor.png").write_bytes(b"png-one")
+        (kit / "textures/blade_bandit_uv_layout.json").write_text("{}")
+        return kit
+
+    def test_fingerprint_tracks_texture_content_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = self._make_kit(Path(tmp))
+            first = kit_fingerprint(kit)
+            self.assertEqual(first, kit_fingerprint(kit))
+            # Unrelated files in the folder must not force a recompile...
+            (kit / "notes.txt").write_text("scratch")
+            (kit / "README.md").write_text("docs")
+            self.assertEqual(first, kit_fingerprint(kit))
+            # ...but repainted pixels must.
+            (kit / "textures/blade_bandit_basecolor.png").write_bytes(b"png-two")
+            self.assertNotEqual(first, kit_fingerprint(kit))
+            # And so must a moved layout.
+            (kit / "textures/blade_bandit_uv_layout.json").write_text('{"islands": []}')
+            self.assertNotEqual(first, kit_fingerprint(kit))
+
+    def test_fingerprint_matches_between_directory_and_archive(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = self._make_kit(Path(tmp))
+            archive = Path(tmp) / "kit.zip"
+            with zipfile.ZipFile(archive, "w") as zf:
+                for path in sorted(kit.rglob("*")):
+                    if path.is_file():
+                        zf.write(path, path.relative_to(kit).as_posix())
+            self.assertEqual(kit_fingerprint(kit), kit_fingerprint(archive))
 
 
 if __name__ == "__main__":
