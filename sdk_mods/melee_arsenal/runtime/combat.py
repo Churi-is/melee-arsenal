@@ -660,6 +660,11 @@ def on_display_recent_damage_pre(obj: Any, args: Any, ret: Any, func: Any) -> An
         except Exception as exc:
             log_error(f"Crit damage-popup re-call failed: {exc!r}")
             return None
+        if STATE.debug_attack_log:
+            log_info(
+                f"Forced crit damage popup on {getattr(actor, 'Name', 'unknown')} "
+                f"({float(getattr(data, 'TotalDamageForDamageType', 0.0) or 0.0):.1f} dmg)"
+            )
         return Block
     except Exception as exc:
         log_error(f"on_display_recent_damage_pre failed: {exc!r}")
