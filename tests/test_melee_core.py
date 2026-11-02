@@ -5,13 +5,16 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR / "sdk_mods") not in sys.path:
     sys.path.insert(0, str(ROOT_DIR / "sdk_mods"))
 
+from melee_arsenal.core import stats as stats_module  # noqa: E402
 from melee_arsenal.core import (  # noqa: E402
     BLADES,
+    BLADE_BY_MANUFACTURER,
     DAMAGE_REDUCTION_MAX_PCT,
     DAMAGE_REDUCTION_MIN_PCT,
     ELEMENTS,
@@ -34,6 +37,8 @@ from melee_arsenal.core import (  # noqa: E402
     compute_attack_damage,
     compute_card_stats,
     compute_damage_reduction_pct,
+    compute_swing_speed_damage_scale,
+    damage_reduction_level_scale,
     deserialize_weapon,
     plan_swing_strikes,
     read_save_records,
@@ -249,41 +254,154 @@ class TestMeleeArsenalCore(unittest.TestCase):
         self.assertEqual(card_m.top_stats[0].arrow, CompareArrow.WORSE)
         self.assertEqual(card_m.top_stats[1].arrow, CompareArrow.BETTER)
 
-    def test_every_melee_weapon_rolls_50_to_70_damage_reduction(self) -> None:
-        self.assertEqual((DAMAGE_REDUCTION_MIN_PCT, DAMAGE_REDUCTION_MAX_PCT), (50, 70))
+    def test_damage_reduction_scales_with_level_and_parts(self) -> None:
+        self.assertEqual((DAMAGE_REDUCTION_MIN_PCT, DAMAGE_REDUCTION_MAX_PCT), (30, 70))
+        self.assertEqual(damage_reduction_level_scale(1), 0.0)
+        self.assertEqual(damage_reduction_level_scale(90), 1.0)
+        # Below Lv 1 / above Lv 80 + OP10 the curve clamps instead of wrapping
+        self.assertEqual(damage_reduction_level_scale(0), 0.0)
+        self.assertEqual(damage_reduction_level_scale(500), 1.0)
 
-        seen_values: set[int] = set()
-        for i in range(400):
-            maker = tuple(Manufacturer)[i % 5]
-            rarity = (Rarity.COMMON, Rarity.UNCOMMON, Rarity.RARE, Rarity.VERY_RARE)[i % 4]
+        rarities = (Rarity.COMMON, Rarity.UNCOMMON, Rarity.RARE, Rarity.VERY_RARE)
+
+        # Lv 1: hard 30% floor, only a sliver of part headroom (never the old 50-70%)
+        low_values: set[int] = set()
+        for i in range(150):
             wpn = roll_melee_weapon(
-                game_stage=1 + (i % 80),
-                rarity=rarity,
-                manufacturer=maker,
-                seed=f"dr:{i}",
+                game_stage=1,
+                rarity=rarities[i % 4],
+                manufacturer=tuple(Manufacturer)[i % 5],
+                seed=f"dr-low:{i}",
                 unique_id=2000 + i,
             )
             pct = compute_card_stats(wpn).damage_reduction_pct
-            self.assertTrue(
-                DAMAGE_REDUCTION_MIN_PCT <= pct <= DAMAGE_REDUCTION_MAX_PCT,
-                f"{wpn.parts.blade_id} rolled {pct}% damage reduction (must be 50-70%)",
-            )
-            seen_values.add(pct)
-
-            # Deterministic: the same weapon always reports (and applies) the same reduction, so the
-            # card, `melee_dump_held`, and the live `TakeDamage` hook can never disagree.
+            self.assertTrue(30 <= pct <= 34, f"Lv1 {wpn.parts.blade_id} rolled {pct}% (want 30-34)")
+            low_values.add(pct)
+            # Deterministic: card + hook + `melee_dump_held` all read the same instance
             self.assertEqual(pct, compute_damage_reduction_pct(wpn))
-            self.assertEqual(pct, compute_card_stats(wpn).damage_reduction_pct)
+        self.assertIn(30, low_values)
 
-            # ...even when BL2 hands back a zeroed `UniqueId` / reset `GameStage` for a re-assembled
-            # item (the same drift `persistence` level-repair guards against).
-            corrupted = MeleeWeaponInstance(
-                unique_id=0, game_stage=1, rarity=wpn.rarity, parts=wpn.parts
+        # Lv 80 + OP10: reaches the 70% cap, but only at the top of the part roll
+        high_values: set[int] = set()
+        for i in range(300):
+            wpn = roll_melee_weapon(
+                game_stage=90,
+                rarity=rarities[i % 4],
+                manufacturer=tuple(Manufacturer)[i % 5],
+                seed=f"dr-high:{i}",
+                unique_id=4000 + i,
             )
-            self.assertEqual(pct, compute_card_stats(corrupted).damage_reduction_pct)
+            pct = compute_card_stats(wpn).damage_reduction_pct
+            self.assertTrue(61 <= pct <= 70, f"OP10 {wpn.parts.blade_id} rolled {pct}% (want 61-70)")
+            high_values.add(pct)
+        self.assertEqual(max(high_values), DAMAGE_REDUCTION_MAX_PCT)
 
-        # Every manufacturer must be represented across the full 50-70% band
-        self.assertEqual(len(seen_values), DAMAGE_REDUCTION_MAX_PCT - DAMAGE_REDUCTION_MIN_PCT + 1)
+        # Parts matter: the same level, different construction -> different reductions
+        self.assertGreater(len(high_values), 3)
+
+        # Higher level never reduces protection for the same blade
+        blade = roll_melee_weapon(
+            game_stage=1,
+            rarity=Rarity.RARE,
+            manufacturer=Manufacturer.HYPERION,
+            seed="dr-monotonic",
+            unique_id=7000,
+        )
+        previous = -1
+        for stage in (1, 15, 30, 50, 72, 90):
+            staged = MeleeWeaponInstance(7000, stage, blade.rarity, blade.parts)
+            pct = compute_damage_reduction_pct(staged)
+            self.assertGreaterEqual(pct, previous)
+            previous = pct
+
+        # Unique rarities keep a little headroom above the 70% cap
+        best_unique = 0
+        for i in range(200):
+            wpn = roll_melee_weapon(
+                game_stage=90,
+                rarity=(Rarity.LEGENDARY, Rarity.SERAPH, Rarity.PEARLESCENT)[i % 3],
+                manufacturer=tuple(Manufacturer)[i % 5],
+                seed=f"dr-unique:{i}",
+                unique_id=9000 + i,
+            )
+            best_unique = max(best_unique, compute_damage_reduction_pct(wpn))
+        self.assertGreater(best_unique, DAMAGE_REDUCTION_MAX_PCT)
+
+    def test_faster_swinging_blades_hit_softer(self) -> None:
+        self.assertAlmostEqual(
+            compute_swing_speed_damage_scale(1.50), 1.0
+        )  # `SWING_SPEED_DAMAGE_REFERENCE`
+        self.assertLess(compute_swing_speed_damage_scale(2.35), 1.0)   # Jakobs Sabre cadence
+        self.assertGreater(compute_swing_speed_damage_scale(0.92), 1.0)  # Torgue Blast-Cleaver cadence
+
+        speeds = (0.8, 1.0, 1.5, 2.0, 2.6)
+        scales = [compute_swing_speed_damage_scale(sp) for sp in speeds]
+        self.assertEqual(scales, sorted(scales, reverse=True))
+
+        # End-to-end: per-hit card damage really is the unspeeded roll multiplied by the cadence
+        # trade-off (patch the exponent to 0 to read the same weapon's unspeeded damage).
+        part_sets = [
+            MeleeWeaponParts("Blade_Jakobs_Sabre", "Grip_Maliwan", "Acc_None", "Elem_None"),
+            MeleeWeaponParts("Blade_Hyperion_Katana", "Grip_Hyperion", "Acc_Serrated", "Elem_None"),
+            MeleeWeaponParts("Blade_Torgue_BlastCleaver", "Grip_Torgue", "Acc_Counterweight", "Elem_Explosive"),
+        ]
+        for index, parts in enumerate(part_sets):
+            weapon = MeleeWeaponInstance(4000 + index, 50, Rarity.RARE, parts)
+            stats = compute_card_stats(weapon)
+            with mock.patch.object(stats_module, "SWING_SPEED_DAMAGE_EXPONENT", 0.0):
+                unspeeded = compute_card_stats(weapon).raw_damage
+            expected_scale = compute_swing_speed_damage_scale(stats.swing_speed)
+            # `swing_speed` on the card is rounded to 2 dp, so allow a hair of rounding slack
+            self.assertAlmostEqual(stats.raw_damage, unspeeded * expected_scale, delta=unspeeded * 0.01)
+            if stats.swing_speed > 1.50:
+                self.assertLess(stats.card_damage, round(unspeeded))   # fast blade hit softer
+            else:
+                self.assertGreater(stats.card_damage, round(unspeeded))  # slow blade hit harder
+
+        # ...and no manufacturer runs away with sustained DPS, even though each keeps its own
+        # identity (Torgue hits hardest & slowest, Maliwan trades raw damage for element DoT, ...).
+        # Matched parts isolate cadence + base multiplier from accessory/element damage rolls.
+        for stage in (50, 90):
+            dps = []
+            for maker in Manufacturer:
+                blade_id = BLADE_BY_MANUFACTURER[maker].part_id
+                card = compute_card_stats(
+                    MeleeWeaponInstance(
+                        6000 + len(dps),
+                        stage,
+                        Rarity.VERY_RARE,
+                        MeleeWeaponParts(blade_id, f"Grip_{maker.value}", "Acc_None", "Elem_None"),
+                    )
+                )
+                dps.append(card.card_damage * card.swing_speed)
+            self.assertLess(
+                max(dps) / min(dps),
+                1.75,
+                f"Lv{stage} DPS spread {min(dps):,.0f}-{max(dps):,.0f} is too wide",
+            )
+
+        # Fastest cadence in the kit must not also be the runaway DPS leader (the old Jakobs problem)
+        fastest = max(
+            (
+                compute_card_stats(
+                    MeleeWeaponInstance(
+                        7000 + i,
+                        50,
+                        Rarity.VERY_RARE,
+                        MeleeWeaponParts(
+                            BLADE_BY_MANUFACTURER[maker].part_id,
+                            f"Grip_{maker.value}",
+                            "Acc_None",
+                            "Elem_None",
+                        ),
+                    )
+                )
+                for i, maker in enumerate(Manufacturer)
+            ),
+            key=lambda c: c.swing_speed,
+        )
+        self.assertGreaterEqual(fastest.swing_speed, 2.0)
+        self.assertLess(fastest.card_damage, 40_000)
 
     def test_incoming_damage_reduction_math(self) -> None:
         self.assertAlmostEqual(apply_incoming_damage_reduction(1000.0, 50), 500.0)
