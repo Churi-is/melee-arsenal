@@ -466,6 +466,20 @@ class TestMeleeArsenalCore(unittest.TestCase):
         self.assertLessEqual(up_end, up_mid)
         self.assertAlmostEqual(fwd_end, heavy_plan.range_uu, delta=heavy_plan.range_uu * 0.02)
 
+        # The launch follows the camera: aim up -> higher launch & longer hang time, aim down ->
+        # lower launch & shorter reach, while gravity still turns every throw into an arc.
+        flat_plan = build_throw_flight_plan(2.9)
+        up_plan = build_throw_flight_plan(2.9, 25.0)
+        down_plan = build_throw_flight_plan(2.9, -25.0)
+        self.assertGreater(up_plan.launch_pitch_deg, flat_plan.launch_pitch_deg)
+        self.assertLess(down_plan.launch_pitch_deg, flat_plan.launch_pitch_deg)
+        self.assertGreater(up_plan.vertical_speed_uu_s, flat_plan.vertical_speed_uu_s)
+        self.assertLess(down_plan.vertical_speed_uu_s, flat_plan.vertical_speed_uu_s)
+        self.assertGreater(up_plan.flight_time_sec, flat_plan.flight_time_sec)
+        self.assertLess(down_plan.range_uu, flat_plan.range_uu)
+        # Aiming steeply down can launch below the horizon — gravity still bends the path.
+        self.assertLess(down_plan.vertical_speed_uu_s, flat_plan.vertical_speed_uu_s)
+
         # Guard blades expose no throw data & Maliwan exposes no secondary attack whatsoever
         guard_card = compute_card_stats(
             MeleeWeaponInstance(

@@ -18,6 +18,7 @@ from unrealsdk.hooks import Block, Type  # type: ignore[import-not-found]
 
 from .combat import (
     _update_first_person_slash_motion,
+    capture_first_person_rest_transform,
     clear_all_pending_crit_feedback,
     ensure_combat_resources_cached as ensure_live_combat_cached,
     on_ai_take_damage_post,
@@ -236,6 +237,14 @@ def _run_frame_tick() -> None:
 
     # 2. Enforce exact meter reach on active melee light projectiles
     tick_melee_projectiles()
+
+    # 2a. Capture the idle first-person arms transform once, before any secondary-attack pose can
+    #     run: a pose must never be able to bake itself in as the "rest" transform.
+    if _tick_counter % 30 == 0:
+        try:
+            capture_first_person_rest_transform()
+        except Exception:
+            pass
 
     # 2b. Advance thrown blades (Bandit/Torgue arcs), keep the held guard honest, and self-heal
     #     any first-person pose whose state has ended. The RMB-release hooks are registered with

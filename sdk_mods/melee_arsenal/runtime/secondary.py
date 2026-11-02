@@ -210,7 +210,6 @@ def begin_throw(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCardStats) ->
         return False
 
     weight = float(card.throw_weight_kg) or compute_throw_weight_kg(inst)
-    plan = build_throw_flight_plan(weight)
 
     vec_tpl = getattr(shooter, "Location", None)
     eye = (
@@ -230,6 +229,10 @@ def begin_throw(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCardStats) ->
     aim = _aim_forward(pc, shooter)
     horiz = math.hypot(aim[0], aim[1])
     dir_xy = (aim[0] / horiz, aim[1] / horiz) if horiz > 1e-4 else (1.0, 0.0)
+    # Follow the camera: the weapon's loft is added on top of where the player is actually aiming,
+    # so looking up lobs the blade up and looking down sends it down (gravity still bends the arc).
+    aim_pitch_deg = math.degrees(math.atan2(float(aim[2]), max(1e-4, horiz)))
+    plan = build_throw_flight_plan(weight, aim_pitch_deg)
 
     # Launch a few UU forward so the swept trace never starts inside the thrower's own capsule.
     origin = (eye[0] + dir_xy[0] * 8.0, eye[1] + dir_xy[1] * 8.0, eye[2])
@@ -252,8 +255,8 @@ def begin_throw(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCardStats) ->
     log_info(
         f"Threw [{card.manufacturer.value} {card.archetype_name}] "
         f"{plan.weight_kg:.2f}kg at {plan.launch_speed_uu_s:.0f} uu/s, "
-        f"{plan.launch_pitch_deg:.1f}° loft -> {plan.range_meters:.1f}m / "
-        f"{plan.flight_time_sec:.2f}s arc"
+        f"{plan.launch_pitch_deg:.1f}° launch (aim {aim_pitch_deg:.1f}°) -> "
+        f"{plan.range_meters:.1f}m / {plan.flight_time_sec:.2f}s arc"
     )
     return True
 
@@ -318,9 +321,11 @@ def _begin_return(st: ThrowState, reason: str) -> None:
     st.phase = "return"
     st.return_started_at = time.monotonic()
     _play_throw_sfx(_deref_weak(st.shooter_ref), "rebound")
+    px, py, pz = st.last_point
     log_info(
-        f"Thrown [{st.card.manufacturer.value} {st.card.archetype_name}] rebounding ({reason})"
-        + (f" after {st.damage_dealt:,} damage on {st.hit_actor_name}" if st.damage_dealt else "")
+        f"Thrown [{st.card.manufacturer.value} {st.card.archetype_name}] rebounding ({reason}) "
+        f"from ({px:.0f}, {py:.0f}, {pz:.0f}) after {st.plan.flight_time_sec:.2f}s arc"
+        + (f", {st.damage_dealt:,} damage on {st.hit_actor_name}" if st.damage_dealt else "")
     )
 
 
@@ -633,8 +638,9 @@ def end_guard(
     if start_cooldown:
         _GUARD_COOLDOWN_UNTIL = time.monotonic() + st.cooldown_sec
     try:
-        combat = _combat()
-        combat.clear_first_person_pose(None, combat.POSE_GUARD)
+        # Unconditional: a brace consumed by a hit must restore the hands even if the engine never
+        # reports the RMB release (this was the "hand stays stuck after blocking" report).
+        _combat().reset_first_person_pose("guard ended")
     except Exception:
         pass
     log_info(
@@ -907,9 +913,9 @@ def _reconcile_secondary_visuals() -> None:
     if not pose:
         return
     if pose == combat.POSE_THROWN and _THROW is None:
-        combat.clear_first_person_pose(None, combat.POSE_THROWN)
+        combat.reset_first_person_pose("throw ended")
     elif pose == combat.POSE_GUARD and _GUARD is None:
-        combat.clear_first_person_pose(None, combat.POSE_GUARD)
+        combat.reset_first_person_pose("guard ended")
 
 
 def tick_secondary_attacks() -> None:

@@ -1614,6 +1614,7 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 )
                 from melee_arsenal.core.secondary import (
                     THROW_DAMAGE_MULTIPLIER,
+                    build_throw_flight_plan,
                     compute_parry_reflect_damage,
                     compute_throw_weight_kg,
                 )
@@ -2121,10 +2122,12 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 # The brace is VISIBLE: the first-person hands (and the blade attached to them)
                 # rotate into a guard posture instead of staying in the idle pose.
                 self.assertEqual(combat.active_first_person_pose(), combat.POSE_GUARD)
-                # A *small* tilt: a large RotOrigin delta swings the hands out of frame.
-                self.assertLess(world.arms_skel_mesh.RotOrigin.Pitch, -1000)
-                self.assertGreater(world.arms_skel_mesh.RotOrigin.Pitch, -3000)
-                self.assertNotEqual(world.arms_skel_mesh.RotOrigin.Yaw, -16384)
+                # A *small* tilt that lifts the blade and swings it INWARD toward the crosshair
+                # (the old signs leaned the sword away from the middle of the screen).
+                self.assertGreater(world.arms_skel_mesh.RotOrigin.Pitch, 1000)
+                self.assertLess(world.arms_skel_mesh.RotOrigin.Pitch, 3000)
+                self.assertLess(world.arms_skel_mesh.RotOrigin.Yaw, -16384)
+                self.assertGreater(world.arms_skel_mesh.RotOrigin.Yaw, -19000)
                 self.assertAlmostEqual(world.arms_skel_mesh.Origin.Z, 3.0, msg="guard must not translate the hands")
                 self.assertAlmostEqual(world.arms_skel_mesh.Origin.Y, -2.0)
                 # Hold the guard past the parry window, then eat one hit: mitigated, then consumed.
@@ -2467,6 +2470,35 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 self.assertTrue(secondary_vfx.has_thrown_blade_visual())
                 secondary_attacks.reset_secondary_state()
                 self.assertFalse(secondary_vfx.has_thrown_blade_visual())
+
+                # 4I-4. The throw follows the camera pitch (and gravity): aim up -> the blade
+                # leaves upward, aim down -> it leaves downward, always on an arc.
+                world.pawn.Weapon = bandit_wpn
+                saved_rot = world.pc.Rotation
+                try:
+                    world.pc.Rotation = FakeWrappedStruct("Rotator", Pitch=4096, Yaw=0, Roll=0)
+                    self.assertTrue(
+                        secondary_attacks.begin_throw(bandit_wpn, bandit_inst, bandit_card)
+                    )
+                    up_throw = secondary_attacks._THROW
+                    flat_throw = build_throw_flight_plan(bandit_card.throw_weight_kg)
+                    self.assertGreater(up_throw.plan.launch_pitch_deg, flat_throw.launch_pitch_deg)
+                    up_xyz = secondary_attacks._throw_point(up_throw, 0.10)
+                    self.assertGreater(up_xyz[2], up_throw.origin_xyz[2])
+                    secondary_attacks.reset_secondary_state()
+
+                    world.pc.Rotation = FakeWrappedStruct("Rotator", Pitch=-4096, Yaw=0, Roll=0)
+                    self.assertTrue(
+                        secondary_attacks.begin_throw(bandit_wpn, bandit_inst, bandit_card)
+                    )
+                    down_throw = secondary_attacks._THROW
+                    self.assertLess(down_throw.plan.launch_pitch_deg, flat_throw.launch_pitch_deg)
+                    down_xyz = secondary_attacks._throw_point(down_throw, 0.10)
+                    self.assertLess(down_xyz[2], down_throw.origin_xyz[2])
+                finally:
+                    world.pc.Rotation = saved_rot
+                    secondary_attacks.reset_secondary_state()
+
                 world.pawn.Weapon = cleaver
                 idle_state = secondary_attacks.describe_secondary_state()
                 self.assertNotIn("thrown", idle_state)
@@ -2509,7 +2541,7 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 secondary_attacks._GUARD = None
                 secondary_attacks._THROW = None
                 self.assertTrue(combat.apply_first_person_pose(world.pc, combat.POSE_GUARD))
-                self.assertLess(world.arms_skel_mesh.RotOrigin.Pitch, -1000)
+                self.assertGreater(world.arms_skel_mesh.RotOrigin.Pitch, 1000)
                 self.assertTrue(
                     secondary_vfx.spawn_thrown_blade(world.pawn, cleaver, (10.0, 0.0, 64.0))
                 )
@@ -2606,7 +2638,7 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 from melee_arsenal.core.schemas import MeleeWeaponInstance, MeleeWeaponParts
                 from melee_arsenal.runtime import commands, custom_assets, definitions, resolver, state
 
-                self.assertEqual(melee_arsenal.__version__, "0.4.2")
+                self.assertEqual(melee_arsenal.__version__, "0.4.3")
                 self.assertTrue(definitions.ensure_definitions_built())
                 self.assertTrue(state.STATE.custom_assets_active)
                 self.assertEqual(state.STATE.custom_kit_revision, "bold_ink_visual_revision_of_r4")

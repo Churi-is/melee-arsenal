@@ -59,6 +59,11 @@ THROW_LOFT_MAX_DEG: float = 24.0
 THROW_LOFT_WEIGHT_MIN_KG: float = 1.5
 THROW_LOFT_WEIGHT_MAX_KG: float = 4.5
 
+# The loft is added *on top of where you are actually aiming*: look up and the blade leaves upward,
+# look down and it leaves downward. These clamp the combined launch angle to something sane.
+THROW_AIM_PITCH_MIN_DEG: float = -70.0
+THROW_AIM_PITCH_MAX_DEG: float = 70.0
+
 # Flight is normally solved from the arc itself; this is only the safety cap so a blade can never
 # stay airborne indefinitely.
 THROW_MAX_FLIGHT_SEC: float = 1.30
@@ -142,11 +147,16 @@ def compute_throw_weight_kg(weapon: MeleeWeaponInstance) -> float:
     return round(max(0.5, weight), 3)
 
 
-def build_throw_flight_plan(weight_kg: float) -> ThrowFlightPlan:
-    """Solve the throw arc for a blade of `weight_kg`.
+def build_throw_flight_plan(
+    weight_kg: float, aim_pitch_deg: float = 0.0
+) -> ThrowFlightPlan:
+    """Solve the throw arc for a blade of `weight_kg`, launched from `aim_pitch_deg`.
 
     Heavier blades leave the hand slower *and* are lofted higher, so weight changes the shape of
-    the arc (height, flight time, reach), not just its total distance.
+    the arc (height, flight time, reach), not just its total distance. The weapon loft is added to
+    the player's own aim angle, so looking up throws the blade up and looking down throws it down
+    while gravity still bends every throw into an arc. The default `aim_pitch_deg=0.0` is the
+    card's flat-ground reference throw.
     """
     weight = max(0.5, float(weight_kg))
     speed = THROW_LAUNCH_SPEED_UU_S * (THROW_REFERENCE_WEIGHT_KG / weight) ** THROW_SPEED_WEIGHT_EXPONENT
@@ -154,15 +164,21 @@ def build_throw_flight_plan(weight_kg: float) -> ThrowFlightPlan:
 
     loft_span = max(1e-6, THROW_LOFT_WEIGHT_MAX_KG - THROW_LOFT_WEIGHT_MIN_KG)
     loft_norm = min(1.0, max(0.0, (weight - THROW_LOFT_WEIGHT_MIN_KG) / loft_span))
-    pitch_deg = THROW_LOFT_MIN_DEG + (THROW_LOFT_MAX_DEG - THROW_LOFT_MIN_DEG) * loft_norm
+    loft_deg = THROW_LOFT_MIN_DEG + (THROW_LOFT_MAX_DEG - THROW_LOFT_MIN_DEG) * loft_norm
+    pitch_deg = min(
+        THROW_AIM_PITCH_MAX_DEG,
+        max(THROW_AIM_PITCH_MIN_DEG, loft_deg + float(aim_pitch_deg)),
+    )
     pitch_rad = math.radians(pitch_deg)
 
     horizontal = speed * math.cos(pitch_rad)
     vertical = speed * math.sin(pitch_rad)
 
-    # Time until the arc returns to launch height (a full lob and fall).
+    # Time until the arc returns to launch height (a full lob and fall). A downward launch never
+    # returns, so give it a short visible descent instead of expiring on the first frame.
     air_time = (2.0 * vertical) / THROW_GRAVITY_Z
-    flight_time = min(THROW_MAX_FLIGHT_SEC, max(0.12, air_time))
+    min_flight = 0.12 if air_time > 0.0 else 0.30
+    flight_time = min(THROW_MAX_FLIGHT_SEC, max(min_flight, air_time))
     apex = (vertical * vertical) / (2.0 * THROW_GRAVITY_Z)
 
     return ThrowFlightPlan(

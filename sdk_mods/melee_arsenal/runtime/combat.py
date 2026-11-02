@@ -203,6 +203,9 @@ _POSE_STARTED_AT: float = 0.0
 POSE_GUARD = "guard"
 POSE_THROWN = "thrown"
 
+# A pose must never outlive its own state; this is the last-resort ceiling for the breathing guard.
+POSE_MAX_HOLD_SEC: float = 12.0
+
 # Offsets in UE3 rotator units (65536/360 per degree) / UU, added to the captured rest transform.
 #
 # These are deliberately small: the first-person arms mesh pivots well behind the hands, so a
@@ -211,7 +214,10 @@ POSE_THROWN = "thrown"
 # no translation, and the thrown pose is pure downward translation (no rotation at all), which can
 # always be restored exactly.
 _POSE_OFFSETS: dict[str, dict[str, float]] = {
-    POSE_GUARD: {"pitch": -1700.0, "yaw": 900.0, "roll": 1300.0, "x": 0.0, "y": 0.0, "z": 0.0},
+    # Positive pitch lifts the blade, negative yaw swings it inward toward the crosshair (the old
+    # signs leaned the sword away from the middle of the screen). No translation: the hands stay
+    # on screen.
+    POSE_GUARD: {"pitch": 1500.0, "yaw": -1200.0, "roll": -1000.0, "x": 0.0, "y": 0.0, "z": 0.0},
     POSE_THROWN: {"pitch": 0.0, "yaw": 0.0, "roll": 0.0, "x": 0.0, "y": 4.0, "z": -75.0},
 }
 
@@ -285,6 +291,11 @@ def _make_vec_from(template_vec: Any, x: float, y: float, z: float) -> Any:
 def _s16(val: int) -> int:
     v = int(val) & 0xFFFF
     return v - 0x10000 if (v & 0x8000) else v
+
+
+def _rotator_add(base: int, delta: float) -> int:
+    """Add a delta to a 16-bit UE3 rotator component, wrapping like the engine does."""
+    return _s16(int(round(int(base) + float(delta))))
 
 
 def _rot_to_forward(rot: Any) -> tuple[float, float, float]:
@@ -847,6 +858,9 @@ def _capture_arms_rest_transform(arms: Any, sm: Any) -> dict[str, Any] | None:
             ),
         }
         _ARMS_REST_BASELINE[id(sm)] = entry
+        log_info(
+            f"Captured first-person arms rest transform: rot={entry['rot']}, loc={entry.get('loc')}"
+        )
         return entry
     except Exception:
         return None
@@ -910,6 +924,9 @@ def update_first_person_pose(pc: Any, now: float | None = None) -> None:
     if offsets is None:
         return
     now = time.monotonic() if now is None else now
+    if now - _POSE_STARTED_AT > POSE_MAX_HOLD_SEC:
+        reset_first_person_pose("held past its safety limit")
+        return
     bob = 0.0
     if _POSE_KIND == POSE_GUARD:
         # A slow, shallow bob keeps the brace alive instead of reading as a frozen T-pose.
@@ -917,9 +934,9 @@ def update_first_person_pose(pc: Any, now: float | None = None) -> None:
     try:
         bp, by, br = entry["rot"]
         ro = copy.copy(sm.RotOrigin)
-        ro.Pitch = int(bp + offsets["pitch"] + 90.0 * bob)
-        ro.Yaw = int(by + offsets["yaw"])
-        ro.Roll = int(br + offsets["roll"] + 60.0 * bob)
+        ro.Pitch = _rotator_add(bp, offsets["pitch"] + 90.0 * bob)
+        ro.Yaw = _rotator_add(by, offsets["yaw"])
+        ro.Roll = _rotator_add(br, offsets["roll"] + 60.0 * bob)
         sm.RotOrigin = ro
         loc = entry.get("loc")
         if loc is not None and hasattr(sm, "Origin"):
@@ -933,6 +950,37 @@ def update_first_person_pose(pc: Any, now: float | None = None) -> None:
     except Exception:
         _write_rest_transforms()
         _POSE_KIND = ""
+
+
+def reset_first_person_pose(reason: str = "") -> None:
+    """Unconditionally restore the idle hands and drop the pose, whatever its kind.
+
+    This is the guard-release path: a hit can consume the brace without the engine ever reporting
+    an RMB release, so the restore must never be conditional on the tracked pose kind matching.
+    """
+    global _POSE_KIND
+    had = _POSE_KIND
+    _POSE_KIND = ""
+    _write_rest_transforms()
+    if had:
+        log_info(f"First-person pose force-restored ({had}{': ' + reason if reason else ''})")
+
+
+def capture_first_person_rest_transform() -> bool:
+    """Capture the idle arms transform while nothing is posed, so it can never bake in an offset."""
+    if _POSE_KIND or STATE.swing_motion.active:
+        return False
+    try:
+        return _pose_target(get_local_player_controller()) is not None
+    except Exception:
+        return False
+
+
+def pose_held_seconds() -> float:
+    """How long the current pose has been applied (0.0 when idle)."""
+    if not _POSE_KIND:
+        return 0.0
+    return max(0.0, time.monotonic() - _POSE_STARTED_AT)
 
 
 def clear_first_person_pose(pc: Any = None, kind: str = "") -> bool:
