@@ -29,7 +29,11 @@ from .config import ELEMENTS, RunConfig
 from .geometry import (
     ACCESSORIES,
     ACCESSORY_FACE_CLIP_M,
+    ACCESSORY_LENGTH_SCALE,
     BLADE_CORE_DEPTH_MULTIPLIER,
+    BLADE_LENGTH_BOOST,
+    BLADE_LENGTH_SCALE,
+    BLADE_SPINE_SCALE,
     BLADES,
     COMBINATIONS,
     ELEMENT_RECEIVER_X,
@@ -196,6 +200,10 @@ class Stage:
     #: Extra fingerprint material, e.g. the decal directory contents.
     extra_key: Callable[[KitState], Any] | None = None
     cacheable: bool = True
+    #: Source files owned by this stage.  The `run` callable is usually a two-line
+    #: wrapper around a module (`geometry.py`, `textures.py`, ...), so hashing the
+    #: wrapper alone would serve stale geometry after an edit to the real code.
+    sources: tuple[str | Path, ...] = ()
 
     def fingerprint(self, cfg: RunConfig, upstream: str, extra: Any = None) -> str:
         digest = hashlib.sha256()
@@ -205,6 +213,15 @@ class Stage:
             digest.update(inspect.getsource(self.run).encode())
         except (OSError, TypeError):  # pragma: no cover - source is always available in-repo
             pass
+        for source in self.sources:
+            path = Path(source)
+            if not path.is_absolute():
+                path = Path(__file__).resolve().parent / path
+            digest.update(str(source).encode())
+            try:
+                digest.update(path.read_bytes())
+            except OSError:  # pragma: no cover - only if the source tree is incomplete
+                pass
         if extra is not None:
             digest.update(json.dumps(extra, sort_keys=True, default=str).encode())
         return digest.hexdigest()[:16]
@@ -443,6 +460,12 @@ def build_manifest(state: KitState) -> dict[str, Any]:
         },
         "revision_notes": {
             "blade_core_depth_multiplier": BLADE_CORE_DEPTH_MULTIPLIER,
+            "blade_spine_scale": BLADE_SPINE_SCALE,
+            "blade_length_scale": BLADE_LENGTH_SCALE,
+            "blade_length_boost_r8": BLADE_LENGTH_BOOST,
+            "accessory_length_scale": ACCESSORY_LENGTH_SCALE,
+            "jakobs_blade": "frontier sabre: straight full-width run, subtle late curve, small clipped tip taper",
+            "flared_cleave_guard": "end caps seated into the continuous plate",
             "accessory_clip_m": ACCESSORY_FACE_CLIP_M,
             "element_center_x_m": round(ELEMENT_RECEIVER_X + ELEMENT_RECEIVER_X_SHIFT, 6),
             "heavy_spine_depth_multiplier": 1.0 / HEAVY_SPINE_DEPTH_DIVISOR,
@@ -677,22 +700,33 @@ def _run_render(state: KitState) -> None:
 def default_stages() -> list[Stage]:
     """The ordered stack. Insert new art passes anywhere between `linework` and `textures`."""
     return [
-        Stage("geometry", "Build final part geometry", _run_geometry, _save_geometry, _load_geometry),
-        Stage("uv", "Project faces and pack padded UV islands", _run_uv, _save_uv, _load_uv),
+        Stage(
+            "geometry", "Build final part geometry", _run_geometry, _save_geometry, _load_geometry,
+            sources=("config.py", "geometry.py"),
+        ),
+        Stage(
+            "uv", "Project faces and pack padded UV islands", _run_uv, _save_uv, _load_uv,
+            sources=("uv.py",),
+        ),
         Stage(
             "flat",
             "Fill each island with its flat palette colour",
             _run_flat,
             _save_canvases,
             _load_canvases,
+            sources=("config.py", "textures.py"),
         ),
-        Stage("mottle", "Paint wash, deposits, wear and chips", _run_mottle, _save_canvases, _load_canvases),
+        Stage(
+            "mottle", "Paint wash, deposits, wear and chips", _run_mottle, _save_canvases, _load_canvases,
+            sources=("config.py", "textures.py"),
+        ),
         Stage(
             "linework",
             "Draw bold contours, shading and hatching",
             _run_linework,
             _save_canvases,
             _load_canvases,
+            sources=("config.py", "textures.py"),
         ),
         Stage(
             "decals",
@@ -701,18 +735,24 @@ def default_stages() -> list[Stage]:
             _save_canvases,
             _load_canvases,
             extra_key=_decals_key,
+            sources=("config.py", "textures.py"),
         ),
-        Stage("textures", "Seal padding and write the final PNGs", _run_textures, _save_finals, _load_finals),
+        Stage(
+            "textures", "Seal padding and write the final PNGs", _run_textures, _save_finals, _load_finals,
+            sources=("config.py", "textures.py"),
+        ),
         Stage(
             "export",
             "Write GLBs, UV layouts and the socket manifest",
             _run_export,
             cacheable=False,
+            sources=("glb.py",),
         ),
         Stage(
             "render",
             "Render part and combination previews (no Blender)",
             _run_render,
             cacheable=False,
+            sources=("render.py",),
         ),
     ]

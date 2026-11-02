@@ -25,7 +25,7 @@ inserted without editing anything that already exists.
 
 | # | Stage | What it owns | Artifacts (per part) |
 | - | ----- | ------------ | -------------------- |
-| 1 | `geometry` | Every mesh rule. R3 parametric shapes **and** the R4 revisions applied in one pass: halved blade-slot depth, per-manufacturer thickness, receiver shift, heavy-spine depth, centred cleave guard, Torgue hex shell + ribs, bifacial normalisation. | `*.json` (faces + sockets) |
+| 1 | `geometry` | Every mesh rule. R3 parametric shapes **and** the R4 revisions applied in one pass: halved blade-slot depth, per-manufacturer thickness, receiver shift, heavy-spine depth, centred cleave guard, Torgue hex shell + ribs, bifacial normalisation. Plus the R7 silhouette pass (slimmer blades, the Jakobs sabre, seated cleave-guard end caps) and the R8 blade/handle ratio pass (1.5x longer blades + blade-mounted accessories). | `*.json` (faces + sockets) |
 | 2 | `uv` | Newell-normal face projection at one shared texel density, padded shelf packing into a pow2 atlas, island template reuse for mirrored rear faces. | `*.json` (`inkblade.physical-uv/2.0`) |
 | 3 | `flat` | **Flat textures saved as PNGs**: one solid palette colour per UV island (per-island brightness jitter, lightened `edge` role). | `<part>.png` (**the flat pass on disk**) |
 | 4 | `mottle` | Paint wash (three-octave field), deposits, dry-brush streaks, gouges, chipped paint, tally marks, edge chips. | `<part>.png` |
@@ -60,10 +60,43 @@ recipes get their accent islands recoloured exactly like the exported combinatio
 ## Caching
 
 Each stage has a fingerprint of `config + its own source + the upstream fingerprint + an optional
-extra key` (the decals stage hashes the decal directory listing). A stage is skipped when its
+extra key` (the decals stage hashes the decal directory listing). "Its own source" means the `run`
+wrapper **and** the module files declared in `Stage.sources` — e.g. `geometry.py` for the geometry
+stage, `textures.py` for the painting stages. The wrapper is usually a two-line call into a module,
+so hashing only the wrapper would serve stale geometry after a mesh edit.
+
+A stage is skipped when its
 fingerprint matches `build/inkblade_stages/<stage>/_fingerprint.json` and its artifacts are still on
 disk. Because fingerprints chain, editing the ink stage re-runs ink and everything after it while the
-geometry / UV / flat / mottle PNGs stay untouched.
+geometry / UV / flat / mottle PNGs stay untouched. Editing `geometry.py` re-runs the whole stack,
+as it should.
+
+## R7 silhouette / R8 length passes
+
+`geometry.py` owns a small, shared blade pass on top of the R3 silhouettes:
+
+- `BLADE_SPINE_SCALE` shrinks every blade's **spine width** (the Y / edge-on thickness). It scales
+  the whole blade part, so the front rail, receiver and face overlays stay attached; the X face
+  width is untouched. `accessory_face_gap_m` follows it so socketed fittings stay on the skin.
+- `BLADE_LENGTH_SCALE` stretches the blade above `BLADE_LENGTH_PIVOT_Z`. Guards, sockets and the
+  element receiver keep their positions, and `BLADES[*].base_reach_m` stays equal to the exported
+  tip height. R8 sets `BLADE_LENGTH_BOOST = 1.5` on top of R7's `1.12`, i.e. blades are 1.5x longer
+  than the R7 kit (roughly a 4:1 blade-to-grip ratio instead of a knife-like 3:1).
+- `ACCESSORY_LENGTH_SCALE` stretches the four **blade-mounted accessory strips** (`serrated_edge`,
+  `extended_blade_fuller`, `monofilament_honing`, `reinforced_heavy_spine`) by the same 1.5x, so
+  they keep covering the same fraction of the blade instead of becoming stubs near the guard.
+  Compact modules (pommel, elemental coil, flared cleave guard), element emitters and grips are
+  deliberately unchanged.
+- Blade-mounted decorative boxes are stretched with the blade too (`_blade_box` scales their Z
+  size), so their proportions survive the longer silhouette.
+- Jakobs was rebuilt as a frontier sabre: straight and full-width out of the hilt, a very subtle
+  curve back near the end and a small clipped point only in the last stretch (the cutting edge
+  sweeps back to meet the spine line). Earlier passes tapered from the ricasso and curved too soon;
+  the original shipped mesh was a recurved hook. Its swept quillons are unchanged. The shape is
+  kept through the R8 length pass: only its Z coordinates stretch, never its X silhouette.
+- `accessory_flared_cleave_guard`'s yellow end caps are seated into the plate: the R4
+  `CLEAVE_GUARD_PLATE_SHIFT` moved the plate back but left the caps at their old depth, so they
+  floated clear of the wing skin.
 
 ## Adding a stage
 
