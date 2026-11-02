@@ -14,6 +14,27 @@ A visual revision of the supplied Inkblade R4 kit, inspired by graphic-novel / l
 - `tools/render_previews.py`: Blender Python render script used for the images.
 - `tools/reink_bold.py`: the texture-generation script, for reference. **It is not idempotent**; run it only on a fresh copy of the original R4 kit, not on these already-painted assets. Requires Pillow, NumPy and OpenCV.
 
+## Regenerating this kit
+
+These binaries are the shipped `r5` paint-over of the R4 kit. The maintainable generator now lives in
+`tools/inkblade_gen/` (see its README) and rebuilds the whole kit — geometry, UVs, flat colour PNGs,
+mottle, bold ink linework, optional decals and the export — as an ordered stack of stages, using only
+Pillow:
+
+```
+./melee generate                                   # -> build/inkblade_kit
+./melee generate --renders                         # + previews in build/inkblade_renders
+./melee generate --only linework                   # re-ink only, reusing cached UV/flat/mottle work
+./melee generate --parts blade_jakobs --decals art # one part, with external decal art
+./melee build --kit build/inkblade_kit             # compile the generated kit to UE3 packages
+```
+
+The generated kit satisfies the same `socket_manifest.json` contract as this directory (schema
+`inkblade.socket-kit/1.0`), reproduces the shipped part bounds and sockets exactly, and compiles
+unchanged with `tools/compile_inkblade_upk.py`. It is not byte-identical art: the ink is re-painted by
+the Pillow stage stack rather than by `tools/reink_bold.py` (which needs OpenCV and is kept for
+reference only). Re-run `tools/render_previews.py` in Blender if you replace these images.
+
 ## Assemble
 
 Import the GLBs with a glTF 2.0 importer. glTF coordinates are right-handed, Y-up, in meters. Each part has a root, named `MOUNT` and/or `SOCKET_*` transform nodes, and UV-textured materials. Align a child part's `MOUNT` to its parent's target socket: `world_child = world_socket × inverse(child_mount)` (the supplied mounts are identity transforms). The grip attaches to `SOCKET_GRIP`; most accessories use `SOCKET_ACCESSORY`, while the balanced pommel uses the grip's `SOCKET_POMMEL`; elemental modules use `SOCKET_ELEMENT`.

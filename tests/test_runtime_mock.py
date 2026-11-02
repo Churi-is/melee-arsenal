@@ -234,6 +234,8 @@ class MockBL2World:
         self.status_mult: float = 1.0
         self.played_ak: list[str] = []
         self.played_canims: list[str] = []
+        # (CameraAnim path, full positional args) for every `ClientPlayCameraAnim` call
+        self.camera_anim_calls: list[tuple[str, tuple]] = []
         self.reward_call_lengths: list[int] = []
         self.ground_pickups: list = []
         self.block_sentinel = object()
@@ -242,6 +244,10 @@ class MockBL2World:
     def register(self, obj: FakeUObject) -> FakeUObject:
         self.objects[obj._path_name()] = obj
         return obj
+
+    def _client_play_camera_anim(self, cam_anim, *args) -> None:
+        self.played_canims.append(cam_anim._path_name())
+        self.camera_anim_calls.append((cam_anim._path_name(), args))
 
     def construct_object(
         self,
@@ -1100,7 +1106,7 @@ class MockBL2World:
             PlayerReplicationInfo=types.SimpleNamespace(ExpLevel=30),
             SaveGameName="Save0001",
             GetCurrentPlaythrough=lambda: 1,
-            ClientPlayCameraAnim=lambda ca, *a: self.played_canims.append(ca._path_name()),
+            ClientPlayCameraAnim=self._client_play_camera_anim,
             GetHUDMovie=lambda: None,
             ServerGrantMissionRewards=self._server_grant_mission_rewards,
         )
@@ -1511,7 +1517,10 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 import melee_arsenal  # type: ignore[import-not-found]
                 from melee_arsenal.core.catalog import ACCESSORIES
                 from melee_arsenal.core.schemas import PlayerMeleeContext
-                from melee_arsenal.core.stats import compute_attack_damage
+                from melee_arsenal.core.stats import (
+                    compute_attack_damage,
+                    compute_damage_reduction_pct,
+                )
                 from melee_arsenal.runtime import (
                     combat,
                     commands,
@@ -1634,6 +1643,9 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 self.assertEqual(len(world.caused_damages), 1)
                 self.assertEqual(world.caused_damages[0]["Target"], dummy_pawn)
                 self.assertAlmostEqual(world.caused_damages[0]["DamageAmount"], float(expected_sabre_crit))
+                # ...and the crit was tagged so BL2's floating number can be re-issued as a CRITICAL
+                self.assertIn(id(dummy_pawn), combat._PENDING_CRIT_FEEDBACK)
+                combat.clear_all_pending_crit_feedback()
 
                 # Mid-swap guard: if `pawn.PendingWeapon` is active, swing must NOT touch `Arms` anim slots!
                 world.pawn.PendingWeapon = phaseblade
@@ -1755,12 +1767,17 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 self.assertIn("Ake_Wep_Explosions.Ak_Play_Wep_Explosion_Gyrojet", world.played_ak)
                 self.assertIn("Anim_CameraAnimations.Explosions.Canim_Explosion_Medium", world.played_canims)
 
-                # 4D. Defensive Blade Guard: the held Melee Weapon's rolled 50-70% Damage Reduction
-                # blocks the incoming `WillowPlayerPawn:TakeDamage` and re-calls it with reduced damage!
+                # 4D. Defensive Blade Guard: the held Melee Weapon's rolled level-scaled Damage
+                # Reduction blocks the incoming `WillowPlayerPawn:TakeDamage` and re-calls it reduced!
                 world.pawn.Weapon = sabre
-                _, sabre_dr_card = resolver.resolve_melee_weapon(sabre, sync_weapon_props=False)
+                sabre_inst_dr, sabre_dr_card = resolver.resolve_melee_weapon(sabre, sync_weapon_props=False)
                 dr_pct = sabre_dr_card.damage_reduction_pct
-                self.assertTrue(50 <= dr_pct <= 70, f"Damage Reduction {dr_pct}% outside 50-70%!")
+                self.assertTrue(
+                    30 <= dr_pct <= 70, f"Damage Reduction {dr_pct}% outside the 30-70% band!"
+                )
+                self.assertEqual(dr_pct, compute_damage_reduction_pct(sabre_inst_dr))
+                # A Lv30 blade must sit well under the Lv80+OP10-only 70% cap
+                self.assertLess(dr_pct, 70)
                 self.assertIn(
                     melee_arsenal.runtime.hook_player_take_damage, melee_arsenal.runtime.ALL_HOOKS
                 )
@@ -1827,6 +1844,138 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                     self.assertEqual(td_re_calls, [])
                 finally:
                     state.STATE.damage_reduction_enabled = True
+
+                # 4E. Weakspot crits must surface the vanilla floating "CRITICAL" popup.
+                # `Behavior_CauseDamage` has no HitInfo, so the engine's recent-damage tracker never
+                # sets the crit bit itself; we tag the victim and re-issue the display call with it.
+                combat.clear_all_pending_crit_feedback()
+                crit_display_calls: list[object] = []
+                crit_event = types.SimpleNamespace(
+                    PC=world.pc,
+                    DamageEventData=types.SimpleNamespace(
+                        DamagedActor=dummy_pawn, DamageEventFlags=0, TotalDamageForDamageType=123.0
+                    ),
+                )
+                # Unknown victim: never forced, vanilla display runs untouched
+                self.assertIsNone(
+                    combat.on_display_recent_damage_pre(
+                        object(), crit_event, None, lambda *a: crit_display_calls.append(a)
+                    )
+                )
+                self.assertEqual(crit_display_calls, [])
+
+                # Co-op safety: a remote player's floating numbers are never modified
+                combat._mark_pending_crit_feedback(dummy_pawn)
+                remote_event = types.SimpleNamespace(
+                    PC=types.SimpleNamespace(Name="WillowPlayerController_CoOp"),
+                    DamageEventData=types.SimpleNamespace(
+                        DamagedActor=dummy_pawn, DamageEventFlags=0
+                    ),
+                )
+                self.assertIsNone(
+                    combat.on_display_recent_damage_pre(
+                        object(), remote_event, None, lambda *a: crit_display_calls.append(a)
+                    )
+                )
+                self.assertEqual(crit_display_calls, [])
+                self.assertEqual(remote_event.DamageEventData.DamageEventFlags, 0)
+
+                # Local crit: display re-called exactly once with the crit bit (1) forced on
+                self.assertIs(
+                    combat.on_display_recent_damage_pre(
+                        object(), crit_event, None, lambda *a: crit_display_calls.append(a)
+                    ),
+                    world.block_sentinel,
+                )
+                self.assertEqual(len(crit_display_calls), 1)
+                self.assertEqual(crit_event.DamageEventData.DamageEventFlags, 1)
+                # Tag consumed: a follow-up DoT/normal popup on the same actor is never force-crit
+                crit_event.DamageEventData.DamageEventFlags = 0
+                self.assertIsNone(
+                    combat.on_display_recent_damage_pre(
+                        object(), crit_event, None, lambda *a: crit_display_calls.append(a)
+                    )
+                )
+                self.assertEqual(len(crit_display_calls), 1)
+
+                # Expired tags are ignored (no stale crits when a swing is interrupted/lagging)
+                combat._mark_pending_crit_feedback(dummy_pawn)
+                combat._PENDING_CRIT_FEEDBACK[id(dummy_pawn)] = 0.0
+                self.assertIsNone(
+                    combat.on_display_recent_damage_pre(
+                        object(), crit_event, None, lambda *a: crit_display_calls.append(a)
+                    )
+                )
+                self.assertEqual(len(crit_display_calls), 1)
+                combat.clear_all_pending_crit_feedback()
+
+                # 4F. RMB / ADS zoom is disabled on Melee Weapons (reserved for secondary attacks)
+                zoom_func_calls: list[object] = []
+                world.pawn.Weapon = sabre
+                self.assertIs(
+                    combat.on_melee_weapon_start_zoom_pre(
+                        sabre, None, None, lambda *a: zoom_func_calls.append(a)
+                    ),
+                    world.block_sentinel,
+                )
+                self.assertEqual(zoom_func_calls, [])
+                # ...but a vanilla gun in hand keeps its native scope/ADS behaviour!
+                self.assertIsNone(
+                    combat.on_melee_weapon_start_zoom_pre(
+                        vanilla_wpn, None, None, lambda *a: zoom_func_calls.append(a)
+                    )
+                )
+                self.assertFalse(combat.MELEE_SECONDARY_ATTACK_ENABLED)
+                self.assertFalse(
+                    combat._try_melee_secondary_attack(sabre, sabre_inst_dr, sabre_dr_card)
+                )
+                self.assertIn(melee_arsenal.runtime.hook_melee_start_zoom, melee_arsenal.runtime.ALL_HOOKS)
+                self.assertIn(
+                    melee_arsenal.runtime.hook_display_recent_damage, melee_arsenal.runtime.ALL_HOOKS
+                )
+
+                # 4G. Camera shake must be a slow, eased camera bump for fast blades (no more flicks)
+                world.camera_anim_calls.clear()
+                world.played_canims.clear()
+                world.pawn.Weapon = sabre
+
+                def _swing_shake() -> list:
+                    world.camera_anim_calls.clear()
+                    combat._LAST_SWING_AT = 0.0
+                    combat.on_weapon_consume_ammo_post(sabre, None, None, None)
+                    combat.on_weapon_instant_fire_pre(sabre, None, None, None)
+                    return world.camera_anim_calls
+
+                calls = _swing_shake()
+                self.assertTrue(calls, "expected a CameraAnim on swing")
+                for path, cam_args in calls:
+                    self.assertIn("Melee", path)
+                    scale, rate, blend_in, blend_out = cam_args[0], cam_args[1], cam_args[2], cam_args[3]
+                    # The opening motion must actually ramp in. 0.10s read as an instant flick while the
+                    # 0.24s fade-out looked smooth, i.e. it eased out but never in.
+                    self.assertGreaterEqual(blend_in, 0.25, f"blend-in {blend_in}s is too abrupt")
+                    self.assertGreaterEqual(blend_out, blend_in * 0.9, "fade-out must match the ease-in")
+                    # Playback below 1.0x stretches the anim's own opening spike so it cannot flick
+                    self.assertLessEqual(rate, 0.70, f"camera shake rate {rate} is too fast")
+                    self.assertLessEqual(scale, 0.05, f"camera shake scale {scale} too strong")
+                default_scale = calls[0][1][0]
+
+                # The slider is rescaled: the 50% default is exactly what the old curve's 10% felt like,
+                # 100% is twice that, and 150% is three times it.
+                self.assertAlmostEqual(combat.CAMERA_SHAKE_SLIDER_GAIN, 0.2)
+                self.assertAlmostEqual(state.STATE.camera_shake_scale, 0.5)
+                state.STATE.camera_shake_scale = 1.0
+                louder = _swing_shake()[0][1][0]
+                self.assertAlmostEqual(louder, default_scale * 2.0)
+                state.STATE.camera_shake_scale = 1.5
+                boosted = _swing_shake()[0][1][0]
+                self.assertAlmostEqual(boosted, default_scale * 3.0)
+                # 0% is a true off switch (no CameraAnim call at all)
+                state.STATE.camera_shake_scale = 0.0
+                self.assertEqual(_swing_shake(), [], "0% camera shake must stay silent")
+                state.STATE.camera_shake_scale = 0.5
+                world.camera_anim_calls.clear()
+                world.played_canims.clear()
 
                 # 5. Item Card GFx Hooks — MUST NOT call AdjustHeight()!
                 top_rows_written: dict[int, tuple] = {}
@@ -1912,7 +2061,7 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 from melee_arsenal.core.schemas import MeleeWeaponInstance, MeleeWeaponParts
                 from melee_arsenal.runtime import commands, custom_assets, definitions, resolver, state
 
-                self.assertEqual(melee_arsenal.__version__, "0.3.4")
+                self.assertEqual(melee_arsenal.__version__, "0.3.5")
                 self.assertTrue(definitions.ensure_definitions_built())
                 self.assertTrue(state.STATE.custom_assets_active)
                 self.assertEqual(state.STATE.custom_kit_revision, "bold_ink_visual_revision_of_r4")

@@ -103,7 +103,7 @@ MANUFACTURERS: dict[Manufacturer, ManufacturerSpec] = {
         ),
         element_policy=ElementPolicy.NEVER,
         allowed_elements=(Element.NONE,),
-        base_damage_mult=1.72,
+        base_damage_mult=1.40,       # Fastest cadence in the kit: per-hit damage stays in check
         base_swing_speed=2.35,       # Semi-auto cadence cap ("Swings as fast as you pull the trigger")
         semi_auto_click=True,
         cleave_profile=CleaveProfile(

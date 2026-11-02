@@ -31,6 +31,7 @@ from ..core.catalog import (
 )
 from ..core.enums import Element, ElementPolicy, Manufacturer, Rarity, StatId, TargetingMode
 from ..core.loot_roller import ACCESSORY_ROLL_CHANCE
+from ..core.stats import compute_swing_speed_damage_scale
 from .asset_library import register_assets_in_library
 from .custom_assets import (
     apply_gestalt_bounds_framing,
@@ -862,7 +863,12 @@ def ensure_definitions_built() -> bool:
 
             ihd = copy.copy(wt.InstantHitDamage)
             ihd.BaseValueConstant = 20.0
-            ihd.BaseValueScaleConstant = 2.65 * mspec.base_damage_mult
+            # Mirror `compute_card_stats` (including the fast-blade per-hit trade-off) so any engine path
+            # that ever reads the inherited pistol damage agrees with the item card.
+            ihd.BaseValueScaleConstant = round(
+                2.65 * mspec.base_damage_mult * compute_swing_speed_damage_scale(mspec.base_swing_speed),
+                6,
+            )
             wt.InstantHitDamage = ihd
 
             # Replace gunshot audio with melee swipe AkEvent (or silence so no gun bang ever plays!)

@@ -35,9 +35,10 @@ Built 100% on empirical results from `melee_combat_probe_report.json` (Sanctuary
      `Arms.SkeletalMesh.RotOrigin` + `Arms.ForceUpdate(False)` if a modded rig ever lacks `Bladed_Melee`.
    - Regular melee (`[V]`) is completely untouched so Maya Scorn, Zer0 Execute, Krieg Buzz Axe, etc. work natively.
 
-4. **Defensive Blade Guard: Rolled 50-70% Damage Reduction While Equipped**:
-   - Every Melee Weapon rolls a stable `50-70%` incoming-damage reduction (printed on its item card) that
-     protects you while it is the held `Pawn.Weapon`, rewarding committing to close-quarters combat.
+4. **Defensive Blade Guard: Level- & Part-Scaled Damage Reduction While Equipped**:
+   - Every Melee Weapon rolls an incoming-damage reduction (printed on its item card) that protects you
+     while it is the held `Pawn.Weapon`. The floor climbs from `30%` at Lv 1 to `61%` at Lv 80 + OP10,
+     with parts deciding the rest up to a `70%` cap (`76%` for unique rarities).
    - `WillowPlayerPawn:TakeDamage` PRE blocks the incoming hit and re-calls the same function with
      `Damage * (1 - reduction)` inside `prevent_hooking_direct_calls()`, so BL2 still handles the
      shield/health split, flinch, hit reactions, and FFYL exactly as normal. Only the local player's own
@@ -107,6 +108,39 @@ AK_HEAVY_IMPACT = "Ake_Wep_Melee.Ak_Play_wep_melee_Merc_impact"
 
 BLADED_MELEE_SEQ_LENGTH = 0.6333
 SINGLE_TARGET_ASSIST_HALF_DEG = 22.5  # Matches Gearbox `BehaviorData_PlayerMeleeAttackWithBladedWeapon` (45° cone)
+
+# CameraAnim tuning. The old values (scale 0.45-0.90 at rate 0.95-1.35, 40-120ms blends) made fast
+# blades read as a hard camera "flick" every swing: a ~100ms ramp read as an instant jump while the
+# 240ms fade-out looked smooth, i.e. it eased out but not in. Playback is now slowed well below 1.0x
+# (the whole motion, including its opening spike, is stretched), the blend-in window is long enough to
+# actually ease (~0.30s == a visible ramp at 60fps), and the fade-out matches it.
+CAMERA_SHAKE_BLEND_IN_SEC = 0.30
+CAMERA_SHAKE_BLEND_OUT_SEC = 0.32
+CAMERA_SHAKE_RATE_HEAVY = 0.65
+CAMERA_SHAKE_RATE_CLEAVE = 0.68
+CAMERA_SHAKE_RATE_SINGLE = 0.70
+CAMERA_SHAKE_CADENCE_REFERENCE = 1.45  # swings/sec at which a shake plays at full strength
+CAMERA_SHAKE_CADENCE_FLOOR = 0.45      # never damp a shake below this fraction of its scale
+
+# `MODS -> Swing Camera Shake (%)` is a feel dial, not a raw multiplier: the amplitudes authored below
+# are the *loud* reference, and the slider is rescaled by this gain so the setting players preferred
+# under the old curve (10%) is exactly what 50% means now — 100% is 2x that, 150% is 3x.
+CAMERA_SHAKE_SLIDER_GAIN = 0.20
+
+# `FPlayerRecentDamageEventData.DamageEventFlags` bits (see `WillowDamageTypeDefinition`):
+#   bit 0 = critical hit, bit 1 = healing, bit 2 = resisted
+DAMAGE_EVENT_FLAG_CRIT = 1
+
+# BL2 only derives the floating "CRITICAL" popup from `DamageEventFlags`, which the engine's damage
+# pipeline sets from a real `HitInfo`/hit-region crit. `Behavior_CauseDamage` (what this mod uses to
+# apply exact, already-crit-multiplied damage) carries no HitInfo, so without help the crit text never
+# appears. We tag each victim we crit and re-issue the vanilla display call with the crit bit forced.
+CRIT_FEEDBACK_WINDOW_SEC = 0.75
+_PENDING_CRIT_FEEDBACK: dict[int, float] = {}
+
+# Right Mouse Button / ADS zoom is intentionally disabled on Melee Weapons for now (see
+# `on_melee_weapon_start_zoom_pre`); RMB is reserved for a future secondary attack.
+MELEE_SECONDARY_ATTACK_ENABLED = False
 
 WEAKSPOT_BONE_KEYWORDS = (
     "head",
@@ -499,7 +533,7 @@ def _read_take_damage_amount(args: Any) -> tuple[str, float] | None:
 
 
 def on_player_take_damage_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
-    """Grant the equipped Melee Weapon's rolled `50-70%` Damage Reduction (`WillowPlayerPawn:TakeDamage`).
+    """Grant the equipped Melee Weapon's rolled level- & part-scaled Damage Reduction (`TakeDamage`).
 
     Only the LOCAL player's pawn is touched, and only while a Melee Arsenal weapon is the active
     `Pawn.Weapon`. pyunrealsdk hook `args` are mutable but never propagate to the live call, so the
@@ -507,6 +541,9 @@ def on_player_take_damage_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
     reduced damage inside `prevent_hooking_direct_calls()` (BL2 then splits that reduced amount
     between shields and health exactly as it normally would). Any unexpected state falls through and
     lets vanilla damage apply untouched.
+
+    The rolled percentage starts at `30%` for a Lv 1 blade and climbs to the `70%` cap (76% for
+    unique rarities) at Lv 80 + OP10 — see `core.stats.compute_damage_reduction_pct`.
     """
     if not STATE.damage_reduction_enabled:
         return None
@@ -552,6 +589,134 @@ def on_player_take_damage_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
     except Exception as exc:
         log_error(f"on_player_take_damage_pre failed: {exc!r}")
         return None
+
+
+# ---------------------------------------------------------------------------
+# Weakspot Crit Feedback (vanilla floating "CRITICAL" popup)
+# ---------------------------------------------------------------------------
+
+def _mark_pending_crit_feedback(victim: Any) -> None:
+    """Tag a victim we just critically struck so its vanilla damage popup shows as a crit."""
+    if victim is None:
+        return
+    now = time.monotonic()
+    for stale_id, expires_at in list(_PENDING_CRIT_FEEDBACK.items()):
+        if expires_at < now:
+            _PENDING_CRIT_FEEDBACK.pop(stale_id, None)
+    _PENDING_CRIT_FEEDBACK[id(victim)] = now + CRIT_FEEDBACK_WINDOW_SEC
+
+
+def _clear_pending_crit_feedback(victim: Any) -> None:
+    if victim is not None:
+        _PENDING_CRIT_FEEDBACK.pop(id(victim), None)
+
+
+def clear_all_pending_crit_feedback() -> None:
+    """Drop every pending crit-feedback tag (map change / mod disable hygiene)."""
+    _PENDING_CRIT_FEEDBACK.clear()
+
+
+def on_display_recent_damage_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
+    """Force the native CRITICAL popup for our Python-side weakspot crits.
+
+    BL2 builds its floating damage numbers (and the red "CRITICAL" text) in
+    `WillowDamageTypeDefinition:DisplayRecentDamageForPlayer`, reading
+    `FPlayerRecentDamageEventData.DamageEventFlags`. The engine's damage pipeline only sets the crit
+    bit when it is handed a real `HitInfo` crit region — and `Behavior_CauseDamage` has no `HitInfo`
+    parameter, so our crits dealt full crit damage but always drew as a normal white number.
+
+    pyunrealsdk hook args are a *copy*, so mutating them in place never reaches the live call. We
+    therefore block the vanilla display and re-call the same function with `DamageEventFlags`' crit
+    bit OR-ed in, exactly the block-and-recall pattern the damage-reduction hook already uses.
+    Any unexpected state falls through to the untouched vanilla call.
+    """
+    if not _PENDING_CRIT_FEEDBACK:
+        return None
+
+    try:
+        data = getattr(args, "DamageEventData", None)
+        actor = getattr(data, "DamagedActor", None) if data is not None else None
+        if actor is None:
+            return None
+
+        expires_at = _PENDING_CRIT_FEEDBACK.get(id(actor))
+        if expires_at is None:
+            return None
+        if time.monotonic() > expires_at:
+            _PENDING_CRIT_FEEDBACK.pop(id(actor), None)
+            return None
+
+        # Only ever touch the local player's own client-side numbers (co-op safe).
+        pc = getattr(args, "PC", None)
+        local_pc = get_local_player_controller()
+        if pc is not None and local_pc is not None and pc is not local_pc:
+            return None
+
+        flags = int(getattr(data, "DamageEventFlags", 0) or 0)
+        if flags & DAMAGE_EVENT_FLAG_CRIT:
+            _PENDING_CRIT_FEEDBACK.pop(id(actor), None)
+            return None
+
+        try:
+            data.DamageEventFlags = flags | DAMAGE_EVENT_FLAG_CRIT
+        except Exception:
+            return None
+
+        # Consume the tag so later DoT ticks / follow-up hits never inherit a stale crit flag.
+        _PENDING_CRIT_FEEDBACK.pop(id(actor), None)
+        try:
+            with prevent_hooking_direct_calls():
+                func(args)
+        except Exception as exc:
+            log_error(f"Crit damage-popup re-call failed: {exc!r}")
+            return None
+        if STATE.debug_attack_log:
+            log_info(
+                f"Forced crit damage popup on {getattr(actor, 'Name', 'unknown')} "
+                f"({float(getattr(data, 'TotalDamageForDamageType', 0.0) or 0.0):.1f} dmg)"
+            )
+        return Block
+    except Exception as exc:
+        log_error(f"on_display_recent_damage_pre failed: {exc!r}")
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Secondary Fire (RMB) — ADS zoom disabled, reserved for future secondary attacks
+# ---------------------------------------------------------------------------
+
+def _try_melee_secondary_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCardStats) -> bool:
+    """Dispatch a Melee Weapon secondary attack (RMB). Returns True once one was performed.
+
+    STUB: every Melee Weapon used to inherit the donor pistol's ADS zoom on Right Mouse Button, which
+    felt wrong for a blade and wasted the only spare input the weapon has. Zoom is now suppressed on
+    Melee Weapons (see `on_melee_weapon_start_zoom_pre`) so RMB is free for secondary attacks —
+    unique weapon skills (Krieg-style thrown blades), dash-cleave lunges, spins, ground slams, etc.
+
+    Implement them here and return True when an attack was dispatched; returning False keeps RMB
+    inert (zoom stays blocked either way).
+    """
+    if not MELEE_SECONDARY_ATTACK_ENABLED:
+        return False
+    return False
+
+
+def on_melee_weapon_start_zoom_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
+    """Block RMB zoom while a Melee Weapon is held and offer the secondary-attack stub a turn."""
+    resolved = resolve_melee_weapon(obj, sync_weapon_props=False)
+    if resolved is None:
+        return None
+    inst, card = resolved
+
+    if _try_melee_secondary_attack(obj, inst, card):
+        return Block
+
+    if STATE.debug_attack_log:
+        log_info(
+            f"RMB zoom suppressed [{card.manufacturer.value} {card.archetype_name}] "
+            "(secondary attack not implemented yet)"
+        )
+    return Block
 
 
 # ---------------------------------------------------------------------------
@@ -677,21 +842,41 @@ def _trigger_first_person_blade_swing(
             sm_info.style = card.manufacturer.value
             sm_info.swing_sign *= -1
 
-    # 3. Manufacturer-tuned CameraAnim impact feel
+    # 3. Manufacturer-tuned CameraAnim impact feel — soft, slow and eased on purpose.
+    #    A 2.35 swings/sec Sabre re-triggers this every ~0.42s, so a snappy shake stacked into a
+    #    jarring camera flick. Playback runs at 0.60-0.68x (slower opening motion), the blend-in
+    #    window is long enough to read as a ramp instead of a jump, and cadence damping scales the
+    #    shake down as swing speed rises. `MODS -> Swing Camera Shake (%)` (rescaled by
+    #    `CAMERA_SHAKE_SLIDER_GAIN`) is the final taste dial.
     if pc is not None:
         if card.manufacturer == Manufacturer.TORGUE:
             canim = _CACHED_CANIMS.get(CANIM_HEAVY_SLAM)
-            scale, rate = 0.90, 0.95
+            scale, rate = 0.50, CAMERA_SHAKE_RATE_HEAVY
         elif card.targeting_mode == TargetingMode.FRONTAL_CLEAVE:
             canim = _CACHED_CANIMS.get(CANIM_MEDIUM_CLEAVE)
-            scale, rate = 0.62, 1.15
+            scale, rate = 0.30, CAMERA_SHAKE_RATE_CLEAVE
         else:
             canim = _CACHED_CANIMS.get(CANIM_LIGHT_SLASH)
-            scale, rate = 0.45, 1.35
+            scale, rate = 0.18, CAMERA_SHAKE_RATE_SINGLE
 
-        if canim is not None:
+        cadence_damping = min(
+            1.0,
+            max(CAMERA_SHAKE_CADENCE_FLOOR, CAMERA_SHAKE_CADENCE_REFERENCE / eff_speed),
+        )
+        shake_scale = float(getattr(STATE, "camera_shake_scale", 0.5) or 0.0)
+        scale *= cadence_damping * shake_scale * CAMERA_SHAKE_SLIDER_GAIN
+
+        if canim is not None and scale > 0.001:
             try:
-                pc.ClientPlayCameraAnim(canim, scale, rate, 0.04, 0.12, False, False)
+                pc.ClientPlayCameraAnim(
+                    canim,
+                    scale,
+                    rate,
+                    CAMERA_SHAKE_BLEND_IN_SEC,
+                    CAMERA_SHAKE_BLEND_OUT_SEC,
+                    False,
+                    False,
+                )
             except Exception:
                 try:
                     pc.ClientPlayCameraAnim(canim)
@@ -1184,6 +1369,11 @@ def _execute_melee_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCar
             dt_def = _CACHED_DMG_TYPES_PROC.get(card.element)
             _set_wpn_status_chance_mods(0.0)
 
+        # Tag the victim BEFORE the call: `Behavior_CauseDamage` can synchronously feed BL2's recent
+        # damage tracker, which is what produces the floating number (and needs the crit bit already set).
+        if is_crit:
+            _mark_pending_crit_feedback(victim)
+
         _combat_breadcrumb(f"before direct damage: {getattr(victim, 'Name', 'unknown')}")
         try:
             with prevent_hooking_direct_calls():
@@ -1202,6 +1392,8 @@ def _execute_melee_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCar
             if primary_blast_xyz is None:
                 primary_blast_xyz = hit_xyz
         except Exception as exc:
+            if is_crit:
+                _clear_pending_crit_feedback(victim)
             log_error(f"Behavior_CauseDamage failed on {victim}: {exc!r}")
 
         # Spawn surface/blood/spark impact FX at the strike point

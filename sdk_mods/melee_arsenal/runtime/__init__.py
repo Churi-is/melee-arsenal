@@ -18,9 +18,12 @@ from unrealsdk.hooks import Block, Type  # type: ignore[import-not-found]
 
 from .combat import (
     _update_first_person_slash_motion,
+    clear_all_pending_crit_feedback,
     ensure_combat_resources_cached as ensure_live_combat_cached,
     on_ai_take_damage_post,
+    on_display_recent_damage_pre,
     on_light_projectile_add_proj_pre,
+    on_melee_weapon_start_zoom_pre,
     on_pawn_weapon_fired_pre,
     on_player_take_damage_pre,
     on_weapon_consume_ammo_post,
@@ -107,6 +110,10 @@ def _on_slash_scale_changed(_opt: Any, new_val: float) -> None:
     STATE.slash_motion_scale = float(new_val) / 100.0
 
 
+def _on_camera_shake_changed(_opt: Any, new_val: float) -> None:
+    STATE.camera_shake_scale = max(0.0, float(new_val)) / 100.0
+
+
 def _on_debug_log_changed(_opt: Any, new_val: bool) -> None:
     STATE.debug_attack_log = bool(new_val)
 
@@ -156,6 +163,20 @@ opt_slash_scale = SliderOption(
     on_change_anytime=_on_slash_scale_changed,
 )
 
+opt_camera_shake = SliderOption(
+    "Swing Camera Shake (%)",
+    50,
+    0,
+    150,
+    10,
+    True,
+    description=(
+        "Strength of the slow, eased camera bump layered on each blade swing (0% disables it "
+        "entirely). 50% matches the old soft curve's 10% feel; up to 150% for a heavier thump."
+    ),
+    on_change_anytime=_on_camera_shake_changed,
+)
+
 opt_debug_log = BoolOption(
     "Log Swing Damage Breakdown",
     False,
@@ -168,7 +189,8 @@ opt_damage_reduction = BoolOption(
     True,
     description=(
         "While a Melee Weapon is equipped, incoming damage is reduced by that weapon's rolled "
-        "50-70% Damage Reduction (shown on its item card)."
+        "Damage Reduction (30% at Lv 1, climbing with level/parts to a 70% cap at Lv 80 + OP10; "
+        "unique rarities go higher). Shown on its item card."
     ),
     on_change_anytime=_on_damage_reduction_changed,
 )
@@ -322,6 +344,22 @@ def hook_ai_take_damage(obj: Any, args: Any, ret: Any, func: Any) -> Any:
 @hook("WillowGame.WillowPlayerPawn:TakeDamage", Type.PRE)
 def hook_player_take_damage(obj: Any, args: Any, ret: Any, func: Any) -> Any:
     return on_player_take_damage_pre(obj, args, ret, func)
+
+
+@hook("WillowGame.WillowDamageTypeDefinition:DisplayRecentDamageForPlayer", Type.PRE)
+def hook_display_recent_damage(obj: Any, args: Any, ret: Any, func: Any) -> Any:
+    return on_display_recent_damage_pre(obj, args, ret, func)
+
+
+@hook("WillowGame.WillowWeapon:StartZoom", Type.PRE)
+def hook_melee_start_zoom(obj: Any, args: Any, ret: Any, func: Any) -> Any:
+    return on_melee_weapon_start_zoom_pre(obj, args, ret, func)
+
+
+@hook("WillowGame.WillowWeapon:ClientStartZoom", Type.PRE)
+def hook_melee_client_start_zoom(obj: Any, args: Any, ret: Any, func: Any) -> Any:
+    # Belt-and-braces guard in case a firing path reaches the client-side FOV change directly
+    return on_melee_weapon_start_zoom_pre(obj, args, ret, func)
 
 
 @hook("WillowGame.ItemCardGFxObject:SetItemCard", Type.PRE)
@@ -535,6 +573,9 @@ ALL_HOOKS = [
     hook_weapon_start_reload,
     hook_ai_take_damage,
     hook_player_take_damage,
+    hook_display_recent_damage,
+    hook_melee_start_zoom,
+    hook_melee_client_start_zoom,
     hook_card_set_item_card_pre,
     hook_card_set_item_card_post,
     hook_card_set_item_card_ex_pre,
@@ -562,6 +603,7 @@ ALL_OPTIONS = [
     opt_world_drops,
     opt_drop_weight,
     opt_slash_scale,
+    opt_camera_shake,
     opt_debug_log,
     opt_damage_reduction,
     btn_spawn_all,
@@ -570,6 +612,7 @@ ALL_OPTIONS = [
 
 def _on_mod_disable() -> None:
     restore_all_arms_rest_transforms()
+    clear_all_pending_crit_feedback()
 
 
 def build_runtime_mod(version: str, author: str) -> Any:
@@ -581,8 +624,8 @@ def build_runtime_mod(version: str, author: str) -> Any:
             "Adds a new Weapon Type: Melee Weapons across 5 Blade-defined manufacturers "
             "(Hyperion Katana, Bandit Machete, Jakobs Sabre, Maliwan Phaseblade, Torgue Blast-Cleaver). "
             "Primary Fire swings your Melee Weapon (Single-Target or Cleave) scaling with player Melee & Roid bonuses, "
-            "while [V] remains your vanilla character melee. Every Melee Weapon also grants 50-70% incoming damage "
-            "reduction while equipped."
+            "while [V] remains your vanilla character melee. Every Melee Weapon also grants level-scaled "
+            "incoming damage reduction (30% at Lv 1 up to 70%+ at OP10) while equipped."
         ),
         supported_games=Game.BL2,
         auto_enable=True,
@@ -595,6 +638,7 @@ def build_runtime_mod(version: str, author: str) -> Any:
     STATE.world_drops_enabled = bool(getattr(opt_world_drops, "value", True))
     STATE.world_drop_weight = float(getattr(opt_drop_weight, "value", 100.0))
     STATE.slash_motion_scale = float(getattr(opt_slash_scale, "value", 100)) / 100.0
+    STATE.camera_shake_scale = float(getattr(opt_camera_shake, "value", 50)) / 100.0
     STATE.debug_attack_log = bool(getattr(opt_debug_log, "value", False))
     STATE.damage_reduction_enabled = bool(getattr(opt_damage_reduction, "value", True))
     log_info(f"Melee Arsenal v{version} loaded and armed.")

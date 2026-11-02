@@ -58,6 +58,8 @@ from .schemas import (
 from .stats import (
     DAMAGE_REDUCTION_MAX_PCT,
     DAMAGE_REDUCTION_MIN_PCT,
+    SWING_SPEED_DAMAGE_EXPONENT,
+    SWING_SPEED_DAMAGE_REFERENCE,
     AttackDamageBreakdown,
     ComputedCardStats,
     apply_bl2_modifiers,
@@ -65,6 +67,8 @@ from .stats import (
     compute_attack_damage,
     compute_card_stats,
     compute_damage_reduction_pct,
+    compute_swing_speed_damage_scale,
+    damage_reduction_level_scale,
 )
 from .targeting import (
     Rotator,
@@ -81,6 +85,8 @@ __all__ = [
     "BLADE_BY_MANUFACTURER",
     "DAMAGE_REDUCTION_MAX_PCT",
     "DAMAGE_REDUCTION_MIN_PCT",
+    "SWING_SPEED_DAMAGE_EXPONENT",
+    "SWING_SPEED_DAMAGE_REFERENCE",
     "ELEMENTS",
     "ELEMENT_PART_BY_TYPE",
     "GRIPS",
@@ -123,6 +129,8 @@ __all__ = [
     "compute_attack_damage",
     "compute_card_stats",
     "compute_damage_reduction_pct",
+    "compute_swing_speed_damage_scale",
+    "damage_reduction_level_scale",
     "deserialize_weapon",
     "eligible_accessories_for_roll",
     "eligible_elements_for_blade",

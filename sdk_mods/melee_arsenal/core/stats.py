@@ -18,9 +18,31 @@ MELEE_WEAPON_TYPE_DAMAGE_SCALAR: float = 2.65
 UU_PER_METER: float = 100.0
 ROID_REFERENCE_SWING_SPEED: float = 1.50  # Normalizes flat Roid shield bonuses across fast/slow blades
 
-# Every Melee Arsenal weapon rolls a flat incoming-damage reduction in this range while equipped.
-DAMAGE_REDUCTION_MIN_PCT: int = 50
+# Swing-speed / per-hit damage budget.
+# Fast blades (Jakobs Sabre 2.35/s) used to out-DPS everything while also being the safest to whiff,
+# so per-hit damage now trades against the blade's *final* swing speed. The exponent stays below 1.0
+# on purpose: fast blades still win slightly on sustained DPS, just no longer by a landslide.
+SWING_SPEED_DAMAGE_REFERENCE: float = 1.50  # swings/sec that keeps 100% of its card damage
+SWING_SPEED_DAMAGE_EXPONENT: float = 0.55   # 0 = no speed penalty (old behaviour), 1 = flat DPS
+
+# Every Melee Arsenal weapon rolls a flat incoming-damage reduction (Blade Guard) while equipped.
+# It now scales with the weapon's level/stage AND its parts:
+#   * Lv 1 (no OP levels)  -> 30% floor, ~30-34% with parts
+#   * Lv 80 + OP10         -> 61% floor, up to the 70% cap with good parts
+#   * Unique rarities (Legendary / Seraph / Pearlescent / Effervescent) may pass the 70% cap.
+DAMAGE_REDUCTION_MIN_PCT: int = 30
 DAMAGE_REDUCTION_MAX_PCT: int = 70
+DAMAGE_REDUCTION_MIN_STAGE: int = 1
+DAMAGE_REDUCTION_MAX_STAGE: int = 90        # Lv 80 + OP1..OP10
+DAMAGE_REDUCTION_FLOOR_AT_MIN_STAGE: float = 30.0
+DAMAGE_REDUCTION_FLOOR_AT_MAX_STAGE: float = 61.0
+DAMAGE_REDUCTION_PART_SPAN_AT_MIN_STAGE: float = 4.0
+DAMAGE_REDUCTION_PART_SPAN_AT_MAX_STAGE: float = 9.0
+DAMAGE_REDUCTION_UNIQUE_HEADROOM_PCT: int = 6
+
+UNIQUE_RARITIES: frozenset[Rarity] = frozenset(
+    {Rarity.LEGENDARY, Rarity.SERAPH, Rarity.PEARLESCENT, Rarity.EFFERVESCENT}
+)
 
 RARITY_DAMAGE_GRADE_BONUS: dict[Rarity, float] = {
     Rarity.COMMON: 0.00,
@@ -100,7 +122,7 @@ class ComputedCardStats:
     matching_grip: bool
     momentum_scale: float
 
-    # Defensive perk: incoming damage reduction while this weapon is equipped (50-70%)
+    # Defensive perk: level- & part-scaled incoming damage reduction while equipped (30-70%+)
     damage_reduction_pct: int
 
 
@@ -122,13 +144,33 @@ class AttackDamageBreakdown:
     effective_dot_dps: float
 
 
-def compute_damage_reduction_pct(weapon: MeleeWeaponInstance) -> int:
-    """Roll this weapon's flat incoming-damage reduction (deterministic, 50-70%).
+def damage_reduction_level_scale(game_stage: int) -> float:
+    """0.0 at Lv 1 (no OP levels) -> 1.0 at Lv 80 + OP10 (`game_stage` 90)."""
+    stage = max(DAMAGE_REDUCTION_MIN_STAGE, int(game_stage or DAMAGE_REDUCTION_MIN_STAGE))
+    span = max(1, DAMAGE_REDUCTION_MAX_STAGE - DAMAGE_REDUCTION_MIN_STAGE)
+    return min(1.0, max(0.0, (stage - DAMAGE_REDUCTION_MIN_STAGE) / float(span)))
 
-    Derived only from the weapon's construction (parts + rarity) — never from `unique_id` or
-    `game_stage`, both of which BL2 can hand back as `0`/`1` for freshly re-assembled items. That
-    keeps the item card, `melee_dump_held`, and the live `WillowPlayerPawn:TakeDamage` hook in exact
-    agreement for the same blade across save/load and map transitions.
+
+def compute_swing_speed_damage_scale(swing_speed: float) -> float:
+    """Per-hit damage multiplier that trades raw damage against cadence.
+
+    At `SWING_SPEED_DAMAGE_REFERENCE` (1.50 swings/sec) this is exactly 1.0. Faster blades lose a
+    little card damage per hit, slower blades gain a little — so a Jakobs Sabre (2.35/s) no longer
+    out-DPSes a Torgue Blast-Cleaver (0.92/s) by a wide margin while also being the easiest to land.
+    """
+    speed = max(0.05, float(swing_speed))
+    scale = (SWING_SPEED_DAMAGE_REFERENCE / speed) ** SWING_SPEED_DAMAGE_EXPONENT
+    return min(1.35, max(0.60, scale))
+
+
+def compute_damage_reduction_pct(weapon: MeleeWeaponInstance) -> int:
+    """Roll this weapon's flat incoming-damage reduction (deterministic, level + part scaled).
+
+    The floor climbs from `30%` at Lv 1 to `61%` at Lv 80 + OP10, and the weapon's construction
+    (Blade + Grip + Accessory + Element + rarity) decides where inside the remaining headroom it
+    lands — up to the `70%` cap, or past it for unique rarities. Everything is derived from the same
+    `MeleeWeaponInstance` the item card, `melee_dump_held`, and the live
+    `WillowPlayerPawn:TakeDamage` hook all read, so they always agree for a given blade.
     """
     seed = "|".join(
         (
@@ -140,14 +182,31 @@ def compute_damage_reduction_pct(weapon: MeleeWeaponInstance) -> int:
         )
     )
     digest = zlib.crc32(seed.encode("utf-8"))
-    span = DAMAGE_REDUCTION_MAX_PCT - DAMAGE_REDUCTION_MIN_PCT + 1
-    return DAMAGE_REDUCTION_MIN_PCT + (digest % span)
+    part_fraction = (digest % 1000) / 999.0
+
+    t = damage_reduction_level_scale(weapon.game_stage)
+    floor_pct = DAMAGE_REDUCTION_FLOOR_AT_MIN_STAGE + (
+        DAMAGE_REDUCTION_FLOOR_AT_MAX_STAGE - DAMAGE_REDUCTION_FLOOR_AT_MIN_STAGE
+    ) * t
+    part_span = DAMAGE_REDUCTION_PART_SPAN_AT_MIN_STAGE + (
+        DAMAGE_REDUCTION_PART_SPAN_AT_MAX_STAGE - DAMAGE_REDUCTION_PART_SPAN_AT_MIN_STAGE
+    ) * t
+
+    pct = floor_pct + part_span * part_fraction
+    cap = DAMAGE_REDUCTION_MAX_PCT
+    if weapon.rarity in UNIQUE_RARITIES:
+        # Unique blades get a small level-scaled bonus that can carry them past the normal 70% cap
+        # (it fades out at low levels so an early legendary is not a free 40%+ guard).
+        headroom = DAMAGE_REDUCTION_UNIQUE_HEADROOM_PCT * t
+        pct += headroom
+        cap += DAMAGE_REDUCTION_UNIQUE_HEADROOM_PCT
+    return int(max(0, min(cap, round(pct))))
 
 
 def apply_incoming_damage_reduction(damage: float, damage_reduction_pct: float) -> float:
     """Apply a Melee Weapon's flat damage reduction to an incoming damage amount.
 
-    `damage_reduction_pct` is the percentage of the hit removed (50-70), so 100 damage with 60%
+    `damage_reduction_pct` is the percentage of the hit removed (30-70+), so 100 damage with 60%
     reduction becomes 40. Non-positive damage or reduction is returned untouched.
     """
     if damage <= 0.0 or damage_reduction_pct <= 0.0:
@@ -193,25 +252,27 @@ def compute_card_stats(weapon: MeleeWeaponInstance) -> ComputedCardStats:
             StatModifier(StatId.SWING_SPEED, ModifierMode.SCALE, maker_spec.matching_grip_speed_bonus)
         )
 
-    # 1. Gun-scaled Base Damage
-    level_curve = GUN_DAMAGE_L0_CONSTANT * (BL2_LEVEL_GROWTH ** max(1, weapon.game_stage))
-    unmodified_damage = level_curve * MELEE_WEAPON_TYPE_DAMAGE_SCALAR * maker_spec.base_damage_mult
-    raw_damage = max(1.0, apply_bl2_modifiers(unmodified_damage, all_mods, StatId.BASE_DAMAGE))
-    card_damage = max(1, round(raw_damage))
-
-    # 2. Range (UU & meters)
-    range_uu = max(
-        120.0,
-        apply_bl2_modifiers(maker_spec.cleave_profile.base_range_uu, all_mods, StatId.RANGE_UU),
-    )
-    range_meters = round(range_uu / UU_PER_METER, 2)
-
-    # 3. Swing Speed (swings/sec) & FireInterval
+    # 1. Swing Speed (swings/sec) & FireInterval — resolved first because the per-hit damage
+    #    budget below trades against the blade's FINAL cadence (matching grip & accessory included).
     swing_speed = max(
         0.35,
         apply_bl2_modifiers(maker_spec.base_swing_speed, all_mods, StatId.SWING_SPEED),
     )
     fire_interval_sec = 1.0 / swing_speed
+
+    # 2. Gun-scaled Base Damage, then the swing-speed trade-off (fast blades hit a little softer)
+    level_curve = GUN_DAMAGE_L0_CONSTANT * (BL2_LEVEL_GROWTH ** max(1, weapon.game_stage))
+    unmodified_damage = level_curve * MELEE_WEAPON_TYPE_DAMAGE_SCALAR * maker_spec.base_damage_mult
+    unspeed_damage = max(1.0, apply_bl2_modifiers(unmodified_damage, all_mods, StatId.BASE_DAMAGE))
+    raw_damage = max(1.0, unspeed_damage * compute_swing_speed_damage_scale(swing_speed))
+    card_damage = max(1, round(raw_damage))
+
+    # 3. Range (UU & meters)
+    range_uu = max(
+        120.0,
+        apply_bl2_modifiers(maker_spec.cleave_profile.base_range_uu, all_mods, StatId.RANGE_UU),
+    )
+    range_meters = round(range_uu / UU_PER_METER, 2)
 
     # 4. Targeting Arc & Critical Bonus
     cleave_arc = maker_spec.cleave_profile.arc_degrees
