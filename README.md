@@ -94,6 +94,8 @@ Phaseblades get no secondary attack. RMB stays inert, no line is printed on the 
 
 # 4. Compile the kit -> build/ UPKs + manifest (generates the kit if absent)
 ./melee build
+#    (optional: `install`/`dev` now recompile by themselves when the kit has changed, so this step
+#     is only needed when you want the packages built before testing/installing)
 
 # 5. Run syntax verification & full unit test suite
 ./melee test
@@ -105,18 +107,28 @@ Phaseblades get no secondary attack. RMB stays inert, no line is printed on the 
 ./melee install --bl2-dir "/path/to/Borderlands 2"
 ```
 
+### Editing art? Watch the packages, not just the kit
+
+`./melee generate` rewrites `build/inkblade_kit`, but the game reads the cooked `.upk` packages, and
+those keep their file names, their texture names and their validity when the kit changes underneath
+them — they just hold the *old* pixels. So `./melee build` records a `kit_fingerprint` (a hash of the
+kit's textures, UV layouts and meshes) in `build/inkblade_compiled_manifest.json`, and
+`./melee install` / `./melee dev` compare that against a fresh fingerprint: if they differ, the
+packages are recompiled before they are copied, and `./melee status` flags them. That is why
+`./melee generate && ./melee dev` is enough to see new art in game.
+
 ### All `./melee` Commands
 
 | Command | Description |
 | :--- | :--- |
 | `./melee setup` | Create `.venv/` and install `Pillow` for UPK compilation |
 | `./melee build [--kit <path>]` | Compile the kit (automatically generating `build/inkblade_kit` if missing) into `build/WillowGame/CookedPCConsole/` and `build/inkblade_compiled_manifest.json` |
-| `./melee generate [options]` | Regenerate the Inkblade kit through the staged pipeline (`geometry -> uv -> flat -> mottle -> linework -> decals -> textures -> export -> render`) into `build/inkblade_kit`, with a per-stage cache in `build/inkblade_stages`. Supports `--list-stages`, `--only`, `--from`, `--force`, `--decals`, `--parts`, `--out <dir\|zip>`, and `--renders [dir]` for preview PNGs + overview sheets in `build/inkblade_renders` |
+| `./melee generate [options]` | Regenerate the Inkblade kit through the staged pipeline (`geometry -> uv -> flat -> mottle -> detail -> decals -> linework -> textures -> export -> render`) into `build/inkblade_kit`, with a per-stage cache in `build/inkblade_stages`. Supports `--list-stages`, `--only`, `--from`, `--force`, `--decals`, `--parts`, `--out <dir\|zip>`, and `--renders [dir]` for preview PNGs + overview sheets in `build/inkblade_renders` |
 | `./melee test [args]` | Byte-compile all modules and run `unittest` (e.g. `./melee test -q`, `./melee test -k world_drop`) |
 | `./melee preview` | Roll sample Level 50 Melee Arsenal weapons and print item cards, level-scaled Damage Reduction, and Roid/Crit/UVHM hit math |
 | `./melee package [--build]` | Build `build/dist/melee_arsenal.zip`, `build/dist/melee_arsenal-v0.4.5.zip`, and `build/dist/source.zip`; builds missing inputs automatically |
-| `./melee install [--bl2-dir <dir>] [--probe]` | Stage `.upk` packages and sync `sdk_mods/melee_arsenal/` into Borderlands 2 (preserving `_melee_arsenal_saves` and `melee_arsenal.log`) |
-| `./melee dev` | Fast iteration loop: run quiet tests, then install to Borderlands 2 |
+| `./melee install [--bl2-dir <dir>] [--probe] [--no-rebuild]` | Stage `.upk` packages and sync `sdk_mods/melee_arsenal/` into Borderlands 2 (preserving `_melee_arsenal_saves` and `melee_arsenal.log`). Recompiles the packages first when the kit's fingerprint no longer matches the one they were built from (`--no-rebuild` installs them anyway, with a warning) |
+| `./melee dev` | Fast iteration loop: run quiet tests, then install to Borderlands 2. Safe after `./melee generate`: stale packages are recompiled instead of shipped, so new art actually reaches the game |
 | `./melee status` | Show mod version, Python/Pillow state, kit & UPK sizes, BL2 sync status, and sidecar save count |
 | `./melee logs [-f] [-n <lines>]` | View or tail live `<BL2>/sdk_mods/melee_arsenal/melee_arsenal.log` |
 | `./melee uninstall [--purge-saves]` | Remove mod & UPKs from Borderlands 2 (keeps `_melee_arsenal_saves` unless `--purge-saves` is passed) |

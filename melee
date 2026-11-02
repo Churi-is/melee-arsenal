@@ -160,6 +160,49 @@ cmd_setup() {
   ok "Environment ready at .venv (Pillow installed)."
 }
 
+kit_fingerprint() {
+  # Content hash of the kit the UPK compiler reads (prints nothing if it cannot be computed).
+  local py
+  py="$(pick_python)"
+  "$py" "$REPO_ROOT/tools/compile_inkblade_upk.py" --kit "${1:-$DEFAULT_KIT}" --fingerprint-only 2>/dev/null || true
+}
+
+compiled_kit_fingerprint() {
+  # The fingerprint the current UPKs were built from (empty for packages built before it existed).
+  local py
+  py="$(pick_python)"
+  "$py" -c 'import json, sys
+try:
+    print(json.load(open(sys.argv[1])).get("kit_fingerprint", ""))
+except Exception:
+    print("")' "$BUILD_MANIFEST" 2>/dev/null || true
+}
+
+# Has the kit been repainted since the UPKs were compiled?
+#   current - packages match the kit on disk
+#   stale   - packages are missing, or were built from a different/unknown kit
+#   unknown - cannot tell (no kit, no python): leave the packages on disk alone
+upk_kit_state() {
+  local meshes_upk="$REPO_ROOT/$COOKED_REL/MeleeArsenalMeshes.upk"
+  local tex_upk="$REPO_ROOT/$COOKED_REL/MeleeArsenalTextures.upk"
+  if [ ! -f "$meshes_upk" ] || [ ! -f "$tex_upk" ] || [ ! -f "$BUILD_MANIFEST" ]; then
+    echo "stale"
+    return
+  fi
+  local want have
+  want="$(kit_fingerprint)"
+  if [ -z "$want" ]; then
+    echo "unknown"
+    return
+  fi
+  have="$(compiled_kit_fingerprint)"
+  if [ "$want" = "$have" ]; then
+    echo "current"
+  else
+    echo "stale"
+  fi
+}
+
 cmd_build() {
   local py
   py="$(pick_python)"
@@ -221,7 +264,7 @@ cmd_package() {
     esac
   done
 
-  if [ "$do_build" -eq 1 ] || [ ! -f "$REPO_ROOT/$COOKED_REL/MeleeArsenalTextures.upk" ] || [ ! -f "$REPO_ROOT/$COOKED_REL/MeleeArsenalMeshes.upk" ] || [ ! -f "$BUILD_MANIFEST" ]; then
+  if [ "$do_build" -eq 1 ] || [ "$(upk_kit_state)" = "stale" ]; then
     cmd_build
   fi
 
@@ -349,12 +392,14 @@ PY
 cmd_install() {
   local bl2_arg=""
   local with_probe=0
+  local no_rebuild=0
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --bl2-dir)   [ "$#" -ge 2 ] || die "--bl2-dir requires a path argument."; bl2_arg="$2"; shift 2 ;;
       --bl2-dir=*) bl2_arg="${1#*=}"; shift ;;
       --probe)     with_probe=1; shift ;;
-      *)           die "Unknown install flag: $1 (supported: --bl2-dir <path>, --probe)" ;;
+      --no-rebuild) no_rebuild=1; shift ;;
+      *)           die "Unknown install flag: $1 (supported: --bl2-dir <path>, --probe, --no-rebuild)" ;;
     esac
   done
 
@@ -363,9 +408,24 @@ cmd_install() {
 
   local meshes_upk="$REPO_ROOT/$COOKED_REL/MeleeArsenalMeshes.upk"
   local tex_upk="$REPO_ROOT/$COOKED_REL/MeleeArsenalTextures.upk"
-  if [ ! -f "$meshes_upk" ] || [ ! -f "$tex_upk" ] || [ ! -f "$BUILD_MANIFEST" ]; then
-    warn "Cooked UPKs missing in $COOKED_REL — building first..."
-    cmd_build
+  # A regenerated kit leaves perfectly valid, perfectly stale UPKs behind: same file names, same
+  # texture names, old pixels.  Compare the kit fingerprint the packages were built from against a
+  # fresh one, so `./melee dev` after `./melee generate` actually ships the new art.
+  if [ "$no_rebuild" -eq 1 ]; then
+    if [ "$(upk_kit_state)" = "stale" ]; then
+      warn "Installing packages that do not match the kit on disk (--no-rebuild) — the game will show the old textures."
+    fi
+  else
+    case "$(upk_kit_state)" in
+      stale)
+        if [ ! -f "$meshes_upk" ] || [ ! -f "$tex_upk" ] || [ ! -f "$BUILD_MANIFEST" ]; then
+          warn "Cooked UPKs missing in $COOKED_REL — building first..."
+        else
+          info "Kit changed since the last UPK build — recompiling the packages"
+        fi
+        cmd_build
+        ;;
+    esac
   fi
 
   local sdk_dir
@@ -482,6 +542,10 @@ cmd_status() {
   if [ -f "$m_upk" ] && [ -f "$t_upk" ]; then
     printf "  Cooked UPKs     : %s✓%s Meshes (%s B), Textures (%s B)\n" \
       "$C_GREEN" "$C_RESET" "$(wc -c < "$m_upk" | tr -d ' ')" "$(wc -c < "$t_upk" | tr -d ' ')"
+    if [ "$(upk_kit_state)" = "stale" ]; then
+      printf "                    %s! built from an older kit — run ./melee build to recompile%s\n" \
+        "$C_YELLOW" "$C_RESET"
+    fi
   else
     printf "  Cooked UPKs     : %s✗ not built%s (run ./melee build)\n" "$C_YELLOW" "$C_RESET"
   fi
@@ -548,6 +612,9 @@ cmd_generate() {
       ;;
   esac
   "$py" "$REPO_ROOT/tools/generate_inkblade_kit.py" "$@"
+  if [ "$(upk_kit_state)" = "stale" ]; then
+    warn "Kit regenerated — run './melee build' (or './melee dev') to recompile the UPKs the game loads."
+  fi
 }
 
 cmd_help() {
@@ -569,9 +636,12 @@ ${C_BOLD}Commands:${C_RESET}
   ${C_CYAN}test${C_RESET} [unittest-args]      Syntax-check all modules and run unit tests (e.g. -k world_drop)
   ${C_CYAN}preview${C_RESET}                   Roll & print sample Level 50 Melee Arsenal item cards & hit math
   ${C_CYAN}package${C_RESET} [--build]         Build release archives in build/dist/
+                            (recompiles the UPKs first if the kit has changed since the last build)
   ${C_CYAN}install${C_RESET} [options]         Install UPKs + sdk_mods/melee_arsenal into Borderlands 2
-                            Options: --bl2-dir <path> (cached in .bl2_dir), --probe
+                            Recompiles the UPKs automatically when the kit has been regenerated.
+                            Options: --bl2-dir <path> (cached in .bl2_dir), --probe, --no-rebuild
   ${C_CYAN}dev${C_RESET} [install-options]     Quick iterate: run quiet tests, then install to Borderlands 2
+                            (safe after './melee generate': stale UPKs are recompiled, not shipped)
   ${C_CYAN}uninstall${C_RESET} [options]       Remove mod & UPKs from Borderlands 2 (--purge-saves to wipe saves)
   ${C_CYAN}status${C_RESET}                    Show repo, kit, UPK, Borderlands 2 sync, and sidecar save status
   ${C_CYAN}logs${C_RESET} [-f] [-n <lines>]    View or follow live in-game melee_arsenal.log

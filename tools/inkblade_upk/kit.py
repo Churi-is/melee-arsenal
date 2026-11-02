@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections import defaultdict, deque
 from dataclasses import dataclass
+import hashlib
 import io
 import json
 import math
@@ -241,9 +242,51 @@ class _KitReader:
         except KeyError:
             return False
 
+    def names(self) -> list[str]:
+        """Every file in the kit (relative to `socket_manifest.json`), sorted."""
+        if self._root_dir is not None:
+            return sorted(
+                p.relative_to(self._root_dir).as_posix()
+                for p in self._root_dir.rglob("*")
+                if p.is_file()
+            )
+        assert self._zf is not None
+        return sorted(
+            name[len(self._prefix):]
+            for name in self._zf.namelist()
+            if name.startswith(self._prefix) and not name.endswith("/")
+        )
+
     def close(self) -> None:
         if self._zf is not None:
             self._zf.close()
+
+
+#: Kit files that the UPK compiler actually consumes.  Anything else in the folder (notes, renders,
+#: `.DS_Store`) must not change the fingerprint, or every stray file would force a recompile.
+KIT_FINGERPRINT_SUFFIXES: tuple[str, ...] = (".png", ".json", ".glb")
+
+
+def kit_fingerprint(kit_path: str | Path) -> str:
+    """Content hash of a kit's compiled inputs.
+
+    The compiler is deterministic, so "has the kit changed since the last build?" is exactly "does
+    this hash still match the one the last build recorded?".  `melee install`/`dev` use it to notice
+    that the generator has repainted the atlases, which is otherwise invisible: the UPKs on disk stay
+    valid files, they just hold the *old* textures, and the game quietly shows them.
+    """
+    reader = _KitReader(kit_path)
+    try:
+        hasher = hashlib.sha256()
+        for name in reader.names():
+            if not name.lower().endswith(KIT_FINGERPRINT_SUFFIXES):
+                continue
+            hasher.update(name.encode("utf-8"))
+            hasher.update(b"\0")
+            hasher.update(hashlib.sha256(reader.read_bytes(name)).digest())
+        return hasher.hexdigest()[:32]
+    finally:
+        reader.close()
 
 
 def _read_glb_accessor(
@@ -1159,6 +1202,9 @@ def compile_inkblade_kit_to_upks(
     compiled_manifest: dict[str, Any] = {
         "schema": "melee_arsenal.compiled_inkblade/1.0",
         "kit_revision": kit.revision,
+        # What the packages were built from.  `melee install` compares this against a fresh
+        # `kit_fingerprint()` and recompiles when the generator has repainted the atlases.
+        "kit_fingerprint": kit_fingerprint(kit_path),
         "meshes_package": Path(out_meshes_upk).stem,
         "mesh_export": mesh_export_name,
         "textures_package": Path(out_textures_upk).stem,
