@@ -5,9 +5,9 @@ Two manufacturer-locked secondary attacks share this module:
 1. **Throw** (Bandit, Torgue) — the blade is hurled along a ballistic arc whose launch speed,
    loft angle, flight time and range all come from the weapon's *weight*. Weight is defined by
    the manufacturers of the actual parts: every manufacturer's blade/grip hardware has a mass,
-   and accessories add their own. A thrown blade strikes for exactly `200%` of the same normal
-   LMB hit, then rebounds to your hand after a short return flight (or after its arc expires if
-   it never touches a wall or an enemy). Primary Fire is locked out while it is airborne.
+   and accessories add their own. A thrown blade strikes for exactly the same damage as a normal
+   LMB hit (`100%`), then homes back into your hand even if you have moved away since the throw.
+   Primary Fire is locked out while it is airborne.
 
 2. **Guard** (Hyperion, Jakobs) — hold RMB to brace. The next incoming hit has the blade's rolled
    card Damage Reduction applied **twice** (`damage * (1 - DR) * (1 - DR)`), then the guard drops
@@ -36,9 +36,10 @@ UU_PER_METER: float = 100.0
 # Throw: weapon mass, ballistic arc & hit budget
 # ---------------------------------------------------------------------------
 
-# A thrown blade deals exactly 200% of the normal LMB melee hit ("hits hit with normal LMB
-# melee but 200% damage").
-THROW_DAMAGE_MULTIPLIER: float = 2.0
+# A thrown blade deals exactly the same damage as the normal LMB melee hit. (It started at 200%
+# as a "thrown hits harder" pitch, but in play that made a single RMB the strongest attack in the
+# whole kit — the throw's payoff is reach, not raw numbers.)
+THROW_DAMAGE_MULTIPLIER: float = 1.0
 
 # UE3/BL2 world gravity along Z (Unreal Units per second squared). The mod simulates the arc
 # itself so the flight is identical on every framerate.
@@ -64,11 +65,36 @@ THROW_LOFT_WEIGHT_MAX_KG: float = 4.5
 THROW_AIM_PITCH_MIN_DEG: float = -70.0
 THROW_AIM_PITCH_MAX_DEG: float = 70.0
 
-# Flight is normally solved from the arc itself; this is only the safety cap so a blade can never
-# stay airborne indefinitely.
-THROW_MAX_FLIGHT_SEC: float = 1.30
-# Rebound flight back into the player's hand (no damage, LMB stays locked until it lands).
+# The arc is traversed at this multiple of the "realistic" solve: the blade follows exactly the
+# same path to exactly the same distance/apex, it just travels along it slower so the flight reads
+# on screen instead of being a 0.7 s blur. Implemented by scaling time up and gravity down by the
+# same factor squared, so the parabola is geometrically identical.
+THROW_TIME_SCALE: float = 1.75
+
+# Fail-safe ceiling, not a design target: a blade hurled off a cliff keeps falling until it hits
+# something, and only gives up after this long.
+THROW_MAX_FLIGHT_SEC: float = 30.0
+
+# A downward throw never returns to launch height, so its flight time is solved from a descent
+# budget instead: how far below the release point the blade is allowed to fall before it counts as
+# landed (in Unreal Units). Terrain hits take priority — this only bounds an arc over open ground.
+THROW_DESCENT_FLOOR_UU: float = 400.0
+
+# After the planned arc is used up, look this far straight down: a hit means the blade landed
+# there, a miss means it is over a drop (cliff/void) and keeps flying ballistically.
+THROW_FALL_PROBE_UU: float = 600.0
+
+# Hard limit on how far a blade may fall below the release point before it is recalled, so a throw
+# into the void cannot leave you disarmed for the full 30 s fail-safe.
+THROW_MAX_FALL_UU: float = 6000.0
+
+# Rebound flight back into the player's hand (no damage, LMB stays locked until it lands). The
+# blade homes on the player's *current* position (Minecraft-trident style), so you can keep moving.
 THROW_RETURN_SEC: float = 0.35
+# ...and this is only the give-up timer if the player somehow cannot be reached.
+THROW_RETURN_MAX_SEC: float = 8.0
+# Within this distance of the player the blade is considered caught.
+THROW_CATCH_RADIUS_UU: float = 70.0
 # The release swing plays first, then the first-person hands drop out of frame so the blade is
 # visibly gone from them for the rest of the flight (and while it flies back).
 THROW_HAND_EMPTY_DELAY_SEC: float = 0.12
@@ -107,6 +133,11 @@ class ThrowFlightPlan:
     range_uu: float
     apex_uu: float
     return_time_sec: float
+    # Effective gravity for THIS arc (`THROW_GRAVITY_Z / time_scale^2`), so the flight can be
+    # slowed down without changing the distance it covers or how high it arcs.
+    gravity_uu_s2: float = THROW_GRAVITY_Z
+    # Fail-safe ceiling for the flight (see `THROW_MAX_FLIGHT_SEC`).
+    max_flight_sec: float = THROW_MAX_FLIGHT_SEC
 
     @property
     def range_meters(self) -> float:
@@ -120,11 +151,13 @@ class ThrowFlightPlan:
         """Return `(forward_uu, height_uu)` of the blade `elapsed_sec` into the throw.
 
         The vertical term is a plain projectile integral, so the arc always matches the plan the
-        item card prints.
+        item card prints. Time is deliberately *not* clamped to `flight_time_sec`: past the end of
+        the planned arc the same parabola keeps being evaluated, which is what lets a blade thrown
+        off a ledge keep falling instead of stopping in mid-air.
         """
-        t = max(0.0, min(float(elapsed_sec), self.flight_time_sec))
+        t = max(0.0, float(elapsed_sec))
         forward = self.horizontal_speed_uu_s * t
-        height = self.vertical_speed_uu_s * t - 0.5 * THROW_GRAVITY_Z * t * t
+        height = self.vertical_speed_uu_s * t - 0.5 * self.gravity_uu_s2 * t * t
         return forward, height
 
 
@@ -171,19 +204,33 @@ def build_throw_flight_plan(
     )
     pitch_rad = math.radians(pitch_deg)
 
-    horizontal = speed * math.cos(pitch_rad)
-    vertical = speed * math.sin(pitch_rad)
+    # Every blade is launched ballistically at `speed`, then the whole arc is *retimed*: the flight
+    # takes `THROW_TIME_SCALE` times as long while covering the same ground, which is the same
+    # thing as reducing both velocity components by k and gravity by k^2.
+    k = max(0.05, THROW_TIME_SCALE)
+    gravity = THROW_GRAVITY_Z / (k * k)
+    horizontal = (speed * math.cos(pitch_rad)) / k
+    vertical = (speed * math.sin(pitch_rad)) / k
 
     # Time until the arc returns to launch height (a full lob and fall). A downward launch never
-    # returns, so give it a short visible descent instead of expiring on the first frame.
-    air_time = (2.0 * vertical) / THROW_GRAVITY_Z
-    min_flight = 0.12 if air_time > 0.0 else 0.30
-    flight_time = min(THROW_MAX_FLIGHT_SEC, max(min_flight, air_time))
-    apex = (vertical * vertical) / (2.0 * THROW_GRAVITY_Z)
+    # returns, so its flight is solved from the descent budget instead — otherwise a slightly
+    # downward aim ended the throw after a fraction of a second and the blade "stopped in mid-air".
+    if vertical > 0.0:
+        flight_time = (2.0 * vertical) / gravity
+        apex = (vertical * vertical) / (2.0 * gravity)
+    else:
+        drop = max(1.0, THROW_DESCENT_FLOOR_UU)
+        fall_speed = abs(vertical)
+        flight_time = (
+            -fall_speed + math.sqrt(fall_speed * fall_speed + 2.0 * gravity * drop)
+        ) / gravity
+        flight_time = max(flight_time, 0.30)
+        apex = 0.0
+    flight_time = min(THROW_MAX_FLIGHT_SEC, flight_time)
 
     return ThrowFlightPlan(
         weight_kg=round(weight, 3),
-        launch_speed_uu_s=round(speed, 1),
+        launch_speed_uu_s=round(speed / k, 1),
         launch_pitch_deg=round(pitch_deg, 2),
         horizontal_speed_uu_s=round(horizontal, 1),
         vertical_speed_uu_s=round(vertical, 1),
@@ -191,11 +238,13 @@ def build_throw_flight_plan(
         range_uu=round(horizontal * flight_time, 1),
         apex_uu=round(apex, 1),
         return_time_sec=THROW_RETURN_SEC,
+        gravity_uu_s2=round(gravity, 2),
+        max_flight_sec=THROW_MAX_FLIGHT_SEC,
     )
 
 
 def compute_throw_damage_scale() -> float:
-    """Multiplier applied to the normal LMB breakdown for a thrown hit (200%)."""
+    """Multiplier applied to the normal LMB breakdown for a thrown hit (100%, i.e. a normal hit)."""
     return THROW_DAMAGE_MULTIPLIER
 
 

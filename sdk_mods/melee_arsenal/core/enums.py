@@ -33,7 +33,7 @@ class SecondaryAttack(str, Enum):
     manufacturer signature move:
 
     - `THROW` (Bandit, Torgue): hurl the blade along a weight-driven arc. It strikes with
-      `200%` of the normal LMB hit, then rebounds to your hand. LMB is locked while airborne.
+      a normal LMB hit, then homes back to your hand. LMB is locked while airborne.
     - `GUARD` (Hyperion, Jakobs): hold RMB to brace. The next incoming hit has the blade's
       rolled Damage Reduction applied twice, and a hit inside the `0.33 s` parry window deals
       zero damage and is reflected back at a melee attacker as a forced critical hit.

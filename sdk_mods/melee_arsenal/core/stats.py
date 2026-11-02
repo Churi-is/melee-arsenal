@@ -429,7 +429,7 @@ def compute_attack_damage(
       final       = subtotal * crit_mult * slag_mult * surface_mult * damage_scale
 
     `damage_scale` exists for secondary attacks: a thrown Bandit/Torgue blade strikes with the
-    exact same breakdown as its LMB swing, scaled to `200%` (`THROW_DAMAGE_MULTIPLIER`).
+    exact same breakdown as its LMB swing (`THROW_DAMAGE_MULTIPLIER` is `1.0`).
     """
     ctx = ctx or PlayerMeleeContext()
 

@@ -709,7 +709,7 @@ def build_runtime_mod(version: str, author: str) -> Any:
             "Adds a new Weapon Type: Melee Weapons across 5 Blade-defined manufacturers "
             "(Hyperion Katana, Bandit Machete, Jakobs Sabre, Maliwan Phaseblade, Torgue Blast-Cleaver). "
             "Primary Fire swings your Melee Weapon (Single-Target or Cleave) scaling with player Melee & Roid bonuses, "
-            "while [V] remains your vanilla character melee. RMB throws Bandit & Torgue blades for 200% damage, "
+            "while [V] remains your vanilla character melee. RMB throws Bandit & Torgue blades for a full-strength hit, "
             "or guards with Hyperion & Jakobs blades (parry inside 0.33s). Every Melee Weapon also grants "
             "level-scaled incoming damage reduction (30% at Lv 1 up to 70%+ at OP10) while equipped."
         ),

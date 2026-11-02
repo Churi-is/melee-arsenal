@@ -2381,7 +2381,7 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 expected_throw = compute_attack_damage(
                     bl_card, throw_ctx, damage_scale=THROW_DAMAGE_MULTIPLIER
                 )
-                self.assertEqual(THROW_DAMAGE_MULTIPLIER, 2.0)
+                self.assertEqual(THROW_DAMAGE_MULTIPLIER, 1.0)
                 world.next_center_trace_override = (dummy_pawn, world._vec(210.0, 0.0, 95.0), "None")
                 secondary_attacks.tick_secondary_attacks()
                 self.assertEqual(len(world.caused_damages), 1)
@@ -2389,7 +2389,9 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 self.assertAlmostEqual(
                     world.caused_damages[0]["DamageAmount"], float(expected_throw.final_hit_damage)
                 )
-                self.assertGreater(
+                # v0.4.4: a throw is a normal-strength hit (it used to be 200% and out-damage the
+                # whole kit), so its damage must equal the plain LMB hit exactly.
+                self.assertEqual(
                     expected_throw.final_hit_damage,
                     compute_attack_damage(bl_card, throw_ctx).final_hit_damage,
                 )
@@ -2407,13 +2409,40 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                     blade_vis["location"], (210.0, 0.0, 95.0), "rebound starts at the strike point"
                 )
                 moves_before_return = blade_vis["moves"]
-                secondary_attacks._THROW.return_started_at -= 0.15
+                throw_state = secondary_attacks._THROW
+                catch_point = secondary_attacks._player_grab_point(throw_state)
+                self.assertIsNotNone(catch_point)
+                # Simulate 0.15 s of flight (the frame hook can run twice in one millisecond).
+                throw_state.last_return_at -= 0.15
                 secondary_attacks.tick_secondary_attacks()
                 self.assertTrue(secondary_attacks.is_weapon_thrown(cleaver))
                 self.assertGreaterEqual(blade_vis["moves"], moves_before_return + 1)
                 self.assertLess(blade_vis["location"][0], 210.0, "the blade flies back to the hand")
-                secondary_attacks._THROW.return_started_at -= 1.0
-                secondary_attacks.tick_secondary_attacks()
+                self.assertGreater(
+                    blade_vis["location"][0], catch_point[0], "...but does not teleport past it"
+                )
+
+                # 4I-1B. The rebound homes on the player's CURRENT position, Minecraft-trident
+                #        style: move the pawn while the blade is flying back and it follows.
+                before_move = blade_vis["location"]
+                saved_loc = world.pawn.Location
+                world.pawn.Location = world._vec(900.0, -400.0, 64.0)
+                try:
+                    for _ in range(6):
+                        throw_state.last_return_at -= 0.15
+                        secondary_attacks.tick_secondary_attacks()
+                    after_move = blade_vis["location"]
+                    self.assertGreater(
+                        after_move[0], before_move[0] + 100.0, "blade must chase the moved player"
+                    )
+                    self.assertLess(after_move[1], before_move[1], "and track the new direction")
+                finally:
+                    world.pawn.Location = saved_loc
+                for _ in range(80):
+                    if not secondary_attacks.is_weapon_thrown(cleaver):
+                        break
+                    secondary_attacks._THROW.last_return_at -= 0.15
+                    secondary_attacks.tick_secondary_attacks()
                 self.assertFalse(secondary_attacks.is_weapon_thrown(cleaver))
                 # Caught: the flying actor is detached/hidden and the hands come back.
                 self.assertFalse(secondary_vfx.has_thrown_blade_visual())
@@ -2424,24 +2453,94 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 self.assertAlmostEqual(world.arms_skel_mesh.Origin.Z, 3.0)
                 self.assertEqual(world.played_custom_anims, [])
 
-                # 4I-2. Arc expiry without touching anything: no damage, then the rebound timer
+                # 4I-2. A throw that touches nothing must NOT stop dead in mid-air: past its
+                #       planned arc it keeps falling (the "off a cliff" case) and only the fall /
+                #       time fail-safes recall it. No damage is dealt along the way.
                 world.caused_damages.clear()
                 world.caused_radius_damages.clear()
                 self.assertTrue(secondary_attacks.begin_throw(cleaver, bl_inst, bl_card))
                 # Aim away from every enemy so the swept-segment check finds nothing
                 original_rot = world.pc.Rotation
+                saved_walls = world.wall_blocked_names
                 world.pc.Rotation = FakeWrappedStruct("Rotator", Pitch=0, Yaw=16384, Roll=0)
                 world.next_center_trace_override = None
+                world.wall_blocked_names = set()
+                saved_pawns_4i2 = world.world_info.PawnList
+                world.world_info.PawnList = None
                 try:
-                    secondary_attacks._THROW.started_at -= bl_card.throw_flight_time_sec + 0.01
-                    secondary_attacks.tick_secondary_attacks()
+                    st = secondary_attacks._THROW
+                    planned = st.plan.flight_time_sec
+                    outbound_steps = 0
+                    while (
+                        outbound_steps < 400
+                        and secondary_attacks._THROW is not None
+                        and secondary_attacks._THROW.phase == "outbound"
+                    ):
+                        secondary_attacks._THROW.started_at -= 0.10
+                        outbound_steps += 1
+                        secondary_attacks.tick_secondary_attacks()
                     self.assertEqual(world.caused_damages, [])
+                    self.assertIsNotNone(secondary_attacks._THROW)
                     self.assertEqual(secondary_attacks._THROW.phase, "return")
-                    secondary_attacks._THROW.return_started_at -= 1.0
-                    secondary_attacks.tick_secondary_attacks()
+                    self.assertEqual(
+                        secondary_attacks._THROW.last_return_reason, "fell out of the world"
+                    )
+                    # ...and it really did fly far past the planned arc before giving up.
+                    self.assertGreater(outbound_steps * 0.10, planned + 2.0)
+                    for _ in range(80):
+                        if not secondary_attacks.is_any_weapon_thrown():
+                            break
+                        secondary_attacks._THROW.last_return_at -= 0.20
+                        secondary_attacks.tick_secondary_attacks()
                     self.assertFalse(secondary_attacks.is_any_weapon_thrown())
+                    self.assertEqual(world.caused_damages, [])
                 finally:
                     world.pc.Rotation = original_rot
+                    world.wall_blocked_names = saved_walls
+                    world.world_info.PawnList = saved_pawns_4i2
+
+                # 4I-5. Non-solid engine actors (and the thrower themselves) must never stop the
+                #       blade: BL2's weapon trace reports volumes/triggers and the player's own
+                #       arms mesh, which used to end a throw in mid-air.
+                world.pawn.Weapon = cleaver
+                self.assertTrue(secondary_attacks.begin_throw(cleaver, bl_inst, bl_card))
+                try:
+                    ghost = types.SimpleNamespace(
+                        Name="PhysicsVolume_9", Class=types.SimpleNamespace(Name="PhysicsVolume")
+                    )
+                    world.next_center_trace_override = (ghost, world._vec(40.0, 0.0, 64.0), "None")
+                    secondary_attacks.tick_secondary_attacks()
+                    self.assertEqual(secondary_attacks._THROW.phase, "outbound")
+                    # ...and a hit right at the release point (own arms/weapon) is ignored too.
+                    world.next_center_trace_override = (
+                        world.pawn,
+                        world._vec(2.0, 0.0, 64.0),
+                        "None",
+                    )
+                    secondary_attacks.tick_secondary_attacks()
+                    self.assertEqual(secondary_attacks._THROW.phase, "outbound")
+                    self.assertEqual(world.caused_damages, [])
+                finally:
+                    world.next_center_trace_override = None
+                    secondary_attacks.reset_secondary_state()
+
+                # 4I-6. A real solid hit still ends the throw exactly where it lands.
+                world.pawn.Weapon = cleaver
+                self.assertTrue(secondary_attacks.begin_throw(cleaver, bl_inst, bl_card))
+                try:
+                    solid = world.wall_actor
+                    world.next_center_trace_override = (
+                        solid,
+                        world._vec(300.0, 0.0, 64.0),
+                        "None",
+                    )
+                    secondary_attacks.tick_secondary_attacks()
+                    self.assertEqual(secondary_attacks._THROW.phase, "return")
+                    self.assertEqual(secondary_attacks._THROW.last_return_reason, "impact")
+                finally:
+                    world.next_center_trace_override = None
+                    secondary_attacks.reset_secondary_state()
+                world.pawn.Weapon = cleaver
                 # 4I-3. A physical Bandit Machete throw hits for 200% with no splash at all.
                 world.ground_pickups.clear()
                 commands.spawn_single_command("bandit", "purple", "")
@@ -2506,7 +2605,7 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 # 4J. Secondary attack state is part of the item card payload, and Maliwan shows none
                 cleaver_payload = build_item_card_payload(bl_card)
                 self.assertTrue(
-                    any("RMB Throw: 200% Damage" in line for line in cleaver_payload.fun_stats_lines)
+                    any("RMB Throw: 100% Damage" in line for line in cleaver_payload.fun_stats_lines)
                 )
                 sabre_payload = build_item_card_payload(sabre_card_g)
                 self.assertTrue(
@@ -2554,6 +2653,29 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 runtime_mod._on_guard_pose_changed(None, 100)
                 combat.update_first_person_pose(world.pc)
                 self.assertLess(world.arms_skel_mesh.RotOrigin.Yaw, -16384)
+
+                # 4L-2. Guarding over and over must never creep: every release restores the exact
+                #       transform the hands had before the guard (players reported the view model
+                #       drifting further up and to the left with every block).
+                combat.reset_first_person_pose("rest before drift test")
+                rest_pitch = world.arms_skel_mesh.RotOrigin.Pitch
+                rest_yaw = world.arms_skel_mesh.RotOrigin.Yaw
+                rest_z = world.arms_skel_mesh.Origin.Z
+                self.assertEqual(rest_pitch, 0)
+                for _ in range(8):
+                    self.assertTrue(combat.apply_first_person_pose(world.pc, combat.POSE_GUARD))
+                    combat.update_first_person_pose(world.pc)
+                    combat.apply_first_person_pose(world.pc, combat.POSE_GUARD)
+                    combat.update_first_person_pose(world.pc)
+                    self.assertFalse(
+                        combat.capture_first_person_rest_transform(),
+                        "a live pose must never be captured as the rest transform",
+                    )
+                    combat.reset_first_person_pose("release")
+                    self.assertEqual(world.arms_skel_mesh.RotOrigin.Pitch, rest_pitch)
+                    self.assertEqual(world.arms_skel_mesh.RotOrigin.Yaw, rest_yaw)
+                    self.assertAlmostEqual(world.arms_skel_mesh.Origin.Z, rest_z)
+                    self.assertEqual(combat.active_first_person_pose(), "")
 
                 self.assertTrue(
                     secondary_vfx.spawn_thrown_blade(world.pawn, cleaver, (10.0, 0.0, 64.0))
@@ -2651,7 +2773,7 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 from melee_arsenal.core.schemas import MeleeWeaponInstance, MeleeWeaponParts
                 from melee_arsenal.runtime import commands, custom_assets, definitions, resolver, state
 
-                self.assertEqual(melee_arsenal.__version__, "0.4.3")
+                self.assertEqual(melee_arsenal.__version__, "0.4.4")
                 self.assertTrue(definitions.ensure_definitions_built())
                 self.assertTrue(state.STATE.custom_assets_active)
                 self.assertEqual(state.STATE.custom_kit_revision, "bold_ink_visual_revision_of_r4")

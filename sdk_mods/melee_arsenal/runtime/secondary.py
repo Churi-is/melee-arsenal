@@ -9,7 +9,7 @@ zoom. This module spends that input on the manufacturer's signature move:
      flatter and further).
    - Each tick sweeps the arc segment with the weapon's own `CalcWeaponFire` trace, plus a pure
      Python swept-segment check against live hostiles, so a fast blade cannot tunnel past an enemy.
-   - A hit deals exactly the normal LMB breakdown at `200%` damage and detonates Torgue splash.
+   - A hit deals exactly the normal LMB breakdown and detonates Torgue splash.
    - After an impact — or once the arc expires without touching anything — the blade rebounds to
      your hand (`THROW_RETURN_SEC`). Primary Fire is locked out for the whole flight.
 
@@ -52,9 +52,13 @@ from ..core.secondary import (
     GUARD_MAX_HOLD_SEC,
     GUARD_PARRY_WINDOW_SEC,
     GUARD_RELEASE_DEBOUNCE_SEC,
+    THROW_CATCH_RADIUS_UU,
     THROW_DAMAGE_MULTIPLIER,
+    THROW_FALL_PROBE_UU,
     THROW_HAND_EMPTY_DELAY_SEC,
     THROW_HIT_PADDING_UU,
+    THROW_MAX_FALL_UU,
+    THROW_RETURN_MAX_SEC,
     ThrowFlightPlan,
     build_throw_flight_plan,
     compute_parry_reflect_damage,
@@ -147,6 +151,13 @@ class ThrowState:
     hit_actor_name: str = ""
     damage_dealt: int = 0
     visual_updates: int = 0
+    # Rebound leg: the blade homes on the player's *current* position, so these track the live
+    # flight point rather than a straight lerp back to where the throw started.
+    return_point: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    last_return_at: float = 0.0
+    return_speed_uu_s: float = 0.0
+    last_return_reason: str = ""
+    arc_probe_logged: bool = False
 
 
 @dataclass
@@ -317,10 +328,35 @@ def _nearest_victim_on_segment(
     return best[1], best[2]
 
 
+def _player_grab_point(st: ThrowState) -> tuple[float, float, float] | None:
+    """Where the returning blade should be caught: the player's *live* position, right now."""
+    shooter = _deref_weak(st.shooter_ref)
+    if shooter is None or _is_dead(shooter):
+        return None
+    loc = getattr(shooter, "Location", None)
+    if loc is None:
+        return None
+    try:
+        eye = float(getattr(shooter, "EyeHeight", getattr(shooter, "BaseEyeHeight", 64.0)))
+        return (float(loc.X), float(loc.Y), float(loc.Z) + eye * 0.55)
+    except Exception:
+        return None
+
+
 def _begin_return(st: ThrowState, reason: str) -> None:
     st.phase = "return"
+    st.last_return_reason = reason
     st.return_started_at = time.monotonic()
+    st.last_return_at = st.return_started_at
+    st.return_point = st.last_point
     _play_throw_sfx(_deref_weak(st.shooter_ref), "rebound")
+    grab = _player_grab_point(st)
+    if grab is not None:
+        dist = math.sqrt(sum((grab[i] - st.last_point[i]) ** 2 for i in range(3)))
+        # Reach the hand in `THROW_RETURN_SEC`, then keep accelerating if the player runs away.
+        st.return_speed_uu_s = max(700.0, dist / max(0.05, st.plan.return_time_sec))
+    else:
+        st.return_speed_uu_s = 1200.0
     px, py, pz = st.last_point
     log_info(
         f"Thrown [{st.card.manufacturer.value} {st.card.archetype_name}] rebounding ({reason}) "
@@ -338,7 +374,8 @@ def _finish_throw() -> None:
     secondary_vfx.destroy_thrown_blade()
     combat = _combat()
     try:
-        combat.clear_first_person_pose(_deref_weak(_THROW.pc_ref), combat.POSE_THROWN)
+        # Unconditional: whatever posture the hands are in, catching the blade puts them back.
+        combat.reset_first_person_pose("thrown blade caught")
     except Exception:
         pass
     updates = _THROW.visual_updates
@@ -385,7 +422,7 @@ def _apply_throw_impact(
     victim: Any | None,
     hit_xyz: tuple[float, float, float] | None,
 ) -> None:
-    """Deal the thrown blade's 200% LMB hit (and Torgue splash), then start the rebound."""
+    """Deal the thrown blade's normal-strength LMB hit (and Torgue splash), then rebound."""
     combat = _combat()
     wpn = _deref_weak(st.wpn_ref)
     shooter = _deref_weak(st.shooter_ref)
@@ -430,7 +467,7 @@ def _apply_throw_impact(
             log_error(f"Thrown Behavior_CauseDamage failed on {victim}: {exc!r}")
         finally:
             _set_status_chance(wpn, 1.0)
-    else:
+    elif not st.hit_actor_name:
         st.hit_actor_name = "world"
 
     # Impact sparks & blood at the exact strike point.
@@ -445,7 +482,7 @@ def _apply_throw_impact(
         except Exception:
             pass
 
-    # Torgue Blast-Cleaver: the thrown slab detonates on any impact (its 200% splash).
+    # Torgue Blast-Cleaver: the thrown slab detonates on any impact (its normal splash).
     if st.card.splash_radius_uu > 0.0 and breakdown.splash_hit_damage > 0 and vec_tpl is not None:
         try:
             sx, sy, sz = float(vec_tpl.X), float(vec_tpl.Y), float(vec_tpl.Z)
@@ -494,8 +531,61 @@ def _apply_throw_impact(
     _begin_return(st, "impact")
 
 
+# A thrown blade spawns in front of the player's face. Anything it "hits" inside this radius is
+# the thrower themselves (arms mesh, held weapon, camera-space collision) — not a real impact.
+THROW_LAUNCH_GRACE_UU: float = 150.0
+
+# Actor classes that are never a real obstacle for a thrown blade. BL2's weapon traces can still
+# report them (volume brushes, triggers, emitters), which used to stop the blade dead in mid-air.
+_THROW_GHOST_CLASS_TOKENS = (
+    "PhysicsVolume",
+    "Trigger",
+    "Emitter",
+    "PostProcessVolume",
+    "LightVolume",
+    "Camera",
+    "BoundaryVolume",
+    "BlockingVolume",
+)
+
+
+def _is_ghost_hit(actor: Any) -> bool:
+    """True for non-solid engine actors that must never stop a thrown blade."""
+    if actor is None:
+        return True
+    cls_name = str(getattr(getattr(actor, "Class", None), "Name", "") or "")
+    if not cls_name:
+        return False
+    return any(token in cls_name for token in _THROW_GHOST_CLASS_TOKENS)
+
+
+def _tick_return(st: ThrowState, now: float) -> None:
+    """Homing rebound: chase the player's *current* hand position until it is caught."""
+    dt = min(0.10, max(0.0005, now - st.last_return_at))
+    st.last_return_at = now
+    target = _player_grab_point(st) or st.origin_xyz
+    cur = st.return_point
+    dx, dy, dz = target[0] - cur[0], target[1] - cur[1], target[2] - cur[2]
+    dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+
+    timed_out = (now - st.return_started_at) >= THROW_RETURN_MAX_SEC
+    if dist <= THROW_CATCH_RADIUS_UU or timed_out:
+        secondary_vfx.update_thrown_blade(target)
+        _finish_throw()
+        return
+
+    # Aim to close the whole gap in `THROW_RETURN_SEC`; when the player keeps running the gap
+    # grows and the blade simply chases faster (Minecraft-trident style).
+    speed = min(6000.0, max(700.0, dist / max(0.05, st.plan.return_time_sec)))
+    st.return_speed_uu_s = speed
+    step = min(dist, speed * dt)
+    scale = step / dist
+    st.return_point = (cur[0] + dx * scale, cur[1] + dy * scale, cur[2] + dz * scale)
+    secondary_vfx.update_thrown_blade(st.return_point)
+
+
 def tick_throw() -> None:
-    """Advance the airborne blade one frame (arc sweep, hit test, rebound timer)."""
+    """Advance the airborne blade one frame (arc sweep, hit test, homing rebound)."""
     global _THROW
     st = _THROW
     if st is None:
@@ -510,19 +600,12 @@ def tick_throw() -> None:
         return
 
     if st.phase == "return":
-        u = 1.0
-        if st.plan.return_time_sec > 0.0:
-            u = min(1.0, max(0.0, (now - st.return_started_at) / st.plan.return_time_sec))
-        secondary_vfx.update_thrown_blade(
-            secondary_vfx.lerp_xyz(st.last_point, st.origin_xyz, u)
-        )
-        if u >= 1.0:
-            _finish_throw()
+        _tick_return(st, now)
         return
 
     elapsed = now - st.started_at
-    if elapsed >= st.plan.flight_time_sec:
-        _begin_return(st, "arc expired")
+    if elapsed >= st.plan.max_flight_sec:
+        _begin_return(st, "flight fail-safe")
         return
 
     point = _throw_point(st, elapsed)
@@ -536,12 +619,54 @@ def tick_throw() -> None:
         secondary_vfx.hide_held_blade()
     secondary_vfx.update_thrown_blade(point)
     st.visual_updates += 1
+
+    # Past the planned arc the blade is over whatever is below it. A short probe decides whether it
+    # simply landed (normal ground) or is falling past a ledge, in which case the same parabola
+    # keeps being evaluated — that is the "thrown off a cliff" case.
+    if elapsed >= st.plan.flight_time_sec:
+        below = (point[0], point[1], point[2] - THROW_FALL_PROBE_UU)
+        ground, ground_xyz, _g_bone = combat._run_weapon_trace(wpn, st.vec_template, point, below)
+        if not st.arc_probe_logged:
+            st.arc_probe_logged = True
+            where = (
+                f"ground at z={ground_xyz[2]:.0f}"
+                if ground_xyz is not None
+                else "no ground found"
+            )
+            log_info(
+                f"Throw arc ended at ({point[0]:.0f}, {point[1]:.0f}, {point[2]:.0f}) — "
+                f"{where} within {THROW_FALL_PROBE_UU:.0f} uu below"
+                + ("; continuing to fall" if ground is None else "")
+            )
+        if ground is not None and not _is_ghost_hit(ground):
+            st.last_point = ground_xyz or point
+            victim = ground if combat._is_valid_melee_victim(shooter, ground) else None
+            if victim is None:
+                st.hit_actor_name = str(getattr(ground, "Name", "") or "ground")
+            _apply_throw_impact(st, victim, st.last_point)
+            return
+        if st.origin_xyz[2] - point[2] >= THROW_MAX_FALL_UU:
+            _begin_return(st, "fell out of the world")
+            return
+
     hit_actor, hit_xyz, _bone = combat._run_weapon_trace(wpn, st.vec_template, st.last_point, point)
 
     if hit_actor is not None:
+        hx, hy, hz = hit_xyz or point
+        close_to_hand = math.sqrt(
+            (hx - st.origin_xyz[0]) ** 2
+            + (hy - st.origin_xyz[1]) ** 2
+            + (hz - st.origin_xyz[2]) ** 2
+        ) < THROW_LAUNCH_GRACE_UU
+        if hit_actor == shooter or _is_ghost_hit(hit_actor) or close_to_hand:
+            # The thrower's own body / arms mesh, or a non-solid volume: keep flying.
+            st.last_point = point
+            return
         if combat._is_valid_melee_victim(shooter, hit_actor):
             _apply_throw_impact(st, hit_actor, hit_xyz or point)
         else:
+            if not st.hit_actor_name:
+                st.hit_actor_name = str(getattr(hit_actor, "Name", "") or "world")
             _apply_throw_impact(st, None, hit_xyz or point)
         return
 
@@ -891,10 +1016,10 @@ def tick_guard() -> None:
 # ---------------------------------------------------------------------------
 
 def _clear_pose(pose_kind: str) -> None:
-    """Best-effort pose restore that never depends on the throw/guard objects still existing."""
+    """Unconditional pose restore that never depends on the throw/guard objects still existing."""
     try:
         combat = _combat()
-        combat.clear_first_person_pose(None, getattr(combat, f"POSE_{pose_kind.upper()}"))
+        combat.reset_first_person_pose(pose_kind)
     except Exception:
         pass
 
@@ -991,9 +1116,7 @@ def reset_secondary_state() -> None:
     _GUARD_COOLDOWN_UNTIL = 0.0
     secondary_vfx.destroy_thrown_blade()
     try:
-        combat = _combat()
-        combat.clear_first_person_pose(None, combat.POSE_GUARD)
-        combat.clear_first_person_pose(None, combat.POSE_THROWN)
+        _combat().reset_first_person_pose("secondary state reset")
     except Exception:
         pass
 

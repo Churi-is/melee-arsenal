@@ -34,6 +34,9 @@ from melee_arsenal.core import (  # noqa: E402
     Vec3,
     GUARD_PARRY_WINDOW_SEC,
     THROW_DAMAGE_MULTIPLIER,
+    THROW_GRAVITY_Z,
+    THROW_MAX_FLIGHT_SEC,
+    THROW_TIME_SCALE,
     apply_guard_damage_reduction,
     apply_incoming_damage_reduction,
     build_asset_sublibrary_manifest,
@@ -420,8 +423,9 @@ class TestMeleeArsenalCore(unittest.TestCase):
         self.assertEqual(MANUFACTURERS[Manufacturer.JAKOBS].secondary_attack, SecondaryAttack.GUARD)
         self.assertEqual(MANUFACTURERS[Manufacturer.MALIWAN].secondary_attack, SecondaryAttack.NONE)
 
-        # Thrown blades strike for exactly 200% of the normal LMB hit.
-        self.assertEqual(THROW_DAMAGE_MULTIPLIER, 2.0)
+        # Thrown blades strike for exactly the same damage as a normal LMB hit (not 200%: a
+        # single RMB used to out-damage everything else in the kit).
+        self.assertEqual(THROW_DAMAGE_MULTIPLIER, 1.0)
         parts = MeleeWeaponParts("Blade_Bandit_Machete", "Grip_Bandit", "Acc_None", "Elem_None")
         weapon = MeleeWeaponInstance(11, 50, Rarity.RARE, parts)
         card = compute_card_stats(weapon)
@@ -429,7 +433,7 @@ class TestMeleeArsenalCore(unittest.TestCase):
         self.assertAlmostEqual(card.throw_weight_kg, compute_throw_weight_kg(weapon))
         normal = compute_attack_damage(card)
         thrown = compute_attack_damage(card, damage_scale=THROW_DAMAGE_MULTIPLIER)
-        self.assertAlmostEqual(thrown.final_hit_damage, normal.final_hit_damage * 2, delta=2)
+        self.assertAlmostEqual(thrown.final_hit_damage, normal.final_hit_damage, delta=2)
 
         # Weight is defined by the manufacturers of the actual parts: a Torgue blade is heavier
         # than a Bandit one, and an off-manufacturer grip changes the mass again.
@@ -479,6 +483,33 @@ class TestMeleeArsenalCore(unittest.TestCase):
         self.assertLess(down_plan.range_uu, flat_plan.range_uu)
         # Aiming steeply down can launch below the horizon — gravity still bends the path.
         self.assertLess(down_plan.vertical_speed_uu_s, flat_plan.vertical_speed_uu_s)
+        # A downward throw must still fly for a real amount of time instead of ending almost
+        # immediately ("it stops and comes back in mid-air").
+        self.assertGreater(down_plan.flight_time_sec, 0.6)
+        # ...and it must actually descend over that time.
+        _df, _dh0 = down_plan.offset_at(0.0)
+        _df, _dh1 = down_plan.offset_at(down_plan.flight_time_sec)
+        self.assertLess(_dh1, _dh0 - 200.0)
+
+        # Travel speed is deliberately slower than a "realistic" solve: the same arc (distance and
+        # apex) is simply walked through at `THROW_TIME_SCALE` times the time.
+        self.assertGreater(THROW_TIME_SCALE, 1.2)
+        self.assertAlmostEqual(
+            flat_plan.gravity_uu_s2,
+            THROW_GRAVITY_Z / (THROW_TIME_SCALE * THROW_TIME_SCALE),
+            delta=0.5,
+        )
+        scaled = build_throw_flight_plan(2.9, 0.0)
+        unscaled_range = scaled.horizontal_speed_uu_s * scaled.flight_time_sec
+        self.assertAlmostEqual(unscaled_range, scaled.range_uu, delta=scaled.range_uu * 0.02)
+        # A 30 s fail-safe, so a blade hurled off a cliff has time to fall to something.
+        self.assertGreaterEqual(THROW_MAX_FLIGHT_SEC, 25.0)
+        self.assertGreaterEqual(flat_plan.max_flight_sec, 25.0)
+        # The arc keeps being valid past its planned end (that is what lets a cliff throw keep
+        # falling instead of freezing in the air).
+        _f_late, h_late = flat_plan.offset_at(flat_plan.flight_time_sec * 2.0)
+        _f_end, h_end = flat_plan.offset_at(flat_plan.flight_time_sec)
+        self.assertLess(h_late, h_end)
 
         # Guard blades expose no throw data & Maliwan exposes no secondary attack whatsoever
         guard_card = compute_card_stats(
@@ -503,7 +534,7 @@ class TestMeleeArsenalCore(unittest.TestCase):
 
         # Cards advertise the secondary attack right under the Damage Reduction line
         throw_lines = build_item_card_payload(card).fun_stats_lines
-        self.assertTrue(any("RMB Throw: 200% Damage" in line for line in throw_lines))
+        self.assertTrue(any("RMB Throw: 100% Damage" in line for line in throw_lines))
         guard_lines = build_item_card_payload(guard_card).fun_stats_lines
         self.assertTrue(any("RMB Hold: Guard" in line for line in guard_lines))
 

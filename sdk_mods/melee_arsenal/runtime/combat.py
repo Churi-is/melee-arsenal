@@ -38,7 +38,7 @@ Built 100% on empirical results from `melee_combat_probe_report.json` (Sanctuary
 4. **Manufacturer Secondary Attacks (RMB / Left Trigger, `runtime/secondary.py`)**:
    - Bandit Machetes and Torgue Blast-Cleavers are **thrown** along a ballistic arc whose speed,
      loft, flight time and reach come from the weapon's real part mass (blade + grip manufacturer
-     hardware + accessory). A thrown blade strikes for exactly `200%` of its normal LMB hit, then
+     hardware + accessory). A thrown blade strikes for exactly a normal LMB hit, then
      rebounds to your hand after an impact — or after its arc expires — and Primary Fire is locked
      out for the whole flight.
    - Hyperion Katanas and Jakobs Sabres **guard** while RMB is held: the next incoming hit has the
@@ -199,6 +199,11 @@ _ARMS_REST_BASELINE: dict[int, dict[str, Any]] = {}
 # relative to the untouched rest transform and can always be restored exactly.
 _POSE_KIND: str = ""
 _POSE_STARTED_AT: float = 0.0
+# Exact `RotOrigin`/`Origin` the hands had *the instant the current pose was applied*. Every pose is
+# written as an absolute offset from this snapshot and undone by writing it straight back, so a
+# guard can never leave a residue behind (repeated guards used to creep further and further up and
+# to the left because the restore target had been captured while a pose was already live).
+_POSE_REST: dict[str, Any] | None = None
 
 POSE_GUARD = "guard"
 POSE_THROWN = "thrown"
@@ -833,9 +838,53 @@ def _get_arms_anim_slots(arms: Any) -> dict[str, Any]:
     return {"action": found_act, "custom": found_cus, "recoil": found_rec}
 
 
+def _uobject_key(obj: Any) -> str:
+    """Stable identity string for a UObject wrapper (`""` when it cannot be read)."""
+    if obj is None:
+        return ""
+    try:
+        return str(obj._path_name())
+    except Exception:
+        return ""
+
+
+def _same_uobject(a: Any, b: Any) -> bool:
+    """Identity check that survives pyunrealsdk handing back a fresh Python wrapper."""
+    if a is None or b is None:
+        return False
+    if a is b:
+        return True
+    ka, kb = _uobject_key(a), _uobject_key(b)
+    return bool(ka) and ka == kb
+
+
+def _snapshot_hands(sm: Any, arms: Any) -> dict[str, Any] | None:
+    """Read the *live* `RotOrigin`/`Origin` of the first-person hands right now."""
+    try:
+        ro = sm.RotOrigin
+        origin = getattr(sm, "Origin", None)
+        return {
+            "arms_ref": _wrap_weak(arms),
+            "sm_ref": _wrap_weak(sm),
+            "sm_key": _uobject_key(sm),
+            "rot": (int(ro.Pitch), int(ro.Yaw), int(ro.Roll)),
+            "loc": (
+                (float(origin.X), float(origin.Y), float(origin.Z))
+                if origin is not None
+                else None
+            ),
+        }
+    except Exception:
+        return None
+
+
 def _capture_arms_rest_transform(arms: Any, sm: Any) -> dict[str, Any] | None:
     """Remember the pristine `RotOrigin`/`Origin` of the first-person hands exactly once."""
     if arms is None or sm is None:
+        return None
+    if _POSE_KIND:
+        # The hands are currently displaced by a pose: whatever is on the mesh right now is NOT the
+        # rest transform, so capturing it would bake the offset in for good.
         return None
     entry = _ARMS_REST_BASELINE.get(id(sm))
     if entry is not None:
@@ -866,8 +915,8 @@ def _capture_arms_rest_transform(arms: Any, sm: Any) -> dict[str, Any] | None:
         return None
 
 
-def _pose_target(pc: Any) -> tuple[Any, Any, Any, dict[str, Any]] | None:
-    """Resolve `(pawn, arms, skeletal_mesh, rest_entry)` for the local first-person hands."""
+def _resolve_hands(pc: Any) -> tuple[Any, Any, Any] | None:
+    """Resolve `(pawn, arms, skeletal_mesh)` for the local first-person hands."""
     pawn = getattr(pc, "Pawn", None) if pc is not None else None
     if pawn is None or _is_dead(pawn):
         return None
@@ -877,7 +926,18 @@ def _pose_target(pc: Any) -> tuple[Any, Any, Any, dict[str, Any]] | None:
     sm = getattr(arms, "SkeletalMesh", None)
     if sm is None or _is_dead(sm) or not hasattr(sm, "RotOrigin"):
         return None
-    entry = _capture_arms_rest_transform(arms, sm)
+    return pawn, arms, sm
+
+
+def _pose_target(pc: Any) -> tuple[Any, Any, Any, dict[str, Any]] | None:
+    """Resolve `(pawn, arms, skeletal_mesh, rest_snapshot)` for the current pose."""
+    hands = _resolve_hands(pc)
+    if hands is None:
+        return None
+    pawn, arms, sm = hands
+    entry = _POSE_REST
+    if entry is None or not _same_uobject(_deref_weak(entry.get("sm_ref")), sm):
+        entry = _snapshot_hands(sm, arms)
     if entry is None:
         return None
     return pawn, arms, sm, entry
@@ -891,12 +951,25 @@ def apply_first_person_pose(pc: Any, kind: str) -> bool:
     fallback, which is verified to move the hands and the attached blade. Returns True when the
     pose is live.
     """
-    global _POSE_KIND, _POSE_STARTED_AT
+    global _POSE_KIND, _POSE_STARTED_AT, _POSE_REST
     if kind not in _POSE_OFFSETS:
         return clear_first_person_pose(pc)
-    target = _pose_target(pc)
-    if target is None:
+    hands = _resolve_hands(pc)
+    if hands is None:
         return False
+    _pawn, arms, sm = hands
+    if _POSE_KIND:
+        # A pose must never be applied on top of another one (that is how offsets accumulate):
+        # snap back to the previous snapshot first, then re-read the hands.
+        _write_rest_transforms()
+        _POSE_KIND = ""
+    if STATE.swing_motion.active:
+        # Let the fallback slash arc finish restoring before the secondary pose takes over.
+        restore_all_arms_rest_transforms()
+    snapshot = _snapshot_hands(sm, arms)
+    if snapshot is None:
+        return False
+    _POSE_REST = snapshot
     _POSE_KIND = kind
     _POSE_STARTED_AT = time.monotonic()
     update_first_person_pose(pc)
@@ -911,7 +984,7 @@ def active_first_person_pose() -> str:
 
 def update_first_person_pose(pc: Any, now: float | None = None) -> None:
     """Re-apply the live pose (guard gets a slow brace breathing bob, throw stays still)."""
-    global _POSE_KIND
+    global _POSE_KIND, _POSE_REST
     if not _POSE_KIND:
         return
     target = _pose_target(pc)
@@ -920,6 +993,7 @@ def update_first_person_pose(pc: Any, now: float | None = None) -> None:
         _POSE_KIND = ""
         return
     _pawn, arms, sm, entry = target
+    _POSE_REST = entry
     offsets = _POSE_OFFSETS.get(_POSE_KIND)
     if offsets is None:
         return
@@ -962,22 +1036,46 @@ def reset_first_person_pose(reason: str = "") -> None:
     This is the guard-release path: a hit can consume the brace without the engine ever reporting
     an RMB release, so the restore must never be conditional on the tracked pose kind matching.
     """
-    global _POSE_KIND
+    global _POSE_KIND, _POSE_REST
     had = _POSE_KIND
     _POSE_KIND = ""
     _write_rest_transforms()
+    _POSE_REST = None
     if had:
         log_info(f"First-person pose force-restored ({had}{': ' + reason if reason else ''})")
 
 
 def capture_first_person_rest_transform() -> bool:
-    """Capture the idle arms transform while nothing is posed, so it can never bake in an offset."""
+    """Refresh the idle arms transform while nothing is posed.
+
+    Called on a slow timer from the frame tick. Re-reading (rather than capturing once) means the
+    stored rest can never hold a stale offset: if the hands are idle right now, that *is* the rest
+    transform, whatever happened earlier in the session.
+    """
     if _POSE_KIND or STATE.swing_motion.active:
         return False
     try:
-        return _pose_target(get_local_player_controller()) is not None
+        hands = _resolve_hands(get_local_player_controller())
     except Exception:
         return False
+    if hands is None:
+        return False
+    _pawn, arms, sm = hands
+    snap = _snapshot_hands(sm, arms)
+    if snap is None:
+        return False
+    entry = _ARMS_REST_BASELINE.get(id(sm))
+    if (
+        entry is None
+        or entry.get("rot") != snap["rot"]
+        or entry.get("loc") != snap["loc"]
+        or entry.get("sm_key") != snap["sm_key"]
+    ):
+        _ARMS_REST_BASELINE[id(sm)] = snap
+        log_info(
+            f"Captured first-person arms rest transform: rot={snap['rot']}, loc={snap.get('loc')}"
+        )
+    return True
 
 
 def pose_held_seconds() -> float:
@@ -989,7 +1087,7 @@ def pose_held_seconds() -> float:
 
 def clear_first_person_pose(pc: Any = None, kind: str = "") -> bool:
     """Restore idle hands. Pass `kind` to only clear that specific pose."""
-    global _POSE_KIND
+    global _POSE_KIND, _POSE_REST
     if not _POSE_KIND:
         return True
     if kind and _POSE_KIND != kind:
@@ -997,13 +1095,17 @@ def clear_first_person_pose(pc: Any = None, kind: str = "") -> bool:
     cleared = _POSE_KIND
     _POSE_KIND = ""
     _write_rest_transforms()
+    _POSE_REST = None
     log_info(f"First-person pose cleared: {cleared}")
     return True
 
 
 def _write_rest_transforms() -> None:
     """Write every captured rest transform back (safe to call at any time)."""
-    for sm_id, entry in list(_ARMS_REST_BASELINE.items()):
+    entries = list(_ARMS_REST_BASELINE.items())
+    if _POSE_REST is not None:
+        entries.append((-1, _POSE_REST))
+    for sm_id, entry in entries:
         sm = _deref_weak(entry.get("sm_ref"))
         arms = _deref_weak(entry.get("arms_ref"))
         if sm is None:
