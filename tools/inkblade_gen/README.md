@@ -25,7 +25,7 @@ inserted without editing anything that already exists.
 
 | # | Stage | What it owns | Artifacts (per part) |
 | - | ----- | ------------ | -------------------- |
-| 1 | `geometry` | Every mesh rule. R3 parametric shapes **and** the R4 revisions applied in one pass: halved blade-slot depth, per-manufacturer thickness, receiver shift, heavy-spine depth, centred cleave guard, Torgue hex shell + ribs, bifacial normalisation. | `*.json` (faces + sockets) |
+| 1 | `geometry` | Every mesh rule. R3 parametric shapes **and** the R4 revisions applied in one pass: halved blade-slot depth, per-manufacturer thickness, receiver shift, heavy-spine depth, centred cleave guard, Torgue hex shell + ribs, bifacial normalisation. Plus the R7 silhouette pass: slimmer/longer blades, the Jakobs sabre and the seated cleave-guard end caps. | `*.json` (faces + sockets) |
 | 2 | `uv` | Newell-normal face projection at one shared texel density, padded shelf packing into a pow2 atlas, island template reuse for mirrored rear faces. | `*.json` (`inkblade.physical-uv/2.0`) |
 | 3 | `flat` | **Flat textures saved as PNGs**: one solid palette colour per UV island (per-island brightness jitter, lightened `edge` role). | `<part>.png` (**the flat pass on disk**) |
 | 4 | `mottle` | Paint wash (three-octave field), deposits, dry-brush streaks, gouges, chipped paint, tally marks, edge chips. | `<part>.png` |
@@ -60,10 +60,32 @@ recipes get their accent islands recoloured exactly like the exported combinatio
 ## Caching
 
 Each stage has a fingerprint of `config + its own source + the upstream fingerprint + an optional
-extra key` (the decals stage hashes the decal directory listing). A stage is skipped when its
+extra key` (the decals stage hashes the decal directory listing). "Its own source" means the `run`
+wrapper **and** the module files declared in `Stage.sources` — e.g. `geometry.py` for the geometry
+stage, `textures.py` for the painting stages. The wrapper is usually a two-line call into a module,
+so hashing only the wrapper would serve stale geometry after a mesh edit.
+
+A stage is skipped when its
 fingerprint matches `build/inkblade_stages/<stage>/_fingerprint.json` and its artifacts are still on
 disk. Because fingerprints chain, editing the ink stage re-runs ink and everything after it while the
-geometry / UV / flat / mottle PNGs stay untouched.
+geometry / UV / flat / mottle PNGs stay untouched. Editing `geometry.py` re-runs the whole stack,
+as it should.
+
+## R7 silhouette pass
+
+`geometry.py` owns a small, shared blade pass on top of the R3 silhouettes:
+
+- `BLADE_SPINE_SCALE` shrinks every blade's **spine width** (the Y / edge-on thickness). It scales
+  the whole blade part, so the front rail, receiver and face overlays stay attached; the X face
+  width is untouched. `accessory_face_gap_m` follows it so socketed fittings stay on the skin.
+- `BLADE_LENGTH_SCALE` stretches the blade above `BLADE_LENGTH_PIVOT_Z`. Guards, sockets and the
+  element receiver keep their positions, and `BLADES[*].base_reach_m` stays equal to the exported
+  tip height.
+- Jakobs was rebuilt as a frontier sabre: a slender, gently forward-swept blade with a smooth spine
+  and a tapered thrusting point, replacing the old recurved hook. Its swept quillons are unchanged.
+- `accessory_flared_cleave_guard`'s yellow end caps are seated into the plate: the R4
+  `CLEAVE_GUARD_PLATE_SHIFT` moved the plate back but left the caps at their old depth, so they
+  floated clear of the wing skin.
 
 ## Adding a stage
 

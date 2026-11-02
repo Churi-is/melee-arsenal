@@ -16,6 +16,11 @@ The R4 revision rules that used to live in `tools/r4_builder.py` are applied her
 * the Flared Cleave Guard centred as a single plate,
 * Torgue's grip rebuilt as a hexagonal shell with four continuous wraparound ribs.
 
+The R7 silhouette pass lives here too: `BLADE_SPINE_SCALE` slims every blade's
+spine (edge-on Y thickness, not its face width), `BLADE_LENGTH_SCALE` lengthens
+the blade above the hilt without moving sockets, Jakobs is rebuilt as a proper
+frontier sabre, and the Flared Cleave Guard's end caps are seated into the plate.
+
 Coordinates here are Blender working space (metres, `+Z` blade tip, `-Y` display/front face);
 `glb.py` performs the glTF conversion (`x, z, -y`) at export time.
 """
@@ -38,6 +43,23 @@ BLADE_THICKNESS_M: dict[str, float] = {
     "Maliwan": 0.095,
     "Torgue": 0.16,
 }
+
+# ---------------------------------------------------------------------------
+# R7 silhouette pass: slimmer spines and a longer reach on *every* blade.
+#
+# BLADE_SPINE_SCALE is applied on top of the R4 depth halving to the whole
+# blade part (core, front rail, receiver and face overlays together), so
+# thinning the spine never peels those details off the blade skin.  It is the
+# spine width (Y / edge-on thickness) that changes, not the face width (X).
+#
+# BLADE_LENGTH_SCALE only stretches geometry above the hilt line; guards,
+# sockets and the element receiver keep their original positions so kit
+# consumers and socketed accessories stay where they expect them.
+# ---------------------------------------------------------------------------
+BLADE_SPINE_SCALE: float = 0.80
+BLADE_LENGTH_SCALE: float = 1.12
+BLADE_LENGTH_PIVOT_Z: float = 0.12
+
 HEAVY_SPINE_DEPTH_DIVISOR: float = 3.0
 CLEAVE_GUARD_PLATE_SHIFT: float = 0.025       # centres the guard's continuous plate
 ELEMENT_RECEIVER_X_SHIFT: float = 0.055       # -0.12 -> -0.065
@@ -233,8 +255,18 @@ class Geo:
 
 
 # ---------------------------------------------------------------------------
-# R3 part shapes (verbatim silhouettes / dimensions)
+# R3 part shapes (verbatim silhouettes / dimensions) + the R7 silhouette pass
 # ---------------------------------------------------------------------------
+def _blade_z(z: float) -> float:
+    """Lengthen the blade above the hilt line, leaving every socket where it was."""
+    return BLADE_LENGTH_PIVOT_Z + (z - BLADE_LENGTH_PIVOT_Z) * BLADE_LENGTH_SCALE
+
+
+def _blade_pts(pts: Sequence[Sequence[float]]) -> list[tuple[float, float]]:
+    """Stretch an (x, z) silhouette / overlay without changing its face width."""
+    return [(float(x), _blade_z(z)) for x, z in pts]
+
+
 def _blade(maker: str) -> Geo:
     g = Geo()
     g.box((0, 0, 0.075), (0.23, 0.15, 0.15), "paint")
@@ -242,13 +274,14 @@ def _blade(maker: str) -> Geo:
     # Universal front rail and element receiver give every accessory a supported mounting surface.
     g.box((0, -0.067, 0.16), (0.22, 0.045, 0.13), "paint")
     g.cyl((-0.12, -0.075, 0.12), 0.043, 0.025, "dark", axis="y")
+    thick = BLADE_THICKNESS_M[maker]
 
     if maker == "Hyperion":
         pts = [(-0.12, 0.13), (0.12, 0.13), (0.16, 0.76), (0.07, 1.29), (-0.045, 1.45), (-0.10, 1.13)]
-        g.profile(pts, 0.075, sharp=True)
-        g.profile([(-0.09, 0.22), (-0.045, 0.25), (0.015, 1.24), (-0.025, 1.18)], 0.016, -0.048, "paint", 0.004)
+        g.profile(_blade_pts(pts), thick, sharp=True)
+        g.profile(_blade_pts([(-0.09, 0.22), (-0.045, 0.25), (0.015, 1.24), (-0.025, 1.18)]), 0.016, -0.048, "paint", 0.004)
         for z in (0.34, 0.44, 0.54):
-            g.box((0.06, -0.047, z), (0.065, 0.018, 0.025), "accent")
+            g.box((0.06, -0.047, _blade_z(z)), (0.065, 0.018, 0.025), "accent")
         g.box((0, 0, 0.005), (0.44, 0.18, 0.065), "paint")
     elif maker == "Bandit":
         pts = [
@@ -256,20 +289,37 @@ def _blade(maker: str) -> Geo:
             (-0.30, 1.19), (-0.32, 0.96), (-0.23, 0.88), (-0.29, 0.77), (-0.20, 0.69), (-0.24, 0.56),
             (-0.14, 0.46),
         ]
-        g.profile(pts, 0.11, sharp=True)
-        g.profile([(-0.09, 0.23), (0.09, 0.25), (0.18, 1.09), (0.07, 1.15), (-0.10, 1.08)], 0.035, -0.065, "paint", 0.008)
+        g.profile(_blade_pts(pts), thick, sharp=True)
+        g.profile(_blade_pts([(-0.09, 0.23), (0.09, 0.25), (0.18, 1.09), (0.07, 1.15), (-0.10, 1.08)]), 0.035, -0.065, "paint", 0.008)
         for x, z in ((0, 0.88), (0.03, 1.02), (0.04, 0.70)):
-            g.cyl((x, -0.09, z), 0.036, 0.013, "dark", axis="y")
+            g.cyl((x, -0.09, _blade_z(z)), 0.036, 0.013, "dark", axis="y")
         g.box((0.02, 0, 0.0), (0.45, 0.2, 0.09), "paint")
     elif maker == "Jakobs":
-        pts = [(-0.105, 0.12), (0.105, 0.12), (0.12, 0.53), (0.21, 0.98), (0.33, 1.39), (0.23, 1.28), (0.02, 0.94), (-0.08, 0.50)]
-        g.profile(pts, 0.065, sharp=True)
-        g.profile([(-0.04, 0.20), (-0.005, 0.23), (0.09, 0.88), (0.20, 1.20), (0.12, 0.86)], 0.012, -0.041, "trim", 0.003)
+        # Frontier sabre: a long, slender, gently forward-curved blade with a
+        # smooth spine and a tapered thrusting point.  The old silhouette hooked
+        # backwards to x=0.33 with a concave notch in the spine, which read as a
+        # recurved/kukri shape instead of a sabre.
+        pts = [
+            (-0.080, 0.13), (0.080, 0.13),          # ricasso, centred on the hilt
+            (0.090, 0.42), (0.115, 0.72), (0.145, 1.00), (0.175, 1.22),  # convex cutting edge
+            (0.200, 1.40),                          # thrusting point, ahead of the hilt axis
+            (0.100, 1.22),                          # shoulder of the tapered point
+            (0.040, 1.00), (-0.010, 0.72), (-0.055, 0.42),                # gently curved spine
+        ]
+        g.profile(_blade_pts(pts), thick, sharp=True)
+        # Inlaid fuller follows the curve and stops short of the taper.
+        g.profile(
+            _blade_pts([(-0.030, 0.20), (0.005, 0.22), (0.035, 0.50), (0.065, 0.78),
+                        (0.095, 1.02), (0.120, 1.16), (0.090, 1.16), (0.060, 1.02),
+                        (0.030, 0.78), (0.000, 0.50)]),
+            0.012, -0.041, "trim", 0.003,
+        )
+        # Swept quillons are hilt geometry: they stay at their original height.
         g.profile([(-0.30, 0.06), (-0.31, -0.015), (-0.15, -0.075), (0.19, -0.035), (0.29, 0.05), (0.14, 0.015), (-0.1, 0.01)], 0.12, 0, "trim")
     elif maker == "Maliwan":
         pts = [(-0.11, 0.14), (0.11, 0.14), (0.17, 0.44), (0.23, 0.64), (0.31, 1.12), (0.18, 1.38), (0.17, 1.08), (-0.03, 0.87), (-0.15, 0.56)]
-        g.profile(pts, 0.095, tag="paint", sharp=True)
-        g.profile([(0.015, 0.25), (0.085, 0.28), (0.11, 0.57), (0.22, 1.08), (0.18, 1.20), (0.04, 0.70)], 0.026, -0.059, "accent", 0.005)
+        g.profile(_blade_pts(pts), thick, tag="paint", sharp=True)
+        g.profile(_blade_pts([(0.015, 0.25), (0.085, 0.28), (0.11, 0.57), (0.22, 1.08), (0.18, 1.20), (0.04, 0.70)]), 0.026, -0.059, "accent", 0.005)
         g.profile([(-0.22, 0.04), (-0.14, -0.045), (0.16, -0.045), (0.24, 0.04), (0.12, 0.10), (-0.12, 0.10)], 0.15, tag="dark")
     else:  # Torgue
         pts = [
@@ -277,10 +327,10 @@ def _blade(maker: str) -> Geo:
             (0.25, 0.73), (0.34, 0.81), (0.28, 0.91), (0.36, 1.01), (0.26, 1.19), (-0.18, 1.19),
             (-0.24, 1.07), (-0.18, 0.82),
         ]
-        g.profile(pts, 0.16, sharp=True)
-        g.profile([(-0.1, 0.27), (0.08, 0.29), (0.15, 1.09), (-0.12, 1.09)], 0.045, -0.098, "paint")
+        g.profile(_blade_pts(pts), thick, sharp=True)
+        g.profile(_blade_pts([(-0.1, 0.27), (0.08, 0.29), (0.15, 1.09), (-0.12, 1.09)]), 0.045, -0.098, "paint")
         for z in (0.44, 0.58, 0.72, 0.86):
-            g.box((0, -0.13, z), (0.12, 0.025, 0.06), "dark")
+            g.box((0, -0.13, _blade_z(z)), (0.12, 0.025, 0.06), "dark")
         for x in (-0.23, 0.23):
             g.cyl((x, 0, -0.01), 0.065, 0.16, "trim", axis="y")
         g.box((0, 0, -0.005), (0.45, 0.23, 0.095), "paint")
@@ -346,8 +396,12 @@ def _accessory(acc_id: str) -> Geo:
              (0.36, 0.08), (0.23, 0.035), (0.10, -0.035), (-0.1, -0.035), (-0.23, 0.035)],
             0.1, -0.025, "metal",
         )
+        # The R4 plate shift (CLEAVE_GUARD_PLATE_SHIFT) moved the continuous
+        # plate back to y=-0.05..0.05 but left these caps at y=-0.09, where
+        # they floated clear of the wing skin.  Seat them into the plate so
+        # both the front cap and its mirrored rear copy actually touch it.
         for x in (-0.27, 0.27):
-            g.box((x, -0.09, 0.0), (0.065, 0.035, 0.045), "trim")
+            g.box((x, -0.060, 0.0), (0.065, 0.035, 0.045), "trim")
     elif acc_id == "reinforced_heavy_spine":
         g.box((0.09, -0.045, 0.27), (0.11, 0.10, 0.55), "paint")
         for z in (0.08, 0.22, 0.36, 0.50):
@@ -371,32 +425,36 @@ def _element() -> Geo:
 
 # ---------------------------------------------------------------------------
 # Catalogue metadata (shipped in `socket_manifest.json`)
+#
+# `base_reach_m` is the physical tip height of the finished mesh, i.e. the R3
+# tip after the R7 length pass (`_blade_z`).  Keep it in step with the profile
+# so the manifest never advertises a blade shorter than the exported geometry.
 # ---------------------------------------------------------------------------
 BLADES: dict[str, dict[str, Any]] = {
     "Hyperion": {
-        "archetype": "Precision tanto", "targeting_mode": "SINGLE_TARGET", "base_reach_m": 1.45,
+        "archetype": "Precision tanto", "targeting_mode": "SINGLE_TARGET", "base_reach_m": 1.6096,
         "base_damage": 82, "base_swings_per_second": 1.65,
         "element_policy": {"mode": "OPTIONAL", "allowed": ["Shock"]}, "signature_title": "Ronin",
     },
     "Bandit": {
-        "archetype": "Scrap cleaver", "targeting_mode": "FRONTAL_CLEAVE", "base_reach_m": 1.25,
+        "archetype": "Scrap cleaver", "targeting_mode": "FRONTAL_CLEAVE", "base_reach_m": 1.3856,
         "base_damage": 106, "base_swings_per_second": 1.05,
         "element_policy": {"mode": "OPTIONAL", "allowed": ["Fire", "Corrosive", "Slag"]},
         "signature_title": "Chopper",
     },
     "Jakobs": {
-        "archetype": "Frontier sabre", "targeting_mode": "SINGLE_TARGET", "base_reach_m": 1.39,
+        "archetype": "Frontier sabre", "targeting_mode": "SINGLE_TARGET", "base_reach_m": 1.5536,
         "base_damage": 98, "base_swings_per_second": 1.4,
         "element_policy": {"mode": "FORBIDDEN", "allowed": []}, "signature_title": "Cavalier",
     },
     "Maliwan": {
-        "archetype": "Ion falchion", "targeting_mode": "FRONTAL_CLEAVE", "base_reach_m": 1.38,
+        "archetype": "Ion falchion", "targeting_mode": "FRONTAL_CLEAVE", "base_reach_m": 1.5312,
         "base_damage": 72, "base_swings_per_second": 1.5,
         "element_policy": {"mode": "REQUIRED", "allowed": ["Fire", "Shock", "Corrosive", "Slag"]},
         "signature_title": "Seraphim",
     },
     "Torgue": {
-        "archetype": "Breach cutter", "targeting_mode": "FRONTAL_CLEAVE", "base_reach_m": 1.19,
+        "archetype": "Breach cutter", "targeting_mode": "FRONTAL_CLEAVE", "base_reach_m": 1.3184,
         "base_damage": 132, "base_swings_per_second": 0.82,
         "element_policy": {"mode": "OPTIONAL", "allowed": ["Explosive"]}, "signature_title": "Detonator",
     },
@@ -514,7 +572,7 @@ def apply_final_revisions(part_id: str, geo: Geo, bifacial: bool) -> tuple[list[
                 if special_guard:
                     vert[1] += CLEAVE_GUARD_PLATE_SHIFT
                 if is_blade:
-                    vert[1] *= BLADE_CORE_DEPTH_MULTIPLIER
+                    vert[1] *= BLADE_CORE_DEPTH_MULTIPLIER * BLADE_SPINE_SCALE
                     if is_receiver:
                         vert[0] += ELEMENT_RECEIVER_X_SHIFT
             face = Face(tuple((float(x), float(y), float(z)) for x, y, z in verts), geo.tags[face_id])
@@ -575,7 +633,9 @@ def build_parts(part_ids: Iterable[str] | None = None) -> dict[str, Part]:
         faces, shift = apply_final_revisions(part_id, geo, bifacial)
         notes: dict[str, Any] = {}
         if part_id.startswith("blade_"):
-            thickness = BLADE_THICKNESS_M[maker]
+            # Effective thickness after the R4 halving and the R7 spine pass;
+            # the socket gaps below must follow it or accessories float.
+            thickness = BLADE_THICKNESS_M[maker] * BLADE_SPINE_SCALE
             notes["core_thickness_m"] = thickness / 2.0
             notes["accessory_face_gap_m"] = thickness / 4.0 - ACCESSORY_FACE_CLIP_M
             notes["element_face_gap_m"] = ELEMENT_FACE_GAP_M

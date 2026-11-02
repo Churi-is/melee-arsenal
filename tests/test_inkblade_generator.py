@@ -7,11 +7,13 @@ from pathlib import Path
 import struct
 import tempfile
 import unittest
+from unittest import mock
 
 from PIL import Image
 
 from tools.inkblade_gen import Pipeline, RunConfig
 from tools.inkblade_gen.config import ELEMENTS
+from tools.inkblade_gen import geometry
 from tools.inkblade_gen.geometry import build_parts
 from tools.inkblade_gen.stages import KitState, Stage, _run_linework, build_manifest, default_stages
 from tools.inkblade_gen.uv import unwrap_parts
@@ -445,8 +447,14 @@ class CombinationAssemblyTests(unittest.TestCase):
         parts = build_parts(cfg.parts)
         layouts = unwrap_parts(parts, cfg)
         blade = parts["blade_torgue"]
+        # The accessory gap follows the r7 slimmer spine (BLADE_SPINE_SCALE).
+        accessory_gap = (
+            geometry.BLADE_THICKNESS_M["Torgue"] * geometry.BLADE_SPINE_SCALE / 4
+            - geometry.ACCESSORY_FACE_CLIP_M
+        )
         for part_id, key, expected in (
-            ("accessory_reinforced_heavy_spine", "accessory_face_gap_m", 0.0401667),
+            ("accessory_reinforced_heavy_spine", "accessory_face_gap_m",
+             parts["accessory_reinforced_heavy_spine"].fit_inner_shift_m + accessory_gap),
             ("element_explosive", "element_face_gap_m", 0.04675),
         ):
             part = parts[part_id]
@@ -619,6 +627,109 @@ class ManifestBuilderTests(unittest.TestCase):
         self.assertEqual(list(manifest["parts"]), ["element_fire"])
         self.assertEqual(manifest["parts"]["element_fire"]["slot"], "ElementalPartDefinition")
         self.assertTrue(manifest["parts"]["element_fire"]["bifacial_fit"])
+
+
+class R7BladeSilhouetteTests(unittest.TestCase):
+    """The r7 model pass: longer, slimmer blades and a real Jakobs sabre."""
+
+    R3_TIP_Z = {"Hyperion": 1.45, "Bandit": 1.25, "Jakobs": 1.39, "Maliwan": 1.38, "Torgue": 1.19}
+
+    @staticmethod
+    def _bbox(part, axis: int) -> tuple[float, float]:
+        values = [vertex[axis] for face in part.faces for vertex in face.verts]
+        return min(values), max(values)
+
+    def test_every_blade_is_longer_and_the_manifest_reach_matches_the_mesh(self) -> None:
+        parts = build_parts()
+        for maker, r3_tip in self.R3_TIP_Z.items():
+            with self.subTest(maker=maker):
+                part = parts[f"blade_{maker.lower()}"]
+                tip = max(vertex[2] for face in part.faces for vertex in face.verts)
+                self.assertGreater(tip, r3_tip * 1.05, "blade did not get longer")
+                self.assertAlmostEqual(tip, part.meta["base_reach_m"], places=4)
+
+    def test_spine_got_thinner_without_changing_the_face_width(self) -> None:
+        """Only the Y (edge-on spine) shrinks; the X silhouette must be untouched."""
+        parts = build_parts()
+        with mock.patch.object(geometry, "BLADE_SPINE_SCALE", 1.0):
+            baseline = build_parts()
+        for maker in geometry.BLADES:
+            with self.subTest(maker=maker):
+                part_id = f"blade_{maker.lower()}"
+                thin = max(abs(value) for value in self._bbox(parts[part_id], 1))
+                thick = max(abs(value) for value in self._bbox(baseline[part_id], 1))
+                self.assertAlmostEqual(thin, thick * geometry.BLADE_SPINE_SCALE, places=6)
+                self.assertEqual(self._bbox(parts[part_id], 0), self._bbox(baseline[part_id], 0))
+                # Socket gaps follow the thinner skin so accessories stay attached.
+                core = parts[part_id].notes["core_thickness_m"]
+                self.assertAlmostEqual(core, geometry.BLADE_THICKNESS_M[maker] * geometry.BLADE_SPINE_SCALE / 2)
+                self.assertAlmostEqual(
+                    parts[part_id].notes["accessory_face_gap_m"],
+                    core / 2 - geometry.ACCESSORY_FACE_CLIP_M,
+                )
+
+    def test_jakobs_is_a_forward_swept_sabre_not_a_recurved_hook(self) -> None:
+        geo = geometry._blade("Jakobs")
+        main_profile = next(component for component in geo.components if component.kind == "profile")
+        pts = [tuple(point) for point in main_profile.args[0]]
+        tip = max(pts, key=lambda point: point[1])
+        self.assertLessEqual(max(x for x, _ in pts), 0.25, "blade still hooks out sideways")
+        self.assertGreater(tip[0], 0.15, "the point must sit ahead of the hilt axis")
+        self.assertGreater(tip[1], 1.5, "sabre should be a long blade")
+        # The spine sweeps forward smoothly: no concave notch / backwards kink.
+        spine = [pts[0]] + list(reversed(pts[7:])) + [tip]
+        self.assertTrue(
+            all(a[0] < b[0] and a[1] < b[1] for a, b in zip(spine, spine[1:])),
+            "spine has a notch or a backwards curve",
+        )
+
+
+class FlaredCleaveGuardTests(unittest.TestCase):
+    """The yellow end caps must be seated in the plate, not floating in front of it."""
+
+    @staticmethod
+    def _inside(polygon, x: float, z: float) -> bool:
+        inside = False
+        for index, (x1, z1) in enumerate(polygon):
+            x2, z2 = polygon[(index + 1) % len(polygon)]
+            if (z1 > z) != (z2 > z) and x < x1 + (z - z1) * (x2 - x1) / (z2 - z1):
+                inside = not inside
+        return inside
+
+    def test_end_caps_intersect_the_plate(self) -> None:
+        geo = geometry._accessory("flared_cleave_guard")
+        plate = next(component for component in geo.components if component.kind == "profile")
+        plate_pts = plate.args[0]
+        plate_front_y = plate.args[2] - plate.args[1] / 2 + geometry.CLEAVE_GUARD_PLATE_SHIFT
+        caps = [
+            component for component in geo.components
+            if component.kind == "box" and abs(abs(component.args[0][0]) - 0.27) < 1e-9
+        ]
+        self.assertEqual(len(caps), 2)
+        for cap in caps:
+            with self.subTest(cap=cap.args[0]):
+                (cx, cy, cz), (_, sy, _) = cap.args[0], cap.args[1]
+                self.assertLess(cy - sy / 2, plate_front_y)
+                self.assertGreater(cy + sy / 2, plate_front_y, "cap floats clear of the plate")
+                self.assertTrue(self._inside(plate_pts, cx, cz), "cap is not over the wing")
+
+
+class StageSourceFingerprintTests(unittest.TestCase):
+    """A stage's real source files belong in its cache fingerprint."""
+
+    def test_geometry_stage_declares_its_module(self) -> None:
+        stage = next(stage for stage in default_stages() if stage.name == "geometry")
+        self.assertIn("geometry.py", [str(source) for source in stage.sources])
+
+    def test_editing_a_source_file_invalidates_the_fingerprint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "geometry.py"
+            source.write_text("RULE = 1\n")
+            stage = Stage("probe", "Probe", lambda state: None, sources=(source,))
+            cfg = RunConfig()
+            first = stage.fingerprint(cfg, "")
+            source.write_text("RULE = 2\n")
+            self.assertNotEqual(first, stage.fingerprint(cfg, ""))
 
 
 if __name__ == "__main__":  # pragma: no cover
