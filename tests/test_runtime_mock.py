@@ -1934,41 +1934,46 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                     melee_arsenal.runtime.hook_display_recent_damage, melee_arsenal.runtime.ALL_HOOKS
                 )
 
-                # 4G. Camera shake must be soft & smoothly blended for fast blades (no more jerks)
-                world.camera_anim_calls.clear()
-                world.pawn.Weapon = sabre
-                combat._LAST_SWING_AT = 0.0
-                combat.on_weapon_consume_ammo_post(sabre, None, None, None)
-                combat.on_weapon_instant_fire_pre(sabre, None, None, None)
-                self.assertTrue(world.camera_anim_calls, "expected a CameraAnim on swing")
-                for path, cam_args in world.camera_anim_calls:
-                    self.assertIn("Melee", path)
-                    scale, rate, blend_in, blend_out = cam_args[0], cam_args[1], cam_args[2], cam_args[3]
-                    # A 2.35/s Sabre used to play 0.45 @ 1.35x with 40/120ms blends; it must now be
-                    # both quieter and eased in/out so repeated quick swings never jerk the camera.
-                    self.assertLessEqual(scale, 0.25, f"camera shake scale {scale} too strong")
-                    self.assertLessEqual(rate, 1.0, f"camera shake rate {rate} too fast")
-                    self.assertGreaterEqual(blend_in, 0.08)
-                    self.assertGreaterEqual(blend_out, 0.20)
-                # ...and the Mod Menu slider can dial it to zero (fully disable) or up for impact
+                # 4G. Camera shake must be a slow, eased camera bump for fast blades (no more flicks)
                 world.camera_anim_calls.clear()
                 world.played_canims.clear()
-                state.STATE.camera_shake_scale = 0.0
-                combat._LAST_SWING_AT = 0.0
-                combat.on_weapon_consume_ammo_post(sabre, None, None, None)
-                combat.on_weapon_instant_fire_pre(sabre, None, None, None)
-                self.assertEqual(world.camera_anim_calls, [], "0% camera shake must stay silent")
-                try:
-                    state.STATE.camera_shake_scale = 1.5
+                world.pawn.Weapon = sabre
+
+                def _swing_shake() -> list:
                     world.camera_anim_calls.clear()
                     combat._LAST_SWING_AT = 0.0
                     combat.on_weapon_consume_ammo_post(sabre, None, None, None)
                     combat.on_weapon_instant_fire_pre(sabre, None, None, None)
-                    boosted = [c[1][0] for c in world.camera_anim_calls]
-                    self.assertTrue(boosted)
-                    self.assertTrue(all(0.0 < b <= 0.55 for b in boosted), boosted)
-                finally:
-                    state.STATE.camera_shake_scale = 1.0
+                    return world.camera_anim_calls
+
+                calls = _swing_shake()
+                self.assertTrue(calls, "expected a CameraAnim on swing")
+                for path, cam_args in calls:
+                    self.assertIn("Melee", path)
+                    scale, rate, blend_in, blend_out = cam_args[0], cam_args[1], cam_args[2], cam_args[3]
+                    # The opening motion must actually ramp in. 0.10s read as an instant flick while the
+                    # 0.24s fade-out looked smooth, i.e. it eased out but never in.
+                    self.assertGreaterEqual(blend_in, 0.25, f"blend-in {blend_in}s is too abrupt")
+                    self.assertGreaterEqual(blend_out, blend_in * 0.9, "fade-out must match the ease-in")
+                    # Playback below 1.0x stretches the anim's own opening spike so it cannot flick
+                    self.assertLessEqual(rate, 0.70, f"camera shake rate {rate} is too fast")
+                    self.assertLessEqual(scale, 0.05, f"camera shake scale {scale} too strong")
+                default_scale = calls[0][1][0]
+
+                # The slider is rescaled: the 50% default is exactly what the old curve's 10% felt like,
+                # 100% is twice that, and 150% is three times it.
+                self.assertAlmostEqual(combat.CAMERA_SHAKE_SLIDER_GAIN, 0.2)
+                self.assertAlmostEqual(state.STATE.camera_shake_scale, 0.5)
+                state.STATE.camera_shake_scale = 1.0
+                louder = _swing_shake()[0][1][0]
+                self.assertAlmostEqual(louder, default_scale * 2.0)
+                state.STATE.camera_shake_scale = 1.5
+                boosted = _swing_shake()[0][1][0]
+                self.assertAlmostEqual(boosted, default_scale * 3.0)
+                # 0% is a true off switch (no CameraAnim call at all)
+                state.STATE.camera_shake_scale = 0.0
+                self.assertEqual(_swing_shake(), [], "0% camera shake must stay silent")
+                state.STATE.camera_shake_scale = 0.5
                 world.camera_anim_calls.clear()
                 world.played_canims.clear()
 

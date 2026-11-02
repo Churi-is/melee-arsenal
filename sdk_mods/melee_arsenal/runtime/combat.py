@@ -109,13 +109,23 @@ AK_HEAVY_IMPACT = "Ake_Wep_Melee.Ak_Play_wep_melee_Merc_impact"
 BLADED_MELEE_SEQ_LENGTH = 0.6333
 SINGLE_TARGET_ASSIST_HALF_DEG = 22.5  # Matches Gearbox `BehaviorData_PlayerMeleeAttackWithBladedWeapon` (45° cone)
 
-# CameraAnim tuning. The previous values (scale 0.45-0.90 at rate 0.95-1.35, 40-120ms blends) made
-# fast blades read as a hard camera "jerk" every swing. Scales are cut roughly in half, rates are
-# brought close to 1.0x, and blend in/out windows are widened so each shake eases in instead of snapping.
-CAMERA_SHAKE_BLEND_IN_SEC = 0.10
-CAMERA_SHAKE_BLEND_OUT_SEC = 0.24
+# CameraAnim tuning. The old values (scale 0.45-0.90 at rate 0.95-1.35, 40-120ms blends) made fast
+# blades read as a hard camera "flick" every swing: a ~100ms ramp read as an instant jump while the
+# 240ms fade-out looked smooth, i.e. it eased out but not in. Playback is now slowed well below 1.0x
+# (the whole motion, including its opening spike, is stretched), the blend-in window is long enough to
+# actually ease (~0.30s == a visible ramp at 60fps), and the fade-out matches it.
+CAMERA_SHAKE_BLEND_IN_SEC = 0.30
+CAMERA_SHAKE_BLEND_OUT_SEC = 0.32
+CAMERA_SHAKE_RATE_HEAVY = 0.65
+CAMERA_SHAKE_RATE_CLEAVE = 0.68
+CAMERA_SHAKE_RATE_SINGLE = 0.70
 CAMERA_SHAKE_CADENCE_REFERENCE = 1.45  # swings/sec at which a shake plays at full strength
 CAMERA_SHAKE_CADENCE_FLOOR = 0.45      # never damp a shake below this fraction of its scale
+
+# `MODS -> Swing Camera Shake (%)` is a feel dial, not a raw multiplier: the amplitudes authored below
+# are the *loud* reference, and the slider is rescaled by this gain so the setting players preferred
+# under the old curve (10%) is exactly what 50% means now — 100% is 2x that, 150% is 3x.
+CAMERA_SHAKE_SLIDER_GAIN = 0.20
 
 # `FPlayerRecentDamageEventData.DamageEventFlags` bits (see `WillowDamageTypeDefinition`):
 #   bit 0 = critical hit, bit 1 = healing, bit 2 = resisted
@@ -832,28 +842,29 @@ def _trigger_first_person_blade_swing(
             sm_info.style = card.manufacturer.value
             sm_info.swing_sign *= -1
 
-    # 3. Manufacturer-tuned CameraAnim impact feel — soft on purpose.
-    #    A 2.35 swings/sec Sabre re-triggers this every ~0.42s, so the old 0.45/0.90 amplitude at
-    #    1.35x rate stacked into a jarring camera jerk. Amplitudes are roughly halved, playback is a
-    #    touch slower (0.80-0.90x), blend windows are widened, and cadence damping scales the shake
-    #    down as swing speed rises. `MODS -> Swing Camera Shake (%)` scales the result from 0-150%.
+    # 3. Manufacturer-tuned CameraAnim impact feel — soft, slow and eased on purpose.
+    #    A 2.35 swings/sec Sabre re-triggers this every ~0.42s, so a snappy shake stacked into a
+    #    jarring camera flick. Playback runs at 0.60-0.68x (slower opening motion), the blend-in
+    #    window is long enough to read as a ramp instead of a jump, and cadence damping scales the
+    #    shake down as swing speed rises. `MODS -> Swing Camera Shake (%)` (rescaled by
+    #    `CAMERA_SHAKE_SLIDER_GAIN`) is the final taste dial.
     if pc is not None:
         if card.manufacturer == Manufacturer.TORGUE:
             canim = _CACHED_CANIMS.get(CANIM_HEAVY_SLAM)
-            scale, rate = 0.50, 0.80
+            scale, rate = 0.50, CAMERA_SHAKE_RATE_HEAVY
         elif card.targeting_mode == TargetingMode.FRONTAL_CLEAVE:
             canim = _CACHED_CANIMS.get(CANIM_MEDIUM_CLEAVE)
-            scale, rate = 0.30, 0.85
+            scale, rate = 0.30, CAMERA_SHAKE_RATE_CLEAVE
         else:
             canim = _CACHED_CANIMS.get(CANIM_LIGHT_SLASH)
-            scale, rate = 0.18, 0.90
+            scale, rate = 0.18, CAMERA_SHAKE_RATE_SINGLE
 
         cadence_damping = min(
             1.0,
             max(CAMERA_SHAKE_CADENCE_FLOOR, CAMERA_SHAKE_CADENCE_REFERENCE / eff_speed),
         )
-        shake_scale = float(getattr(STATE, "camera_shake_scale", 1.0) or 0.0)
-        scale *= cadence_damping * shake_scale
+        shake_scale = float(getattr(STATE, "camera_shake_scale", 0.5) or 0.0)
+        scale *= cadence_damping * shake_scale * CAMERA_SHAKE_SLIDER_GAIN
 
         if canim is not None and scale > 0.001:
             try:

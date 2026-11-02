@@ -165,14 +165,14 @@ opt_slash_scale = SliderOption(
 
 opt_camera_shake = SliderOption(
     "Swing Camera Shake (%)",
-    100,
+    50,
     0,
     150,
     10,
     True,
     description=(
-        "Strength of the camera shake layered on each blade swing. 0% disables it entirely; "
-        "100% is the default soft, eased shake; up to 150% for more impact."
+        "Strength of the slow, eased camera bump layered on each blade swing (0% disables it "
+        "entirely). 50% matches the old soft curve's 10% feel; up to 150% for a heavier thump."
     ),
     on_change_anytime=_on_camera_shake_changed,
 )
@@ -638,7 +638,7 @@ def build_runtime_mod(version: str, author: str) -> Any:
     STATE.world_drops_enabled = bool(getattr(opt_world_drops, "value", True))
     STATE.world_drop_weight = float(getattr(opt_drop_weight, "value", 100.0))
     STATE.slash_motion_scale = float(getattr(opt_slash_scale, "value", 100)) / 100.0
-    STATE.camera_shake_scale = float(getattr(opt_camera_shake, "value", 100)) / 100.0
+    STATE.camera_shake_scale = float(getattr(opt_camera_shake, "value", 50)) / 100.0
     STATE.debug_attack_log = bool(getattr(opt_debug_log, "value", False))
     STATE.damage_reduction_enabled = bool(getattr(opt_damage_reduction, "value", True))
     log_info(f"Melee Arsenal v{version} loaded and armed.")
