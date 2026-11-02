@@ -668,20 +668,38 @@ class R7BladeSilhouetteTests(unittest.TestCase):
                     core / 2 - geometry.ACCESSORY_FACE_CLIP_M,
                 )
 
-    def test_jakobs_is_a_forward_swept_sabre_not_a_recurved_hook(self) -> None:
+    @staticmethod
+    def _span_at(pts, z: float) -> tuple[float, float]:
+        """Left/right silhouette x at a given (stretched) z."""
+        crossings: list[float] = []
+        for (x1, z1), (x2, z2) in zip(pts, pts[1:] + pts[:1]):
+            if (z1 <= z <= z2) or (z2 <= z <= z1):
+                if z1 != z2:
+                    crossings.append(x1 + (z - z1) / (z2 - z1) * (x2 - x1))
+        return min(crossings), max(crossings)
+
+    def test_jakobs_stays_straight_and_full_width_until_the_very_end(self) -> None:
+        """Sabre silhouette: straight out of the hilt, then a subtle curve + small tip taper."""
         geo = geometry._blade("Jakobs")
         main_profile = next(component for component in geo.components if component.kind == "profile")
         pts = [tuple(point) for point in main_profile.args[0]]
         tip = max(pts, key=lambda point: point[1])
         self.assertLessEqual(max(x for x, _ in pts), 0.25, "blade still hooks out sideways")
-        self.assertGreater(tip[0], 0.15, "the point must sit ahead of the hilt axis")
-        self.assertGreater(tip[1], 1.5, "sabre should be a long blade")
-        # The spine sweeps forward smoothly: no concave notch / backwards kink.
-        spine = [pts[0]] + list(reversed(pts[7:])) + [tip]
-        self.assertTrue(
-            all(a[0] < b[0] and a[1] < b[1] for a, b in zip(spine, spine[1:])),
-            "spine has a notch or a backwards curve",
-        )
+        self.assertTrue(0.05 < tip[0] < 0.20, "only a subtle late lean, not a recurved hook")
+        self.assertGreater(tip[1], 1.5, "keep the longer blade length")
+
+        widths, centres = [], []
+        for pre_z in (0.30, 0.55, 0.80, 0.92, 1.10, 1.16):
+            left, right = self._span_at(pts, geometry._blade_z(pre_z))
+            widths.append(right - left)
+            centres.append((right + left) / 2)
+        self.assertLess(max(widths) / min(widths), 1.08, "blade tapers too much / too early")
+        self.assertLess(max(centres) - min(centres), 0.02, "blade starts curving too soon")
+
+        late_left, late_right = self._span_at(pts, geometry._blade_z(1.16))
+        self.assertGreaterEqual(late_right - late_left, 0.90 * widths[0], "taper must start at the very end")
+        tip_left, tip_right = self._span_at(pts, geometry._blade_z(1.38))
+        self.assertLess(tip_right - tip_left, 0.50 * widths[0], "small clipped point at the tip")
 
 
 class FlaredCleaveGuardTests(unittest.TestCase):

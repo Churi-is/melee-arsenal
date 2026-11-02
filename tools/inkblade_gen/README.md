@@ -81,8 +81,11 @@ as it should.
 - `BLADE_LENGTH_SCALE` stretches the blade above `BLADE_LENGTH_PIVOT_Z`. Guards, sockets and the
   element receiver keep their positions, and `BLADES[*].base_reach_m` stays equal to the exported
   tip height.
-- Jakobs was rebuilt as a frontier sabre: a slender, gently forward-swept blade with a smooth spine
-  and a tapered thrusting point, replacing the old recurved hook. Its swept quillons are unchanged.
+- Jakobs was rebuilt as a frontier sabre: straight and full-width out of the hilt, a very subtle
+  curve back near the end and a small clipped point only in the last stretch (the cutting edge
+  sweeps back to meet the spine line). Earlier passes tapered from the ricasso and curved too soon;
+  the original shipped mesh was a recurved hook. Its swept quillons are unchanged. Blade length is
+  unchanged by this revision.
 - `accessory_flared_cleave_guard`'s yellow end caps are seated into the plate: the R4
   `CLEAVE_GUARD_PLATE_SHIFT` moved the plate back but left the caps at their old depth, so they
   floated clear of the wing skin.

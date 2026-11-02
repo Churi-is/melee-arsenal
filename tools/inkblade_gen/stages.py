@@ -460,7 +460,7 @@ def build_manifest(state: KitState) -> dict[str, Any]:
             "blade_core_depth_multiplier": BLADE_CORE_DEPTH_MULTIPLIER,
             "blade_spine_scale": BLADE_SPINE_SCALE,
             "blade_length_scale": BLADE_LENGTH_SCALE,
-            "jakobs_blade": "frontier sabre: forward-swept, smooth spine, tapered thrusting point",
+            "jakobs_blade": "frontier sabre: straight full-width run, subtle late curve, small clipped tip taper",
             "flared_cleave_guard": "end caps seated into the continuous plate",
             "accessory_clip_m": ACCESSORY_FACE_CLIP_M,
             "element_center_x_m": round(ELEMENT_RECEIVER_X + ELEMENT_RECEIVER_X_SHIFT, 6),

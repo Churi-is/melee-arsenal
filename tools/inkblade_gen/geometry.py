@@ -19,7 +19,9 @@ The R4 revision rules that used to live in `tools/r4_builder.py` are applied her
 The R7 silhouette pass lives here too: `BLADE_SPINE_SCALE` slims every blade's
 spine (edge-on Y thickness, not its face width), `BLADE_LENGTH_SCALE` lengthens
 the blade above the hilt without moving sockets, Jakobs is rebuilt as a proper
-frontier sabre, and the Flared Cleave Guard's end caps are seated into the plate.
+frontier sabre (straight and full-width out of the hilt, subtle late curve,
+small clipped point), and the Flared Cleave Guard's end caps are seated into
+the plate.
 
 Coordinates here are Blender working space (metres, `+Z` blade tip, `-Y` display/front face);
 `glb.py` performs the glTF conversion (`x, z, -y`) at export time.
@@ -295,23 +297,23 @@ def _blade(maker: str) -> Geo:
             g.cyl((x, -0.09, _blade_z(z)), 0.036, 0.013, "dark", axis="y")
         g.box((0.02, 0, 0.0), (0.45, 0.2, 0.09), "paint")
     elif maker == "Jakobs":
-        # Frontier sabre: a long, slender, gently forward-curved blade with a
-        # smooth spine and a tapered thrusting point.  The old silhouette hooked
-        # backwards to x=0.33 with a concave notch in the spine, which read as a
-        # recurved/kukri shape instead of a sabre.
+        # Frontier sabre.  Reference silhouette: essentially straight and
+        # full-width out of the hilt, a very subtle curve, then a *small* taper
+        # only at the very end where the cutting edge sweeps back into a
+        # clipped point on the spine line.  Earlier passes tapered from the
+        # ricasso and started curving immediately, which read as a recurve.
         pts = [
-            (-0.080, 0.13), (0.080, 0.13),          # ricasso, centred on the hilt
-            (0.090, 0.42), (0.115, 0.72), (0.145, 1.00), (0.175, 1.22),  # convex cutting edge
-            (0.200, 1.40),                          # thrusting point, ahead of the hilt axis
-            (0.100, 1.22),                          # shoulder of the tapered point
-            (0.040, 1.00), (-0.010, 0.72), (-0.055, 0.42),                # gently curved spine
+            (-0.085, 0.13), (0.085, 0.13),          # ricasso, centred on the hilt
+            (0.088, 0.55), (0.092, 0.92), (0.098, 1.16), (0.108, 1.34),  # straight spine, tiny late drift
+            (0.115, 1.40),                          # clipped point, on the spine line
+            (-0.025, 1.30),                         # cutting edge sweeping back, only at the very end
+            (-0.084, 1.14), (-0.090, 0.80), (-0.088, 0.55),                # straight, full-width run
         ]
         g.profile(_blade_pts(pts), thick, sharp=True)
-        # Inlaid fuller follows the curve and stops short of the taper.
+        # Nearly straight inlaid fuller; it stops before the tip taper.
         g.profile(
-            _blade_pts([(-0.030, 0.20), (0.005, 0.22), (0.035, 0.50), (0.065, 0.78),
-                        (0.095, 1.02), (0.120, 1.16), (0.090, 1.16), (0.060, 1.02),
-                        (0.030, 0.78), (0.000, 0.50)]),
+            _blade_pts([(-0.020, 0.20), (0.030, 0.22), (0.032, 0.55), (0.036, 0.85),
+                        (0.040, 1.06), (-0.010, 1.06), (-0.014, 0.85), (-0.018, 0.55)]),
             0.012, -0.041, "trim", 0.003,
         )
         # Swept quillons are hilt geometry: they stay at their original height.
