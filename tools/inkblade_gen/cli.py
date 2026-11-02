@@ -12,11 +12,11 @@ Rerun only the ink + downstream stages after tweaking the linework::
 
 Swap in decal art without touching geometry/UV work::
 
-    python tools/generate_inkblade_kit.py --decals assets/inkblade_decals
+    python tools/generate_inkblade_kit.py --decals path/to/inkblade_decals
 
 Produce a zip the UE3 compiler can consume directly::
 
-    python tools/generate_inkblade_kit.py --out dist/Inkblade_Modular_Kit_r6.zip
+    python tools/generate_inkblade_kit.py --out build/dist/Inkblade_Modular_Kit_r6.zip
 """
 from __future__ import annotations
 
@@ -59,7 +59,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--linework-seed",
         default="",
         metavar="TEXT",
-        help="re-roll the ink layout (hatch corners, stroke breaks, scratches); empty = the shipped strokes",
+        help="re-roll the ink layout (hatch corners, stroke breaks, scratches); empty = default seed",
     )
     parser.add_argument(
         "--quantise",

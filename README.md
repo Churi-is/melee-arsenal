@@ -1,6 +1,6 @@
 # Melee Arsenal — Borderlands 2 PythonSDK Mod & UPK Pipeline
 
-**Melee Arsenal (`v0.3.5`)** adds a standalone **Melee Weapon** class to *Borderlands 2* (`pyunrealsdk` 1.10 / `unrealsdk` 3.2 / `mods_base` 1.12+) powered by a custom 22-part modular 3D **InkBlade Bold (`r5`)** Gestalt mesh and six 2048×2048 elemental texture atlases compiled via a pure-Python Unreal Engine 3 `.upk` pipeline.
+**Melee Arsenal (`v0.3.5`)** adds a standalone **Melee Weapon** class to *Borderlands 2* (`pyunrealsdk` 1.10 / `unrealsdk` 3.2 / `mods_base` 1.12+) powered by a custom 22-part modular 3D **InkBlade (`r6`)** Gestalt mesh and six 2048×2048 elemental texture atlases compiled via a pure-Python Unreal Engine 3 `.upk` pipeline.
 
 Primary Fire swings your equipped Melee Weapon (precision single-target strikes or frontal cleave arcs) scaling with gun-level base damage, weakspot crits, elemental DoT/splash, **player Melee Damage bonuses**, and **Roid shield buffs**, while `[V]` remains your vanilla character melee. **Right Mouse Button is deliberately inert** on Melee Weapons in `v0.3.5` (no ADS zoom); the hook is kept as a stub for possible future secondary attacks.
 
@@ -56,7 +56,7 @@ While a Melee Weapon is your held `Pawn.Weapon`, incoming damage on `WillowGame.
 #    Add --renders for Blender-free preview PNGs in build/inkblade_renders
 ./melee generate --renders
 
-# 4. Compile ./assets/inkblade_bold_kit -> CookedPCConsole/*.upk + manifest JSON
+# 4. Compile the kit -> build/ UPKs + manifest (generates the kit if absent)
 ./melee build
 
 # 5. Run syntax verification & full unit test suite
@@ -74,17 +74,17 @@ While a Melee Weapon is your held `Pawn.Weapon`, incoming damage on `WillowGame.
 | Command | Description |
 | :--- | :--- |
 | `./melee setup` | Create `.venv/` and install `Pillow` for UPK compilation |
-| `./melee build [--kit <path>]` | Compile modular kit (default `./assets/inkblade_bold_kit`) into `WillowGame/CookedPCConsole/MeleeArsenal{Meshes,Textures}.upk`, update `inkblade_compiled_manifest.json`, and sync `sdk_mods/melee_arsenal/upk/` |
+| `./melee build [--kit <path>]` | Compile the kit (automatically generating `build/inkblade_kit` if missing) into `build/WillowGame/CookedPCConsole/` and `build/inkblade_compiled_manifest.json` |
 | `./melee generate [options]` | Regenerate the Inkblade kit through the staged pipeline (`geometry -> uv -> flat -> mottle -> linework -> decals -> textures -> export -> render`) into `build/inkblade_kit`, with a per-stage cache in `build/inkblade_stages`. Supports `--list-stages`, `--only`, `--from`, `--force`, `--decals`, `--parts`, `--out <dir\|zip>`, and `--renders [dir]` for preview PNGs + overview sheets in `build/inkblade_renders` |
 | `./melee test [args]` | Byte-compile all modules and run `unittest` (e.g. `./melee test -q`, `./melee test -k world_drop`) |
 | `./melee preview` | Roll sample Level 50 Melee Arsenal weapons and print item cards, level-scaled Damage Reduction, and Roid/Crit/UVHM hit math |
-| `./melee package [--build]` | Build `dist/melee_arsenal.zip`, `dist/melee_arsenal-v0.3.5.zip`, and `dist/source.zip` |
+| `./melee package [--build]` | Build `build/dist/melee_arsenal.zip`, `build/dist/melee_arsenal-v0.3.5.zip`, and `build/dist/source.zip`; builds missing inputs automatically |
 | `./melee install [--bl2-dir <dir>] [--probe]` | Stage `.upk` packages and sync `sdk_mods/melee_arsenal/` into Borderlands 2 (preserving `_melee_arsenal_saves` and `melee_arsenal.log`) |
 | `./melee dev` | Fast iteration loop: run quiet tests, then install to Borderlands 2 |
 | `./melee status` | Show mod version, Python/Pillow state, kit & UPK sizes, BL2 sync status, and sidecar save count |
 | `./melee logs [-f] [-n <lines>]` | View or tail live `<BL2>/sdk_mods/melee_arsenal/melee_arsenal.log` |
 | `./melee uninstall [--purge-saves]` | Remove mod & UPKs from Borderlands 2 (keeps `_melee_arsenal_saves` unless `--purge-saves` is passed) |
-| `./melee clean` | Remove `__pycache__`, `.pyc`, probe scratch reports, and `dist/` |
+| `./melee clean` | Remove `__pycache__`, `.pyc`, probe scratch reports, and `build/` |
 | `./melee all` | Run `build -> test -> package -> install` end-to-end |
 
 ---
@@ -94,16 +94,12 @@ While a Melee Weapon is your held `Pawn.Weapon`, incoming damage on `WillowGame.
 ```text
 .
 ├── melee                           # Project build, test, package & BL2 deployment CLI
-├── assets/
-│   └── inkblade_bold_kit/          # Modular 3D GLBs, bold-inked textures, and socket_manifest.json
-├── WillowGame/
-│   └── CookedPCConsole/            # Cooked UE3 packages (MeleeArsenalMeshes.upk & MeleeArsenalTextures.upk)
+├── build/                          # Ignored generated kit, cooked UPKs, manifest and release archives
 ├── sdk_mods/
 │   ├── melee_arsenal/              # Main Borderlands 2 PythonSDK mod
 │   │   ├── core/                   # Pure-Python catalog, schemas, card/hit math, targeting, persistence
 │   │   ├── data/                   # Compiler-generated Gestalt fragment/bounds/atlas manifest JSON
-│   │   ├── runtime/                # Live UE3 definitions, Gestalt/MIC binding, combat, GFx cards, loot pools
-│   │   └── upk/                    # Bundled fallback MeleeArsenalMeshes.upk auto-stager
+│   │   └── runtime/                # Live UE3 definitions, Gestalt/MIC binding, combat, GFx cards, loot pools
 │   └── melee_arsenal_probe/        # Optional in-game UE3 diagnostics & Startup.upk donor extractor
 ├── tools/
 │   ├── generate_inkblade_kit.py    # Staged Inkblade kit generator CLI (pure Python + Pillow)

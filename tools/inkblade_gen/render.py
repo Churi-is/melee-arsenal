@@ -1,15 +1,13 @@
 """Offline preview renders: a small software rasteriser, so previews need no Blender.
 
-The shipped `r5` previews were made with `assets/inkblade_bold_kit/tools/render_previews.py` inside
-Blender (Cycles, orthographic camera, three area lights). That is not available in CI or in a
-Pillow-only environment, so this module renders the same views in pure Python:
+This module renders previews in pure Python without requiring Blender:
 
 * flat per-triangle lighting from a three-light rig (key / fill / bounce), two-sided normals,
 * back-face culled, z-buffered rasterisation with `ss`x supersampling for clean silhouettes,
 * the painted atlas is sampled per pixel, so the ink linework and hatching show up in every preview,
-* orthographic framing that fits each part to the frame, matching the shipped 720x720 tiles.
+* orthographic framing that fits each part to the frame, with 720x720 tiles by default.
 
-Output layout mirrors the shipped kit::
+Output layout::
 
     <out>/parts/<part_id>.png
     <out>/combinations/<recipe>.png
@@ -401,7 +399,7 @@ def contact_sheet(
     gutter: int = 18,
     label_height: int = 34,
 ) -> Image.Image:
-    """Compose labelled tiles on paper, with a title bar — the shipped overview-sheet look."""
+    """Compose labelled tiles on paper, with a title bar — an overview sheet."""
     margin = 28
     rows = max(1, math.ceil(len(tiles) / columns))
     cell_w = tile

@@ -6,7 +6,7 @@ The kit is produced by a stack of independent, individually cacheable stages (se
 2. `uv`        — shared-density face projection, padded island packing, template reuse
 3. `flat`      — flat palette colour per UV island (saved as PNG atlases)
 4. `mottle`    — paint wash, deposits, wear, chips
-5. `linework`  — the shipped kit's two ink passes, ported line for line (seedable)
+5. `linework`  — two seedable ink passes
 6. `decals`    — optional external decal art (the template for future art passes)
 7. `textures`  — padding fill inside each island rect, optional quantisation, final PNGs
 8. `export`    — `<part>.glb`, combinations, UV layout JSON and `socket_manifest.json`

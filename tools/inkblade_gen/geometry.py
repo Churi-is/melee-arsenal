@@ -4,6 +4,7 @@ The old pipeline built an R3 kit, zipped it, and then ran a second `r4_builder.p
 re-parsed `generate_blender.py` with `ast` to re-create the same meshes and apply its revision on
 top. That two-revision split is gone: `build_parts()` emits *final* geometry directly, so there is
 exactly one place that defines a part and no revision stage that has to re-derive R3.
+It matched the shipped kit as of r6; later changes are by design.
 
 The R4 revision rules that used to live in `tools/r4_builder.py` are applied here, in
 `apply_final_revisions()`:
@@ -27,7 +28,7 @@ from typing import Any, Iterable, Sequence
 Vec = tuple[float, float, float]
 
 # ---------------------------------------------------------------------------
-# Final-revision constants (R4 values, kept verbatim so the geometry matches the shipped kit)
+# Final-revision geometry constants
 # ---------------------------------------------------------------------------
 BLADE_CORE_DEPTH_MULTIPLIER: float = 0.5      # blade slot depth (was 1.0 in R3)
 BLADE_THICKNESS_M: dict[str, float] = {

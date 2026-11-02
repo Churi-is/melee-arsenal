@@ -1,8 +1,8 @@
 """Custom Inkblade 3D Gestalt mesh, bifacial socket-fitted parts, and unified element-atlas materials.
 
-Driven directly by `sdk_mods/melee_arsenal/data/inkblade_compiled_manifest.json` emitted by
-`tools/compile_inkblade_upk.py`, so re-running the compiler on any future `Inkblade_Modular_Kit`
-revision updates part bounds, socket offsets, face-gap twins, and atlases with zero code changes.
+Reads `data/inkblade_compiled_manifest.json` from the installed mod. The compiler writes the
+manifest under `build/`; packaging and installation place it alongside the matching UPKs,
+updating part bounds, socket offsets, face-gap twins, and atlases without code changes.
 """
 from __future__ import annotations
 

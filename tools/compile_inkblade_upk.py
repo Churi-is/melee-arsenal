@@ -28,12 +28,12 @@ def main() -> int:
     )
     parser.add_argument(
         "--out-cooked-dir",
-        default=str(REPO_ROOT / "WillowGame" / "CookedPCConsole"),
+        default=str(REPO_ROOT / "build" / "WillowGame" / "CookedPCConsole"),
         help="Output directory for MeleeArsenalMeshes.upk and MeleeArsenalTextures.upk",
     )
     parser.add_argument(
         "--out-manifest",
-        default=str(REPO_ROOT / "sdk_mods" / "melee_arsenal" / "data" / "inkblade_compiled_manifest.json"),
+        default=str(REPO_ROOT / "build" / "inkblade_compiled_manifest.json"),
         help="Output path for runtime Gestalt/material manifest JSON",
     )
     parser.add_argument("--atlas-size", type=int, default=2048, choices=(1024, 2048, 4096))
