@@ -76,7 +76,7 @@ from ..core.stats import (
 )
 from ..core.targeting import TargetCandidate, Vec3
 from .log import log_error, log_info
-from .resolver import get_local_player_controller, resolve_melee_weapon
+from .resolver import get_local_player_controller, resolve_melee_weapon, unwrap_weapon_object
 from .secondary import (
     begin_throw,
     handle_guard_incoming_damage,
@@ -204,6 +204,11 @@ _POSE_STARTED_AT: float = 0.0
 # guard can never leave a residue behind (repeated guards used to creep further and further up and
 # to the left because the restore target had been captured while a pose was already live).
 _POSE_REST: dict[str, Any] | None = None
+# The held blade itself: `WillowWeapon.Mesh` pivots at the hand, so tilting *it* angles the weapon
+# across the screen without sliding the hands around. (Rotating `Arms.SkeletalMesh` instead swings
+# the whole hand sideways, because that mesh pivots far behind the hands — which read in play as
+# "the hand moves toward the centre and left" rather than "the blade tilts".)
+_POSE_BLADE_REST: dict[str, Any] | None = None
 
 POSE_GUARD = "guard"
 POSE_THROWN = "thrown"
@@ -219,12 +224,19 @@ POSE_MAX_HOLD_SEC: float = 12.0
 # no translation, and the thrown pose is pure downward translation (no rotation at all), which can
 # always be restored exactly.
 _POSE_OFFSETS: dict[str, dict[str, float]] = {
-    # Positive pitch lifts the blade, negative yaw swings it inward toward the crosshair (the old
-    # signs leaned the sword away from the middle of the screen). No translation: the hands stay
-    # on screen.
-    POSE_GUARD: {"pitch": 1500.0, "yaw": -1200.0, "roll": -1000.0, "x": 0.0, "y": 0.0, "z": 0.0},
+    # The hands only *lift* a little (pitch, no yaw): the visible brace comes from the blade tilt
+    # below, so the guard no longer slides the hand sideways across the screen.
+    POSE_GUARD: {"pitch": 1500.0, "yaw": 0.0, "roll": 0.0, "x": 0.0, "y": 0.0, "z": 0.0},
     POSE_THROWN: {"pitch": 0.0, "yaw": 0.0, "roll": 0.0, "x": 0.0, "y": 4.0, "z": -75.0},
 }
+
+# Blade tilt applied to the *held weapon mesh* while guarding, in UE3 rotator units:
+#   pitch lifts the tip, yaw swings the point toward the middle of the screen, roll angles the
+#   blade's flat. ~14.3 / 8.2 / 6.6 degrees. `Guard Blade Tilt (%)` scales (and can mirror) all
+#   three, so a build where a sign reads backwards is one slider away from looking right.
+GUARD_BLADE_PITCH: float = 2600.0
+GUARD_BLADE_YAW: float = -1500.0
+GUARD_BLADE_ROLL: float = -1200.0
 
 _SHOT_SEQ: int = 0
 _HANDLED_SHOT_SEQ: int = 0
@@ -915,6 +927,68 @@ def _capture_arms_rest_transform(arms: Any, sm: Any) -> dict[str, Any] | None:
         return None
 
 
+def _held_weapon_mesh(pawn: Any) -> Any:
+    """The first-person `Mesh` component of the blade the player is holding (or None)."""
+    wpn = getattr(pawn, "Weapon", None) if pawn is not None else None
+    if wpn is None:
+        return None
+    try:
+        wpn = unwrap_weapon_object(wpn)
+    except Exception:
+        return None
+    mesh = getattr(wpn, "Mesh", None) if wpn is not None else None
+    if mesh is None or _is_dead(mesh) or not hasattr(mesh, "RotOrigin"):
+        return None
+    return mesh
+
+
+def _snapshot_blade(mesh: Any) -> dict[str, Any] | None:
+    """Read the held blade mesh's own `RotOrigin` (its pivot is at the hand, not behind it)."""
+    try:
+        ro = mesh.RotOrigin
+        return {
+            "mesh_ref": _wrap_weak(mesh),
+            "rot": (int(ro.Pitch), int(ro.Yaw), int(ro.Roll)),
+        }
+    except Exception:
+        return None
+
+
+def _write_blade_tilt(mesh: Any, tilt: float, bob: float) -> None:
+    """Tilt the held blade into the guard stance (relative to its own captured rest)."""
+    rest = _POSE_BLADE_REST
+    if mesh is None or rest is None:
+        return
+    if not _same_uobject(_deref_weak(rest.get("mesh_ref")), mesh):
+        return
+    try:
+        bp, by, br = rest["rot"]
+        ro = copy.copy(mesh.RotOrigin)
+        ro.Pitch = _rotator_add(bp, GUARD_BLADE_PITCH * tilt + 120.0 * bob)
+        ro.Yaw = _rotator_add(by, GUARD_BLADE_YAW * tilt)
+        ro.Roll = _rotator_add(br, GUARD_BLADE_ROLL * tilt + 80.0 * bob)
+        mesh.RotOrigin = ro
+    except Exception:
+        pass
+
+
+def _restore_blade() -> None:
+    """Put the held blade mesh back exactly where it was before the pose."""
+    rest = _POSE_BLADE_REST
+    if rest is None:
+        return
+    mesh = _deref_weak(rest.get("mesh_ref"))
+    if mesh is None:
+        return
+    try:
+        bp, by, br = rest["rot"]
+        ro = copy.copy(mesh.RotOrigin)
+        ro.Pitch, ro.Yaw, ro.Roll = bp, by, br
+        mesh.RotOrigin = ro
+    except Exception:
+        pass
+
+
 def _resolve_hands(pc: Any) -> tuple[Any, Any, Any] | None:
     """Resolve `(pawn, arms, skeletal_mesh)` for the local first-person hands."""
     pawn = getattr(pc, "Pawn", None) if pc is not None else None
@@ -951,7 +1025,7 @@ def apply_first_person_pose(pc: Any, kind: str) -> bool:
     fallback, which is verified to move the hands and the attached blade. Returns True when the
     pose is live.
     """
-    global _POSE_KIND, _POSE_STARTED_AT, _POSE_REST
+    global _POSE_KIND, _POSE_STARTED_AT, _POSE_REST, _POSE_BLADE_REST
     if kind not in _POSE_OFFSETS:
         return clear_first_person_pose(pc)
     hands = _resolve_hands(pc)
@@ -970,6 +1044,7 @@ def apply_first_person_pose(pc: Any, kind: str) -> bool:
     if snapshot is None:
         return False
     _POSE_REST = snapshot
+    _POSE_BLADE_REST = _snapshot_blade(_held_weapon_mesh(_pawn))
     _POSE_KIND = kind
     _POSE_STARTED_AT = time.monotonic()
     update_first_person_pose(pc)
@@ -1028,6 +1103,12 @@ def update_first_person_pose(pc: Any, now: float | None = None) -> None:
     except Exception:
         _write_rest_transforms()
         _POSE_KIND = ""
+    if _POSE_KIND == POSE_GUARD:
+        # The blade tilt is cosmetic and must never be able to tear down the pose.
+        try:
+            _write_blade_tilt(_held_weapon_mesh(_pawn), tilt, bob)
+        except Exception:
+            pass
 
 
 def reset_first_person_pose(reason: str = "") -> None:
@@ -1036,11 +1117,12 @@ def reset_first_person_pose(reason: str = "") -> None:
     This is the guard-release path: a hit can consume the brace without the engine ever reporting
     an RMB release, so the restore must never be conditional on the tracked pose kind matching.
     """
-    global _POSE_KIND, _POSE_REST
+    global _POSE_KIND, _POSE_REST, _POSE_BLADE_REST
     had = _POSE_KIND
     _POSE_KIND = ""
     _write_rest_transforms()
     _POSE_REST = None
+    _POSE_BLADE_REST = None
     if had:
         log_info(f"First-person pose force-restored ({had}{': ' + reason if reason else ''})")
 
@@ -1087,7 +1169,7 @@ def pose_held_seconds() -> float:
 
 def clear_first_person_pose(pc: Any = None, kind: str = "") -> bool:
     """Restore idle hands. Pass `kind` to only clear that specific pose."""
-    global _POSE_KIND, _POSE_REST
+    global _POSE_KIND, _POSE_REST, _POSE_BLADE_REST
     if not _POSE_KIND:
         return True
     if kind and _POSE_KIND != kind:
@@ -1096,12 +1178,14 @@ def clear_first_person_pose(pc: Any = None, kind: str = "") -> bool:
     _POSE_KIND = ""
     _write_rest_transforms()
     _POSE_REST = None
+    _POSE_BLADE_REST = None
     log_info(f"First-person pose cleared: {cleared}")
     return True
 
 
 def _write_rest_transforms() -> None:
     """Write every captured rest transform back (safe to call at any time)."""
+    _restore_blade()
     entries = list(_ARMS_REST_BASELINE.items())
     if _POSE_REST is not None:
         entries.append((-1, _POSE_REST))

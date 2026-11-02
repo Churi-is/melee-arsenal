@@ -56,6 +56,8 @@ from .secondary import (
     describe_secondary_state,
     disable_optional_hooks,
     enable_optional_hooks,
+    is_any_weapon_thrown,
+    is_guarding,
     on_melee_weapon_client_stop_zoom_pre,
     on_melee_weapon_stop_zoom_pre,
     reset_secondary_state,
@@ -85,7 +87,7 @@ from .ui_item_card import (
 
 _tick_counter: int = 0
 _map_restore_ready_at: float = 0.0
-_last_restored_pawn_id: int = 0
+_last_restored_pawn_key: str = ""
 _last_frame_tick_at: float = 0.0
 
 
@@ -245,7 +247,7 @@ def _run_frame_tick() -> None:
     and left the guard pose stuck. `WillowPlayerController:PlayerTick` is the engine function
     mods reliably hook, so the same body is driven from both, de-duplicated per frame.
     """
-    global _tick_counter, _map_restore_ready_at, _last_restored_pawn_id, _last_frame_tick_at
+    global _tick_counter, _map_restore_ready_at, _last_restored_pawn_key, _last_frame_tick_at
     now = time.monotonic()
     if now - _last_frame_tick_at < 0.002:
         return
@@ -299,15 +301,28 @@ def _run_frame_tick() -> None:
         if map_name in ("menumap", "loader", "exampleentry"):
             return
 
-        pid = id(pawn)
-        if pid != _last_restored_pawn_id:
+        # A live throw/guard must never be yanked out from under the player: resetting the
+        # secondary state mid-flight deletes the flying blade without a rebound.
+        if is_any_weapon_thrown() or is_guarding():
+            return
+
+        # Key the pawn by its *path name*, not `id()`: pyunrealsdk can hand back a fresh Python
+        # wrapper for the same UObject, and an id that churns re-ran the whole map-load restore
+        # (inventory re-grant + secondary reset) on a perfectly normal pawn.
+        try:
+            pawn_key = str(pawn._path_name())
+        except Exception:
+            pawn_key = ""
+        if not pawn_key:
+            pawn_key = f"id:{id(pawn)}"
+        if pawn_key != _last_restored_pawn_key:
             if _map_restore_ready_at == 0.0:
                 restore_all_arms_rest_transforms()
                 sync_loot_pools()
                 _map_restore_ready_at = now + 2.0
                 return
             if now >= _map_restore_ready_at:
-                _last_restored_pawn_id = pid
+                _last_restored_pawn_key = pawn_key
                 _map_restore_ready_at = 0.0
                 reset_secondary_state()
                 ensure_combat_resources_cached()

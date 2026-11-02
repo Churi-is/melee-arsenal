@@ -620,34 +620,26 @@ def tick_throw() -> None:
     secondary_vfx.update_thrown_blade(point)
     st.visual_updates += 1
 
-    # Past the planned arc the blade is over whatever is below it. A short probe decides whether it
-    # simply landed (normal ground) or is falling past a ledge, in which case the same parabola
-    # keeps being evaluated — that is the "thrown off a cliff" case.
-    if elapsed >= st.plan.flight_time_sec:
+    # Past the planned arc the blade is simply still falling: the arc is only a prediction for
+    # *flat* ground, so the flight continues (same parabola) and the per-frame trace below finds
+    # the real surface. Never snap the blade to a probed ground point here — that teleported it
+    # several metres straight down ("it stops in mid-air, then jumps to the ground and returns").
+    if elapsed >= st.plan.flight_time_sec and not st.arc_probe_logged:
+        st.arc_probe_logged = True
         below = (point[0], point[1], point[2] - THROW_FALL_PROBE_UU)
         ground, ground_xyz, _g_bone = combat._run_weapon_trace(wpn, st.vec_template, point, below)
-        if not st.arc_probe_logged:
-            st.arc_probe_logged = True
-            where = (
-                f"ground at z={ground_xyz[2]:.0f}"
-                if ground_xyz is not None
-                else "no ground found"
-            )
-            log_info(
-                f"Throw arc ended at ({point[0]:.0f}, {point[1]:.0f}, {point[2]:.0f}) — "
-                f"{where} within {THROW_FALL_PROBE_UU:.0f} uu below"
-                + ("; continuing to fall" if ground is None else "")
-            )
-        if ground is not None and not _is_ghost_hit(ground):
-            st.last_point = ground_xyz or point
-            victim = ground if combat._is_valid_melee_victim(shooter, ground) else None
-            if victim is None:
-                st.hit_actor_name = str(getattr(ground, "Name", "") or "ground")
-            _apply_throw_impact(st, victim, st.last_point)
-            return
-        if st.origin_xyz[2] - point[2] >= THROW_MAX_FALL_UU:
-            _begin_return(st, "fell out of the world")
-            return
+        where = (
+            f"ground at z={ground_xyz[2]:.0f}"
+            if ground_xyz is not None
+            else "no ground found"
+        )
+        log_info(
+            f"Throw arc ended at ({point[0]:.0f}, {point[1]:.0f}, {point[2]:.0f}) — "
+            f"{where} within {THROW_FALL_PROBE_UU:.0f} uu below; still flying until it hits"
+        )
+    if st.origin_xyz[2] - point[2] >= THROW_MAX_FALL_UU:
+        _begin_return(st, "fell out of the world")
+        return
 
     hit_actor, hit_xyz, _bone = combat._run_weapon_trace(wpn, st.vec_template, st.last_point, point)
 

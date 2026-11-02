@@ -1148,6 +1148,7 @@ class MockBL2World:
         self.pawn = types.SimpleNamespace(
             Name="WillowPlayerPawn_0",
             ObjectFlags=0,
+            _path_name=lambda: "MockWorld.WillowPlayerPawn_0",
             Location=self._vec(),
             Rotation=FakeWrappedStruct("Rotator", Pitch=0, Yaw=0, Roll=0),
             BaseEyeHeight=64.0,
@@ -1349,6 +1350,7 @@ class MockBL2World:
             SkeletalMesh=self.thrown_blade_source_mesh,
             Materials=[self.thrown_blade_source_material],
             Scale3D=self._vec(1.0, 1.0, 1.0),
+            RotOrigin=FakeWrappedStruct("Rotator", Pitch=0, Yaw=0, Roll=0),
             SetHiddenGame=lambda flag: mesh_state.__setitem__("hidden", bool(flag)),
             _state=mesh_state,
         )
@@ -2122,14 +2124,19 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 # The brace is VISIBLE: the first-person hands (and the blade attached to them)
                 # rotate into a guard posture instead of staying in the idle pose.
                 self.assertEqual(combat.active_first_person_pose(), combat.POSE_GUARD)
-                # A *small* tilt that lifts the blade and swings it INWARD toward the crosshair
-                # (the old signs leaned the sword away from the middle of the screen).
-                self.assertGreater(world.arms_skel_mesh.RotOrigin.Pitch, 1000)
-                self.assertLess(world.arms_skel_mesh.RotOrigin.Pitch, 3000)
-                self.assertLess(world.arms_skel_mesh.RotOrigin.Yaw, -16384)
-                self.assertGreater(world.arms_skel_mesh.RotOrigin.Yaw, -19000)
+                # The hands only lift; they must never slide sideways across the screen (that was
+                # the "it just moves the hand toward the centre and left" complaint).
+                self.assertGreater(world.arms_skel_mesh.RotOrigin.Pitch, 800)
+                self.assertLess(world.arms_skel_mesh.RotOrigin.Pitch, 2200)
+                self.assertEqual(world.arms_skel_mesh.RotOrigin.Yaw, -16384)
                 self.assertAlmostEqual(world.arms_skel_mesh.Origin.Z, 3.0, msg="guard must not translate the hands")
                 self.assertAlmostEqual(world.arms_skel_mesh.Origin.Y, -2.0)
+                # ...the visible BRACE is the held blade itself tilting: its mesh pivots at the
+                # hand, so the tip lifts and swings toward the crosshair while the hand stays put.
+                guard_blade_mesh = sabre.Mesh
+                self.assertGreater(guard_blade_mesh.RotOrigin.Pitch, 1000, "blade tip must lift")
+                self.assertLess(guard_blade_mesh.RotOrigin.Yaw, 0, "blade must point inward")
+                self.assertLess(guard_blade_mesh.RotOrigin.Roll, 0, "blade must angle its flat")
                 # Hold the guard past the parry window, then eat one hit: mitigated, then consumed.
                 secondary_attacks._GUARD.started_at -= 0.60
                 self.assertIs(
@@ -2148,6 +2155,10 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 )
                 self.assertFalse(secondary_attacks.is_guarding())
                 self.assertGreater(secondary_attacks.guard_cooldown_remaining(), 0.0)
+                # ...and the blade mesh is restored exactly when the brace is consumed by a hit.
+                self.assertEqual(guard_blade_mesh.RotOrigin.Pitch, 0)
+                self.assertEqual(guard_blade_mesh.RotOrigin.Yaw, 0)
+                self.assertEqual(guard_blade_mesh.RotOrigin.Roll, 0)
                 # Dropping the guard restores the idle hands exactly (no drifting offsets).
                 self.assertEqual(combat.active_first_person_pose(), "")
                 self.assertEqual(world.arms_skel_mesh.RotOrigin.Pitch, 0)
@@ -2524,6 +2535,34 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                     world.next_center_trace_override = None
                     secondary_attacks.reset_secondary_state()
 
+                # 4I-7. Reaching the end of the planned arc must NOT teleport the blade onto a
+                #       probed ground point (that read as "it stops in mid-air, then jumps to the
+                #       ground and comes back"): it keeps flying and lets the trace land it.
+                world.pawn.Weapon = cleaver
+                self.assertTrue(secondary_attacks.begin_throw(cleaver, bl_inst, bl_card))
+                saved_pawns_4i7 = world.world_info.PawnList
+                world.world_info.PawnList = None
+                try:
+                    st7 = secondary_attacks._THROW
+                    st7.started_at -= st7.plan.flight_time_sec + 0.01
+                    vis7 = world.thrown_blade_visuals[-1]
+                    world.next_center_trace_override = (
+                        world.wall_actor,
+                        world._vec(50.0, 0.0, -1053.0),
+                        "None",
+                    )
+                    secondary_attacks.tick_secondary_attacks()
+                    self.assertEqual(secondary_attacks._THROW.phase, "outbound")
+                    self.assertTrue(secondary_attacks._THROW.arc_probe_logged)
+                    self.assertGreater(
+                        vis7["location"][2], -500.0, "the blade must not snap down to the ground"
+                    )
+                    self.assertEqual(world.caused_damages, [])
+                finally:
+                    world.next_center_trace_override = None
+                    world.world_info.PawnList = saved_pawns_4i7
+                    secondary_attacks.reset_secondary_state()
+
                 # 4I-6. A real solid hit still ends the throw exactly where it lands.
                 world.pawn.Weapon = cleaver
                 self.assertTrue(secondary_attacks.begin_throw(cleaver, bl_inst, bl_card))
@@ -2626,7 +2665,7 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 self.assertIn(
                     secondary_attacks.on_melee_weapon_client_stop_zoom_pre, runtime_mod.ALL_HOOKS
                 )
-                runtime_mod._last_restored_pawn_id = id(world.pawn)
+                runtime_mod._last_restored_pawn_key = "mock.pawn"
                 runtime_mod._last_frame_tick_at = 0.0
                 ticks_before = runtime_mod._tick_counter
                 runtime_mod.hook_player_tick(None, None, None, None)
@@ -2634,6 +2673,41 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 # Both tick hooks firing in the same frame must only run the body once.
                 runtime_mod.hook_viewport_tick(None, None, None, None)
                 self.assertEqual(runtime_mod._tick_counter, ticks_before + 1)
+
+                # 4N. The map-restore pass keys the pawn by path name, not wrapper identity: an
+                #     `id()` that churns re-ran the whole restore (and reset the secondary state,
+                #     deleting an in-flight blade) about a second into a throw.
+                runtime_mod._last_restored_pawn_key = "MockWorld.WillowPlayerPawn_0"
+                runtime_mod._map_restore_ready_at = 0.0
+                runtime_mod._tick_counter = 119
+                runtime_mod._last_frame_tick_at = 0.0
+                runtime_mod.hook_player_tick(None, None, None, None)
+                self.assertEqual(
+                    runtime_mod._map_restore_ready_at, 0.0, "a stable pawn must not re-restore"
+                )
+
+                # A live throw must survive a map-restore pass. `id(pawn)` churns when
+                #     pyunrealsdk hands back a new wrapper for the same UObject, which used to
+                #     re-run the whole restore (and reset the secondary state, deleting the flying
+                #     blade) a second or so into a throw.
+                world.pawn.Weapon = cleaver
+                self.assertTrue(secondary_attacks.begin_throw(cleaver, bl_inst, bl_card))
+                try:
+                    runtime_mod._last_restored_pawn_key = "some.other.pawn"
+                    runtime_mod._map_restore_ready_at = 0.0
+                    runtime_mod._tick_counter = 59
+                    runtime_mod._last_frame_tick_at = 0.0
+                    runtime_mod.hook_player_tick(None, None, None, None)
+                    self.assertTrue(
+                        secondary_attacks.is_any_weapon_thrown(),
+                        "a map-restore pass must not delete a blade that is still in flight",
+                    )
+                    self.assertTrue(secondary_vfx.has_thrown_blade_visual())
+                finally:
+                    secondary_attacks.reset_secondary_state()
+                    runtime_mod._last_restored_pawn_key = "MockWorld.WillowPlayerPawn_0"
+                    runtime_mod._map_restore_ready_at = 0.0
+
 
                 # 4L. Self-healing: a finished throw/guard can never leave the hands moved or a
                 #     copy of the blade hanging in the air — even if a state ended abnormally.
@@ -2645,14 +2719,17 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 # 4L-1. `Guard Blade Tilt (%)` is the in-game escape hatch if the RotOrigin
                 #       sign convention reads backwards: -100% leans the blade the other way.
                 self.assertIn(runtime_mod.opt_guard_pose, runtime_mod.ALL_OPTIONS)
+                tilt_blade_mesh = world.pawn.Weapon.Mesh
                 runtime_mod._on_guard_pose_changed(None, -100)
                 combat.update_first_person_pose(world.pc)
                 self.assertGreater(
-                    world.arms_skel_mesh.RotOrigin.Yaw, -16384, "negative tilt must lean outward"
+                    tilt_blade_mesh.RotOrigin.Yaw, 0, "negative tilt must lean the blade outward"
                 )
                 runtime_mod._on_guard_pose_changed(None, 100)
                 combat.update_first_person_pose(world.pc)
-                self.assertLess(world.arms_skel_mesh.RotOrigin.Yaw, -16384)
+                self.assertLess(tilt_blade_mesh.RotOrigin.Yaw, 0)
+                # The hands never slide sideways at either setting.
+                self.assertEqual(world.arms_skel_mesh.RotOrigin.Yaw, -16384)
 
                 # 4L-2. Guarding over and over must never creep: every release restores the exact
                 #       transform the hands had before the guard (players reported the view model
@@ -2676,6 +2753,10 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                     self.assertEqual(world.arms_skel_mesh.RotOrigin.Yaw, rest_yaw)
                     self.assertAlmostEqual(world.arms_skel_mesh.Origin.Z, rest_z)
                     self.assertEqual(combat.active_first_person_pose(), "")
+                    # The blade mesh must come back too — otherwise it would stay cocked over.
+                    self.assertEqual(world.pawn.Weapon.Mesh.RotOrigin.Pitch, 0)
+                    self.assertEqual(world.pawn.Weapon.Mesh.RotOrigin.Yaw, 0)
+                    self.assertEqual(world.pawn.Weapon.Mesh.RotOrigin.Roll, 0)
 
                 self.assertTrue(
                     secondary_vfx.spawn_thrown_blade(world.pawn, cleaver, (10.0, 0.0, 64.0))
@@ -2773,7 +2854,7 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 from melee_arsenal.core.schemas import MeleeWeaponInstance, MeleeWeaponParts
                 from melee_arsenal.runtime import commands, custom_assets, definitions, resolver, state
 
-                self.assertEqual(melee_arsenal.__version__, "0.4.4")
+                self.assertEqual(melee_arsenal.__version__, "0.4.5")
                 self.assertTrue(definitions.ensure_definitions_built())
                 self.assertTrue(state.STATE.custom_assets_active)
                 self.assertEqual(state.STATE.custom_kit_revision, "bold_ink_visual_revision_of_r4")
