@@ -289,6 +289,24 @@ MERGED_KEYS = (
 )
 
 
+def shift_bifacial_faces(doc: dict[str, Any], gap: float) -> None:
+    """Move a bifacial piece's `FACE_FRONT` / `FACE_BACK` instances outward by `gap` metres.
+
+    `gap` is the host blade's `accessory_face_gap_m` (or `element_face_gap_m`): the piece carries its
+    own `fit_inner_shift_m` to normalise the decorative plate to Z=0, and the gap then lifts that
+    plate onto the blade's skin instead of leaving it buried inside the blade.
+    """
+    if not gap:
+        return
+    for node in doc.get("nodes", []):
+        offset = {"FACE_FRONT": gap, "FACE_BACK": -gap}.get(str(node.get("name")))
+        if offset is None:
+            continue
+        translation = list(node.get("translation", [0.0, 0.0, 0.0]))
+        translation[2] = round(float(translation[2]) + offset, 7)
+        node["translation"] = translation
+
+
 def merge_glbs(pieces: Iterable[tuple[dict[str, Any], bytes | bytearray, Sequence[float], str]]) -> bytes:
     """Merge `(doc, binary, root_translation, label)` pieces into one self-contained GLB."""
     doc: dict[str, Any] = {

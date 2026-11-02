@@ -40,7 +40,7 @@ from .geometry import (
     Part,
     build_parts,
 )
-from .glb import build_part_glb, merge_glbs, read_glb, _to_gltf
+from .glb import build_part_glb, merge_glbs, read_glb, shift_bifacial_faces, _to_gltf
 from .uv import Island, PartLayout, unwrap_parts
 
 MANIFEST_SCHEMA = "inkblade.socket-kit/1.0"
@@ -552,12 +552,17 @@ def _run_export(state: KitState) -> None:
             if blade_id not in available or grip_id not in available:
                 continue
             pieces: list[tuple[dict[str, Any], bytes, Sequence[float], str]] = []
+            blade_notes = state.parts[blade_id].notes
+            accessory_gap = float(blade_notes.get("accessory_face_gap_m", 0.0))
+            element_gap = float(blade_notes.get("element_face_gap_m", 0.0))
 
-            def add(part_id: str, position: Sequence[float]) -> None:
+            def add(part_id: str, position: Sequence[float], gap: float = 0.0) -> None:
                 part = state.parts[part_id]
                 layout = state.layouts[part_id]
                 png = _png_bytes(_atlas_for_element(state, part_id, element))
                 doc, binary = read_glb(build_part_glb(part, layout, png, revision=cfg.revision))
+                # Socketed pieces sit on the blade skin, not inside it.
+                shift_bifacial_faces(doc, gap)
                 pieces.append((doc, bytes(binary), tuple(float(c) for c in position), part_id))
 
             add(blade_id, (0.0, 0.0, 0.0))
@@ -567,11 +572,16 @@ def _run_export(state: KitState) -> None:
                 if accessory_id in available:
                     target = str(state.parts[accessory_id].meta.get("target_socket", "SOCKET_ACCESSORY"))
                     host = state.parts[grip_id] if target == "SOCKET_POMMEL" else state.parts[blade_id]
-                    add(accessory_id, _to_gltf(host.sockets_blender[target]))
+                    gap = 0.0 if target == "SOCKET_POMMEL" else accessory_gap
+                    add(accessory_id, _to_gltf(host.sockets_blender[target]), gap)
             if element:
                 element_id = f"element_{element.lower()}"
                 if element_id in available:
-                    add(element_id, _to_gltf(state.parts[blade_id].sockets_blender["SOCKET_ELEMENT"]))
+                    add(
+                        element_id,
+                        _to_gltf(state.parts[blade_id].sockets_blender["SOCKET_ELEMENT"]),
+                        element_gap,
+                    )
 
             (models / "combinations" / f"{name}.glb").write_bytes(merge_glbs(pieces))
             manifest["combinations"].append(
@@ -631,8 +641,9 @@ def _kit_readme(state: KitState) -> str:
         "## Notes",
         "",
         "- Blade-slot depth is halved and front-only detail is mirrored onto the rear face.",
-        "- Bifacial accessories/elements export `FACE_FRONT` / `FACE_BACK` instances; move them by the",
-        "  blade's `accessory_face_gap_m` / `element_face_gap_m` when assembling.",
+        "- Bifacial accessories/elements export `FACE_FRONT` / `FACE_BACK` instances; the baked",
+        "  combinations already push them out by the blade's `accessory_face_gap_m` /",
+        "  `element_face_gap_m`, so their plates sit on the blade skin instead of inside it.",
         "- The Torgue grip is a hexagonal shell with four continuous wraparound ribs.",
         "- Textures are painted as a stack of independent layers (flat colours -> mottle/wear -> bold",
         "  ink -> optional decals), so new art passes can be inserted without touching older ones.",

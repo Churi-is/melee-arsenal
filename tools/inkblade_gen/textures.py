@@ -604,11 +604,16 @@ def recolor_accent(
     layout: PartLayout,
     hex_colour: str,
 ) -> Image.Image:
-    """Bake an element tint into the `accent` islands only (keeps ink and `SURFACE` untouched)."""
+    """Bake an element tint into the `accent` islands only (keeps ink and `SURFACE` untouched).
+
+    Matches `recolor_palette` from the shipped builder: every accent pixel at least `56` bright is
+    recoloured to the tint scaled by its own luminance, so the painted shading survives the tint.
+    """
     rgb = hex_to_rgb(hex_colour)
     out = atlas.convert("RGB").copy()
     for island in layout.islands:
-        if island.role != "accent":
+        # Mirrored/template faces reuse an owner's texels, so tinting them would double-apply.
+        if island.role != "accent" or not island.owner:
             continue
         x, y, w, h = island.rect
         patch = out.crop((x, y, x + w, y + h))
@@ -616,8 +621,9 @@ def recolor_accent(
         for py in range(h):
             for px in range(w):
                 value = pixels[px, py]
-                lum = max(value) / 255.0
-                if lum > 0.22:
-                    pixels[px, py] = tuple(int(min(255, c * 255 * lum)) for c in rgb)
+                # `recolor_palette`: keep ink and dark shading, tint the rest by its luminance.
+                lum = max(value)
+                if lum >= 56:
+                    pixels[px, py] = tuple(int(round(c * lum / 255.0)) for c in rgb)
         out.paste(patch, (x, y))
     return out

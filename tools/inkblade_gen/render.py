@@ -18,15 +18,13 @@ Output layout mirrors the shipped kit::
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Callable, Iterable, Sequence
 
 from PIL import Image, ImageDraw, ImageFont
 
-from .config import ELEMENTS
-from .textures import recolor_accent
 from .geometry import COMBINATIONS, PART_ORDER, Part
 from .uv import PartLayout, Vec2, Vec3, project_face
 from .glb import triangulate, _to_gltf
@@ -61,6 +59,11 @@ class Triangle:
     uv_c: Vec2
     normal: Vec3
     accent: bool = False
+    material: int = 0
+
+
+def _shift(point: Vec3, offset: Vec3) -> Vec3:
+    return (point[0] + offset[0], point[1] + offset[1], point[2] + offset[2])
 
 
 def _normal(pa: Vec3, pb: Vec3, pc: Vec3) -> Vec3:
@@ -79,6 +82,7 @@ def part_triangles(
     *,
     offset: Vec3 = (0.0, 0.0, 0.0),
     mirror: bool = False,
+    material: int = 0,
 ) -> list[Triangle]:
     """Triangulate one part in glTF space, optionally mirrored through glTF Z (bifacial halves)."""
     out: list[Triangle] = []
@@ -104,31 +108,57 @@ def part_triangles(
                     uv_c=tex[2],
                     normal=_normal(*positions),
                     accent=face.tag == "accent",
+                    material=material,
                 )
             )
     return out
 
 
-def part_scene(part: Part, layout: PartLayout) -> list[Triangle]:
-    """All geometry of one part, including both `FACE_FRONT` / `FACE_BACK` instances."""
+def part_scene(part: Part, layout: PartLayout, gap: float = 0.0) -> list[Triangle]:
+    """All geometry of one part, including both `FACE_FRONT` / `FACE_BACK` instances.
+
+    `gap` is the host blade's `accessory_face_gap_m` / `element_face_gap_m`: combinations push the
+    decorative plate onto the blade skin exactly like the exported GLBs do.
+    """
     if not part.bifacial:
         return part_triangles(part, layout)
-    shift = float(part.fit_inner_shift_m)
+    shift = float(part.fit_inner_shift_m) + float(gap)
     return part_triangles(part, layout, offset=(0.0, 0.0, shift)) + part_triangles(
         part, layout, offset=(0.0, 0.0, -shift), mirror=True
     )
 
 
-def assembly_scene(state, recipe: Sequence[str | None]) -> tuple[list[Triangle], str]:  # noqa: ANN001
-    """Triangles for one combination recipe, positioned exactly like the exported GLB."""
+def assembly_scene(
+    state,  # noqa: ANN001 - KitState, duck typed to keep this module dependency-free
+    recipe: Sequence[str | None],
+    atlas_for: Callable[[str], Image.Image] | None = None,
+) -> tuple[list[Triangle], str, list[Image.Image]]:
+    """Triangles plus one atlas per piece, positioned exactly like the exported GLB."""
     name, blade, grip, accessory, element = recipe
     blade_id = f"blade_{str(blade).lower()}"
     grip_id = f"grip_{str(grip).lower()}"
     triangles: list[Triangle] = []
+    atlases: list[Image.Image] = []
 
-    def add(part_id: str, offset: Vec3) -> None:
+    def add(part_id: str, offset: Vec3, gap: float = 0.0) -> None:
         part = state.parts[part_id]
-        triangles.extend(part_triangles(part, state.layouts[part_id], offset=offset))
+        layout = state.layouts[part_id]
+        index = len(atlases)
+        atlases.append(state.finals[part_id] if atlas_for is None else atlas_for(part_id))
+        for triangle in part_scene(part, layout, gap):
+            triangles.append(
+                replace(
+                    triangle,
+                    a=_shift(triangle.a, offset),
+                    b=_shift(triangle.b, offset),
+                    c=_shift(triangle.c, offset),
+                    material=index,
+                )
+            )
+
+    blade_notes = state.parts[blade_id].notes if blade_id in state.parts else {}
+    accessory_gap = float(blade_notes.get("accessory_face_gap_m", 0.0))
+    element_gap = float(blade_notes.get("element_face_gap_m", 0.0))
 
     if blade_id in state.parts:
         add(blade_id, (0.0, 0.0, 0.0))
@@ -139,12 +169,17 @@ def assembly_scene(state, recipe: Sequence[str | None]) -> tuple[list[Triangle],
         if accessory_id in state.parts:
             target = str(state.parts[accessory_id].meta.get("target_socket", "SOCKET_ACCESSORY"))
             host = state.parts[grip_id] if target == "SOCKET_POMMEL" else state.parts[blade_id]
-            add(accessory_id, _to_gltf(host.sockets_blender[target]))
+            gap = 0.0 if target == "SOCKET_POMMEL" else accessory_gap
+            add(accessory_id, _to_gltf(host.sockets_blender[target]), gap)
     if element:
         element_id = f"element_{str(element).lower()}"
         if element_id in state.parts:
-            add(element_id, _to_gltf(state.parts[blade_id].sockets_blender["SOCKET_ELEMENT"]))
-    return triangles, str(name)
+            add(
+                element_id,
+                _to_gltf(state.parts[blade_id].sockets_blender["SOCKET_ELEMENT"]),
+                element_gap,
+            )
+    return triangles, str(name), atlases
 
 
 # ---------------------------------------------------------------------------
@@ -181,7 +216,7 @@ def _shade(normal: Vec3, forward: Vec3) -> float:
 
 def rasterise(
     triangles: Sequence[Triangle],
-    atlas: Image.Image,
+    atlas: Image.Image | Sequence[Image.Image],
     *,
     size: tuple[int, int] = (720, 720),
     supersample: int = 2,
@@ -190,6 +225,10 @@ def rasterise(
     background: tuple[int, int, int] = BACKGROUND,
 ) -> Image.Image:
     """Orthographic, z-buffered render of one triangle soup.
+
+    `atlas` is either a single image (one material) or a list indexed by `Triangle.material`, which
+    is what an assembled combination needs: every socketed piece keeps its own atlas.
+    
 
     No back-face culling: a z-buffer already resolves closed shells correctly, and drawing both
     sides makes the result immune to the winding order the source geometry happened to use.
@@ -200,7 +239,9 @@ def rasterise(
     right, up, forward = _camera(yaw_deg, pitch_deg)
 
     # --- project & frame ---------------------------------------------------
-    screen_triangles: list[tuple[tuple[Vec2, Vec2, Vec2], tuple[Vec2, Vec2, Vec2], tuple[float, float, float], float]] = []
+    screen_triangles: list[
+        tuple[tuple[Vec2, Vec2, Vec2], tuple[Vec2, Vec2, Vec2], tuple[float, float, float], float, int]
+    ] = []
     xs: list[float] = []
     ys: list[float] = []
     for triangle in triangles:
@@ -222,6 +263,7 @@ def rasterise(
                 (triangle.uv_a, triangle.uv_b, triangle.uv_c),
                 (depths[0], depths[1], depths[2]),
                 _shade(triangle.normal, forward),
+                triangle.material,
             )
         )
     if not screen_triangles:
@@ -236,11 +278,13 @@ def rasterise(
     # --- rasterise ---------------------------------------------------------
     buffer = bytearray(bytes(background) * (canvas_w * canvas_h))
     depth_buffer = [1e30] * (canvas_w * canvas_h)
-    tex = atlas.convert("RGB")
-    tex_w, tex_h = tex.size
-    tex_bytes = tex.tobytes()
+    atlases = (
+        [atlas] if isinstance(atlas, Image.Image) else [image.convert("RGB") for image in atlas]
+    )
+    textures = [(image.size, image.tobytes()) for image in atlases]
 
-    for screen, uvs, depths, light in screen_triangles:
+    for screen, uvs, depths, light, material in screen_triangles:
+        (tex_w, tex_h), tex_bytes = textures[material] if len(textures) > material else textures[0]
         (ax, ay), (bx, by), (cx, cy) = screen
         area = (bx - ax) * (cy - ay) - (cx - ax) * (by - ay)
         if abs(area) < 1e-9:
@@ -424,16 +468,19 @@ def render_kit(
         part_tiles.append((part_id.replace("_", " ").title(), image))
 
     combo_tiles: list[tuple[str, Image.Image]] = []
+    from .stages import _atlas_for_element  # local import: stages imports this module
+
     for recipe in COMBINATIONS:
-        triangles, name = assembly_scene(state, recipe)
+        triangles, name, atlases = assembly_scene(
+            state, recipe, atlas_for=lambda part_id, element=recipe[4]: _atlas_for_element(
+                state, part_id, element
+            )
+        )
         if not triangles:
             continue
-        atlas = state.finals[f"blade_{str(recipe[1]).lower()}"]
-        if recipe[4]:
-            atlas = recolor_accent(atlas, state.layouts[f"blade_{str(recipe[1]).lower()}"], ELEMENTS[recipe[4]])
         image = rasterise(
             triangles,
-            atlas,
+            atlases,
             size=size,
             supersample=supersample,
             yaw_deg=yaw_deg,

@@ -612,6 +612,119 @@ class InkSeedTests(unittest.TestCase):
         self.assertGreater(sum(1 for value in changed.tobytes() if value), 0)
 
 
+class ElementTintTests(unittest.TestCase):
+    """`recolor_accent` must tint the accent islands, not blow them out to white."""
+
+    def test_tint_keeps_luminance_and_ink(self) -> None:
+        from tools.inkblade_gen import textures
+        from tools.inkblade_gen.config import ELEMENTS
+
+        cfg = RunConfig(density=192.0, padding=4, parts=("blade_maliwan",))
+        parts = build_parts(cfg.parts)
+        layouts = unwrap_parts(parts, cfg)
+        layout = layouts["blade_maliwan"]
+        canvas = textures.new_canvas(layout)
+        canvas = textures.paint_flat_colours(parts["blade_maliwan"], layout, canvas, cfg.seed)
+        tint = textures.hex_to_rgb(ELEMENTS["Corrosive"])
+        tinted = textures.recolor_accent(canvas, layout, ELEMENTS["Corrosive"])
+
+        island = next(i for i in layout.islands if i.role == "accent" and i.owner)
+        x, y, w, h = island.rect
+        centre = (x + w // 2, y + h // 2)
+        before = canvas.getpixel(centre)
+        after = tinted.getpixel(centre)
+        expected = tuple(int(round(channel * max(before) / 255.0)) for channel in tint)
+        self.assertEqual(after, expected)
+        self.assertLess(max(after), 255 - 1, "the tint must not clip to white")
+        self.assertNotEqual(after, before)
+
+        # A dark pixel inside an accent island stays dark (ink is never recoloured).
+        dark = None
+        for px in range(x, x + w):
+            for py in range(y, y + h):
+                if max(canvas.getpixel((px, py))) < 40:
+                    dark = (px, py)
+                    break
+            if dark:
+                break
+        if dark:
+            self.assertEqual(tinted.getpixel(dark), canvas.getpixel(dark))
+
+
+class CombinationAssemblyTests(unittest.TestCase):
+    """Socketed pieces must land on the blade skin, with their own atlas."""
+
+    def test_bifacial_pieces_get_the_blade_skin_gap(self) -> None:
+        from tools.inkblade_gen.glb import build_part_glb, read_glb, shift_bifacial_faces
+
+        cfg = RunConfig(
+            density=192.0,
+            padding=4,
+            parts=("blade_torgue", "accessory_reinforced_heavy_spine", "element_explosive"),
+        )
+        parts = build_parts(cfg.parts)
+        layouts = unwrap_parts(parts, cfg)
+        blade = parts["blade_torgue"]
+        for part_id, key, expected in (
+            ("accessory_reinforced_heavy_spine", "accessory_face_gap_m", 0.0401667),
+            ("element_explosive", "element_face_gap_m", 0.04675),
+        ):
+            part = parts[part_id]
+            doc, _ = read_glb(build_part_glb(part, layouts[part_id], b"", revision=cfg.revision))
+            bare = {
+                node["name"]: node["translation"][2]
+                for node in doc["nodes"]
+                if node.get("name") in ("FACE_FRONT", "FACE_BACK")
+            }
+            self.assertAlmostEqual(bare["FACE_FRONT"], part.fit_inner_shift_m, places=6)
+            shift_bifacial_faces(doc, float(blade.notes[key]))
+            fitted = {
+                node["name"]: node["translation"][2]
+                for node in doc["nodes"]
+                if node.get("name") in ("FACE_FRONT", "FACE_BACK")
+            }
+            self.assertAlmostEqual(fitted["FACE_FRONT"], expected, places=6)
+            self.assertAlmostEqual(fitted["FACE_BACK"], -expected, places=6)
+
+    def test_combination_pieces_keep_their_own_atlas(self) -> None:
+        from tools.inkblade_gen.render import assembly_scene
+
+        cfg = RunConfig(
+            density=192.0,
+            padding=4,
+            parts=("blade_torgue", "grip_torgue", "accessory_reinforced_heavy_spine"),
+        )
+        parts = build_parts(cfg.parts)
+        layouts = unwrap_parts(parts, cfg)
+        state = _painted_state(cfg, parts, layouts)
+        triangles, name, atlases = assembly_scene(
+            state, ("05_Detonator", "Torgue", "Torgue", "reinforced_heavy_spine", None)
+        )
+        self.assertEqual(name, "05_Detonator")
+        self.assertEqual(len(atlases), 3, "blade, grip and accessory each need their own atlas")
+        materials = {triangle.material for triangle in triangles}
+        self.assertEqual(materials, {0, 1, 2})
+        self.assertIs(atlases[0], state.finals["blade_torgue"])
+        self.assertIs(atlases[2], state.finals["accessory_reinforced_heavy_spine"])
+
+        # The accessory's decorative plate must end up in front of the blade, not buried in it.
+        blade_front = max(
+            max(triangle.a[2], triangle.b[2], triangle.c[2])
+            for triangle in triangles
+            if triangle.material == 0
+        )
+        accessory_front = max(
+            max(triangle.a[2], triangle.b[2], triangle.c[2])
+            for triangle in triangles
+            if triangle.material == 2
+        )
+        self.assertGreater(
+            accessory_front,
+            blade_front,
+            "the socketed accessory should sit proud of the blade skin",
+        )
+
+
 class RenderStageTests(unittest.TestCase):
     """Preview renders are a stage too: optional, ordered last, and Blender-free."""
 
