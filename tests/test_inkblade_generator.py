@@ -547,6 +547,71 @@ class FaceInkPortTests(unittest.TestCase):
             self.assertEqual(mismatched, 0, f"{part_id}: face ink differs from the reference")
 
 
+class InkSeedTests(unittest.TestCase):
+    """The ink passes are seedable, and padding never paints outside an island's rectangle."""
+
+    def _layout(self, part_id: str):
+        cfg = RunConfig(density=512.0, parts=(part_id,))
+        parts = build_parts(cfg.parts)
+        return parts[part_id], unwrap_parts(parts, cfg)[part_id], cfg
+
+    def test_linework_seed_rerolls_the_ink_and_stays_deterministic(self) -> None:
+        from tools.inkblade_gen import textures
+
+        part, layout, _ = self._layout("grip_jakobs")
+        reference = textures.linework_layers(part.part_id, layout)
+        again = textures.linework_layers(part.part_id, layout)
+        self.assertEqual(
+            b"".join(layer.tobytes() for layer in reference),
+            b"".join(layer.tobytes() for layer in again),
+            "the same salt must reproduce the same ink",
+        )
+        for salt in ("seed-a", "seed-b"):
+            shifted = textures.linework_layers(part.part_id, layout, salt)
+            self.assertNotEqual(
+                reference[1].tobytes(), shifted[1].tobytes(), f"salt {salt} left the ink unchanged"
+            )
+        self.assertEqual(
+            textures.paint_linework(part, layout, textures.new_canvas(layout), seed_salt="seed-a").tobytes(),
+            textures.paint_linework(part, layout, textures.new_canvas(layout), seed_salt="seed-a").tobytes(),
+        )
+
+    def test_cli_exposes_the_ink_seed(self) -> None:
+        from tools.inkblade_gen.cli import build_parser, config_from_args
+
+        args = build_parser().parse_args(["--linework-seed", "salt"])
+        self.assertEqual(config_from_args(args).linework_seed, "salt")
+        self.assertEqual(RunConfig().linework_seed, "", "the shipped strokes stay the default")
+
+    def test_padding_stays_inside_each_island_rectangle(self) -> None:
+        from PIL import ImageChops, ImageDraw
+
+        from tools.inkblade_gen import textures
+
+        part, layout, cfg = self._layout("grip_jakobs")
+        canvas = textures.new_canvas(layout)
+        canvas = textures.paint_flat_colours(part, layout, canvas, cfg.seed)
+        canvas = textures.paint_mottle(part, layout, canvas)
+        colours = textures.role_colours(part, layout, cfg.seed)
+        sealed = textures.seal_padding(canvas.copy(), layout, colours)
+
+        width, height = layout.atlas_size
+        rects = Image.new("L", (width, height), 0)
+        draw = ImageDraw.Draw(rects)
+        for island in layout.islands:
+            if island.owner:
+                x, y, w, h = island.rect
+                draw.rectangle((x, y, x + w - 1, y + h - 1), fill=255)
+        changed = ImageChops.difference(canvas, sealed).convert("L").point(lambda v: 255 if v else 0)
+        outside = ImageChops.subtract(changed, rects)
+        self.assertEqual(
+            sum(1 for value in outside.tobytes() if value),
+            0,
+            "padding painted over texels that belong to no island",
+        )
+        self.assertGreater(sum(1 for value in changed.tobytes() if value), 0)
+
+
 class RenderStageTests(unittest.TestCase):
     """Preview renders are a stage too: optional, ordered last, and Blender-free."""
 

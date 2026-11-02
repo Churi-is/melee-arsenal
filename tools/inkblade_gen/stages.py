@@ -288,7 +288,11 @@ def _run_linework(state: KitState) -> None:
     _ensure_canvases(state)
     for part_id, layout in state.layouts.items():
         state.canvases[part_id] = textures.paint_linework(
-            state.parts[part_id], layout, state.canvases[part_id], ink_px=state.cfg.ink_px
+            state.parts[part_id],
+            layout,
+            state.canvases[part_id],
+            ink_px=state.cfg.ink_px,
+            seed_salt=state.cfg.linework_seed,
         )
 
 

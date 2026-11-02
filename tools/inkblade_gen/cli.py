@@ -56,6 +56,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--force", default="", help="comma-separated stages to ignore cached output for")
     parser.add_argument("--no-combinations", action="store_true", help="skip the assembled example GLBs")
     parser.add_argument(
+        "--linework-seed",
+        default="",
+        metavar="TEXT",
+        help="re-roll the ink layout (hatch corners, stroke breaks, scratches); empty = the shipped strokes",
+    )
+    parser.add_argument(
         "--quantise",
         type=int,
         default=None,
@@ -94,6 +100,7 @@ def config_from_args(args: argparse.Namespace) -> RunConfig:
         ink_px=int(args.ink_px),
         padding=int(args.padding),
         seed=str(args.seed),
+        linework_seed=str(args.linework_seed),
         quantize_colors=int(args.quantise) if args.quantise else None,
         decal_dir=Path(args.decals) if args.decals else None,
         decal_fit=float(args.decal_fit),

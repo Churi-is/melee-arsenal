@@ -76,6 +76,9 @@ class RunConfig:
     padding: int = 9
     # Deterministic master seed mixed into every per-face / per-stage RNG.
     seed: str = "inkblade"
+    # Extra salt for the two ink passes only. Empty reproduces the shipped Inkblade Bold strokes
+    # exactly; any other value re-rolls hatch corners, stroke breaks, shadows and scratches.
+    linework_seed: str = ""
     # Optional indexed-palette quantisation of the finished atlas. Off by default: the shipped kit's
     # atlases are RGB PNGs, so a palette would only add snapping on top of the painted art.
     quantize_colors: int | None = None

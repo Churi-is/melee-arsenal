@@ -280,7 +280,13 @@ def _polygon_area(poly: Sequence[Vec2]) -> float:
     return abs(area) / 2.0
 
 
-def paint_linework(part: Part, layout: PartLayout, canvas: Image.Image, ink_px: int = 6) -> Image.Image:
+def paint_linework(
+    part: Part,
+    layout: PartLayout,
+    canvas: Image.Image,
+    ink_px: int = 6,
+    seed_salt: str = "",
+) -> Image.Image:
     """Both ink passes of the shipped kit, in their original order.
 
     1. `physical_uv.texture_face`'s finishing block: six converging hatch strokes off the first one
@@ -290,18 +296,21 @@ def paint_linework(part: Part, layout: PartLayout, canvas: Image.Image, ink_px: 
        onto two layers, clipped to a 1px-eroded mask and composited over the atlas.
     """
     if ink_px:
-        _paint_face_ink(part.part_id, layout, canvas, int(ink_px))
-    shade, ink = linework_layers(part.part_id, layout)
+        _paint_face_ink(part.part_id, layout, canvas, int(ink_px), seed_salt)
+    shade, ink = linework_layers(part.part_id, layout, seed_salt)
     return Image.alpha_composite(canvas.convert("RGBA"), Image.alpha_composite(shade, ink)).convert("RGB")
 
 
-def _paint_face_ink(part_id: str, layout: PartLayout, canvas: Image.Image, ink_px: int) -> None:
+def _paint_face_ink(
+    part_id: str, layout: PartLayout, canvas: Image.Image, ink_px: int, seed_salt: str = ""
+) -> None:
     """`texture_face`'s hatch + perimeter block, per owned face in atlas order.
 
     The reference keeps one `random.Random(part-seed)` stream for the whole part, so the hatch
-    jitter is drawn face by face.
+    jitter is drawn face by face. A non-empty `seed_salt` re-rolls that stream and rotates each
+    face's vertex order, which is how a hatch cluster ends up on a different corner.
     """
-    rng = random.Random(int.from_bytes(hashlib.sha256(part_id.encode()).digest()[:8], "little"))
+    rng = random.Random(int.from_bytes(hashlib.sha256((part_id + seed_salt).encode()).digest()[:8], "little"))
     for island in layout.islands:
         if not island.owner:
             continue
@@ -310,6 +319,11 @@ def _paint_face_ink(part_id: str, layout: PartLayout, canvas: Image.Image, ink_p
         poly = _local_polygon(island, (x, y))
         if len(poly) < 3:
             continue
+        if seed_salt:
+            # The reference hatches off the face's first one or two vertices, so rotating the vertex
+            # order is what moves a cluster to a different corner. Empty salt keeps the shipped order.
+            offset = rng.randrange(len(poly))
+            poly = poly[offset:] + poly[:offset]
         hatch = Image.new("RGBA", (w, h))
         hatch_draw = ImageDraw.Draw(hatch)
         if min(w, h) > 30:
@@ -334,7 +348,9 @@ def _paint_face_ink(part_id: str, layout: PartLayout, canvas: Image.Image, ink_p
         canvas.paste(face, (x, y))
 
 
-def linework_layers(part_id: str, layout: PartLayout) -> tuple[Image.Image, Image.Image]:
+def linework_layers(
+    part_id: str, layout: PartLayout, seed_salt: str = ""
+) -> tuple[Image.Image, Image.Image]:
     """The R5 overlay as `(shade, ink)`: translucent shadow planes beneath, ink on top, both clipped.
 
     Split out of `paint_linework` so the port can be compared layer-for-layer with the reference
@@ -352,7 +368,7 @@ def linework_layers(part_id: str, layout: PartLayout) -> tuple[Image.Image, Imag
             mask_draw.polygon(island.polygon, fill=255)
     mask_px = mask.load()
 
-    rng = random.Random(int(hashlib.sha256(("bold5" + part_id).encode()).hexdigest()[:12], 16))
+    rng = random.Random(int(hashlib.sha256(("bold5" + part_id + seed_salt).encode()).hexdigest()[:12], 16))
 
     for island in layout.islands:
         if not island.owner:
@@ -550,21 +566,24 @@ def paint_decals(
 # Finalise: seal island colours into the padding, then quantise
 # ---------------------------------------------------------------------------
 def seal_padding(canvas: Image.Image, layout: PartLayout, colours: dict[int, RGB]) -> Image.Image:
-    """Dilate each island's own art into its padding so bilinear filtering never pulls pale seams."""
-    width, height = layout.atlas_size
-    pad = Image.new("RGB", (width, height), ATLAS_BACKGROUND)
+    """Fill each island's own rectangle with its flat colour, keeping the art inside the polygon.
+
+    The rectangle already carries the UV padding on every side, so nothing has to be painted beyond
+    it: an island can never spill its base colour over a neighbour's texels.
+    """
+    sealed = canvas.copy()
     for island in layout.islands:
         if not island.owner:
             continue
-        colour = colours.get(island.index, ATLAS_BACKGROUND)
-        box, origin = _island_box(island, layout, max(2, layout.padding))
+        box, origin = _island_box(island, layout, 0)
+        if box[2] <= box[0] or box[3] <= box[1]:
+            continue
         size = (box[2] - box[0], box[3] - box[1])
         mask = _island_mask(island, size, origin)
         grown = mask.filter(ImageFilter.MaxFilter(7))
-        patch = canvas.crop(box)
-        fill = Image.new("RGB", size, colour)
-        pad.paste(Image.composite(patch, fill, grown), box[:2])
-    return pad
+        fill = Image.new("RGB", size, colours.get(island.index, ATLAS_BACKGROUND))
+        sealed.paste(Image.composite(canvas.crop(box), fill, grown), box[:2])
+    return sealed
 
 
 def finalise_atlas(
