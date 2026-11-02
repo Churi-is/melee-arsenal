@@ -23,6 +23,16 @@ zoom. This module spends that input on the manufacturer's signature move:
      after `GUARD_MAX_HOLD_SEC`, so a missing engine function can never leave you stuck bracing.
 
 Maliwan gets neither attack — RMB stays inert on a Phaseblade.
+
+**Visuals** (`runtime/secondary_vfx.py` + `runtime/combat.py` first-person posing)
+
+   - Throw: the release slash plays, then the first-person hands drop out of frame while a real
+     actor carrying the weapon's `SkeletalMesh` + materials flies the solved arc (a Tediore-style
+     thrown-weapon actor without Tediore's fuse explosion on Bandit blades), tumbles, and travels
+     back from the strike point to your hand on the rebound before it is caught.
+   - Guard: the hands rotate into a raised brace with a slow bob for as long as RMB is held.
+   - Parry: `PERFECT PARRY!` HUD callout, blade-on-blade clang and a camera jolt, on top of the
+     vanilla CRITICAL popup of the reflected hit.
 """
 from __future__ import annotations
 
@@ -43,6 +53,7 @@ from ..core.secondary import (
     GUARD_PARRY_WINDOW_SEC,
     GUARD_RELEASE_DEBOUNCE_SEC,
     THROW_DAMAGE_MULTIPLIER,
+    THROW_HAND_EMPTY_DELAY_SEC,
     THROW_HIT_PADDING_UU,
     ThrowFlightPlan,
     build_throw_flight_plan,
@@ -51,6 +62,7 @@ from ..core.secondary import (
     point_segment_distance_uu,
 )
 from ..core.stats import ComputedCardStats, apply_guard_damage_reduction, compute_attack_damage
+from . import secondary_vfx
 from .log import log_error, log_info
 from .resolver import get_local_player_controller, resolve_melee_weapon, unwrap_weapon_object
 from .state import STATE
@@ -175,9 +187,8 @@ def _play_throw_sfx(shooter: Any, kind: str = "whoosh") -> None:
         combat.ensure_combat_resources_cached()
         if kind == "impact":
             ak = combat._CACHED_AKEVENTS.get(combat.AK_BLADE_HIT_FLESH)
-        elif kind == "rebound":
-            ak = combat._CACHED_AKEVENTS.get(combat.AK_BLADE_HIT_FLESH)
         else:
+            # "whoosh" (release / catch) and "rebound" (blade turning back) both read as air.
             ak = combat._CACHED_AKEVENTS.get(combat.AK_SWING_WHOOSH)
         if ak is not None:
             shooter.PlayAkEvent(ak)
@@ -235,6 +246,8 @@ def begin_throw(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCardStats) ->
         vec_template=vec_tpl,
     )
     _play_throw_sfx(shooter, "whoosh")
+    # A real spinning actor carries the weapon's own mesh along the arc (Tediore-style throw visual).
+    secondary_vfx.spawn_thrown_blade(shooter, wpn, origin)
     log_info(
         f"Threw [{card.manufacturer.value} {card.archetype_name}] "
         f"{plan.weight_kg:.2f}kg at {plan.launch_speed_uu_s:.0f} uu/s, "
@@ -315,6 +328,12 @@ def _finish_throw() -> None:
     if _THROW is None:
         return
     _play_throw_sfx(_deref_weak(_THROW.shooter_ref), "whoosh")
+    secondary_vfx.destroy_thrown_blade()
+    combat = _combat()
+    try:
+        combat.clear_first_person_pose(_deref_weak(_THROW.pc_ref), combat.POSE_THROWN)
+    except Exception:
+        pass
     _THROW = None
     log_info("Thrown blade caught — Primary Fire unlocked.")
 
@@ -449,6 +468,18 @@ def _apply_throw_impact(
         except Exception as exc:
             log_error(f"Thrown splash failed: {exc!r}")
 
+    # The rebound starts from wherever the blade struck, so the flying actor visibly returns
+    # from the target to your hand instead of teleporting backwards.
+    st.last_point = hit_point
+    secondary_vfx.update_thrown_blade(hit_point)
+    _play_throw_sfx(shooter, "impact")
+    try:
+        combat.play_thrown_impact_feedback(
+            pc, shooter, shake=st.card.splash_radius_uu <= 0.0
+        )
+    except Exception:
+        pass
+
     _begin_return(st, "impact")
 
 
@@ -462,11 +493,18 @@ def tick_throw() -> None:
     wpn = _deref_weak(st.wpn_ref)
     shooter = _deref_weak(st.shooter_ref)
     if wpn is None or shooter is None or _is_dead(shooter):
+        secondary_vfx.destroy_thrown_blade()
         _THROW = None
         return
 
     if st.phase == "return":
-        if now - st.return_started_at >= st.plan.return_time_sec:
+        u = 1.0
+        if st.plan.return_time_sec > 0.0:
+            u = min(1.0, max(0.0, (now - st.return_started_at) / st.plan.return_time_sec))
+        secondary_vfx.update_thrown_blade(
+            secondary_vfx.lerp_xyz(st.last_point, st.origin_xyz, u)
+        )
+        if u >= 1.0:
             _finish_throw()
         return
 
@@ -477,6 +515,14 @@ def tick_throw() -> None:
 
     point = _throw_point(st, elapsed)
     combat = _combat()
+
+    # First-person sell: the release slash plays, then the hands drop out of frame so the blade is
+    # visibly gone from them until it is caught.
+    if elapsed >= THROW_HAND_EMPTY_DELAY_SEC:
+        if combat.active_first_person_pose() != combat.POSE_THROWN:
+            combat.apply_first_person_pose(_deref_weak(st.pc_ref), combat.POSE_THROWN)
+        secondary_vfx.hide_held_blade()
+    secondary_vfx.update_thrown_blade(point)
     hit_actor, hit_xyz, _bone = combat._run_weapon_trace(wpn, st.vec_template, st.last_point, point)
 
     if hit_actor is not None:
@@ -534,6 +580,12 @@ def try_begin_guard(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCardStats
         cooldown_sec=cooldown,
     )
     _play_guard_sfx(wpn, card)
+    # Visible brace: the hands (and the blade attached to them) lift into a guard posture.
+    try:
+        combat = _combat()
+        combat.apply_first_person_pose(get_local_player_controller(), combat.POSE_GUARD)
+    except Exception:
+        pass
     log_info(
         f"Guard raised [{card.manufacturer.value} {card.archetype_name}] — "
         f"{card.guard_reduction_pct}% braced DR, {GUARD_PARRY_WINDOW_SEC:.2f}s parry window, "
@@ -572,6 +624,11 @@ def end_guard(
     _GUARD = None
     if start_cooldown:
         _GUARD_COOLDOWN_UNTIL = time.monotonic() + st.cooldown_sec
+    try:
+        combat = _combat()
+        combat.clear_first_person_pose(None, combat.POSE_GUARD)
+    except Exception:
+        pass
     log_info(
         f"Guard dropped [{st.card.manufacturer.value} {st.card.archetype_name}] — "
         + (f"cooldown {st.cooldown_sec:.2f}s" if start_cooldown else "no cooldown")
@@ -640,7 +697,17 @@ def _reflect_parry(pawn: Any, st: GuardState, args: Any, incoming_damage: float)
     if attacker is None or attacker is pawn or _is_dead(attacker):
         return 0
     combat = _combat()
-    reflected = compute_parry_reflect_damage(incoming_damage, st.card.crit_bonus_pct)
+    # The reflect must read as a critical hit from the blade in your hands, not as a scaling of a
+    # weak enemy poke (a 112-card blade used to reflect ~50 damage).
+    pc = get_local_player_controller()
+    try:
+        ctx = combat.read_player_melee_context(pawn, pc)
+        blade_crit = compute_attack_damage(st.card, ctx, is_crit=True).final_hit_damage
+    except Exception:
+        blade_crit = 0
+    reflected = compute_parry_reflect_damage(
+        incoming_damage, st.card.crit_bonus_pct, blade_crit
+    )
     if reflected <= 0:
         return 0
     wpn = _deref_weak(st.wpn_ref)
@@ -681,6 +748,10 @@ def _reflect_parry(pawn: Any, st: GuardState, args: Any, incoming_damage: float)
             except Exception:
                 pass
         _play_throw_sfx(pawn, "impact")
+        try:
+            combat.play_parry_feedback(pc, pawn, attacker)
+        except Exception:
+            pass
         log_info(
             f"PARRY! Reflected {reflected:,} forced-crit damage back at "
             f"{getattr(attacker, 'Name', 'attacker')} (incoming {incoming_damage:,.0f})"
@@ -784,6 +855,10 @@ def tick_guard() -> None:
     if resolved is None or resolved[1].secondary_attack != SecondaryAttack.GUARD:
         end_guard(start_cooldown=False)
         return
+    try:
+        _combat().update_first_person_pose(pc)
+    except Exception:
+        pass
     if now - st.started_at >= GUARD_MAX_HOLD_SEC:
         log_info("Guard force-released (held past its maximum brace time).")
         end_guard()
@@ -821,6 +896,7 @@ def describe_secondary_state() -> dict[str, Any]:
     if _THROW is not None:
         info["thrown"] = True
         info["throw_phase"] = _THROW.phase
+        info["thrown_visual"] = secondary_vfx.has_thrown_blade_visual()
         info["weight_kg"] = _THROW.plan.weight_kg
         info["range_m"] = _THROW.plan.range_meters
         info["detail"] = (
@@ -859,6 +935,13 @@ def reset_secondary_state() -> None:
     _THROW = None
     _GUARD = None
     _GUARD_COOLDOWN_UNTIL = 0.0
+    secondary_vfx.destroy_thrown_blade()
+    try:
+        combat = _combat()
+        combat.clear_first_person_pose(None, combat.POSE_GUARD)
+        combat.clear_first_person_pose(None, combat.POSE_THROWN)
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------

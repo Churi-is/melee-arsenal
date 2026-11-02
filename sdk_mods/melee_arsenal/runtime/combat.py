@@ -192,6 +192,25 @@ _ARMS_SLOT_CACHE: dict[int, dict[str, Any]] = {}
 # Fallback `Arms.SkeletalMesh` rest baseline if procedural fallback is ever used
 _ARMS_REST_BASELINE: dict[int, dict[str, Any]] = {}
 
+# Live first-person posture for the secondary attacks ("" = normal idle hands):
+#   POSE_GUARD  — blade braced across the view while RMB is held
+#   POSE_THROWN — hands emptied out of frame after the blade leaves them
+# The pose shares `_ARMS_REST_BASELINE` with the fallback slash arc, so every offset is applied
+# relative to the untouched rest transform and can always be restored exactly.
+_POSE_KIND: str = ""
+_POSE_STARTED_AT: float = 0.0
+
+POSE_GUARD = "guard"
+POSE_THROWN = "thrown"
+
+# Offsets in UE3 rotator units / UU, added to the captured rest transform.
+_POSE_OFFSETS: dict[str, dict[str, float]] = {
+    # Raise the blade across the chest: pitch up, yaw inward, roll the flat toward the enemy.
+    POSE_GUARD: {"pitch": -4600.0, "yaw": 2600.0, "roll": 3400.0, "x": 0.0, "y": 5.0, "z": 4.0},
+    # Drop the hands (and the attached weapon) far below the camera so the hand is visibly empty.
+    POSE_THROWN: {"pitch": -9000.0, "yaw": 7000.0, "roll": 0.0, "x": 0.0, "y": 10.0, "z": -58.0},
+}
+
 _SHOT_SEQ: int = 0
 _HANDLED_SHOT_SEQ: int = 0
 _LAST_SWING_AT: float = 0.0
@@ -799,6 +818,150 @@ def _get_arms_anim_slots(arms: Any) -> dict[str, Any]:
     return {"action": found_act, "custom": found_cus, "recoil": found_rec}
 
 
+def _capture_arms_rest_transform(arms: Any, sm: Any) -> dict[str, Any] | None:
+    """Remember the pristine `RotOrigin`/`Origin` of the first-person hands exactly once."""
+    if arms is None or sm is None:
+        return None
+    entry = _ARMS_REST_BASELINE.get(id(sm))
+    if entry is not None:
+        return entry
+    try:
+        ro0 = sm.RotOrigin
+        origin0 = getattr(sm, "Origin", None)
+        entry = {
+            "arms_ref": _wrap_weak(arms),
+            "sm_ref": _wrap_weak(sm),
+            "rot": (int(ro0.Pitch), int(ro0.Yaw), int(ro0.Roll)),
+            "loc": (
+                (float(origin0.X), float(origin0.Y), float(origin0.Z))
+                if origin0 is not None
+                else None
+            ),
+        }
+        _ARMS_REST_BASELINE[id(sm)] = entry
+        return entry
+    except Exception:
+        return None
+
+
+def _pose_target(pc: Any) -> tuple[Any, Any, Any, dict[str, Any]] | None:
+    """Resolve `(pawn, arms, skeletal_mesh, rest_entry)` for the local first-person hands."""
+    pawn = getattr(pc, "Pawn", None) if pc is not None else None
+    if pawn is None or _is_dead(pawn):
+        return None
+    arms = getattr(pawn, "Arms", None)
+    if arms is None or _is_dead(arms):
+        return None
+    sm = getattr(arms, "SkeletalMesh", None)
+    if sm is None or _is_dead(sm) or not hasattr(sm, "RotOrigin"):
+        return None
+    entry = _capture_arms_rest_transform(arms, sm)
+    if entry is None:
+        return None
+    return pawn, arms, sm, entry
+
+
+def apply_first_person_pose(pc: Any, kind: str) -> bool:
+    """Brace the blade (`guard`) or empty the hands (`thrown`) in first person.
+
+    The pose is procedural (`Arms.SkeletalMesh.RotOrigin` + `Origin` + `ForceUpdate`) because no
+    vanilla sequence holds a guard stance: the same technique the mod already uses for its swing
+    fallback, which is verified to move the hands and the attached blade. Returns True when the
+    pose is live.
+    """
+    global _POSE_KIND, _POSE_STARTED_AT
+    if kind not in _POSE_OFFSETS:
+        return clear_first_person_pose(pc)
+    target = _pose_target(pc)
+    if target is None:
+        return False
+    _POSE_KIND = kind
+    _POSE_STARTED_AT = time.monotonic()
+    update_first_person_pose(pc)
+    return True
+
+
+def active_first_person_pose() -> str:
+    """The currently applied secondary-attack posture ("" when the hands are idle)."""
+    return _POSE_KIND
+
+
+def update_first_person_pose(pc: Any, now: float | None = None) -> None:
+    """Re-apply the live pose (guard gets a slow brace breathing bob, throw stays still)."""
+    global _POSE_KIND
+    if not _POSE_KIND:
+        return
+    target = _pose_target(pc)
+    if target is None:
+        _write_rest_transforms()
+        _POSE_KIND = ""
+        return
+    _pawn, arms, sm, entry = target
+    offsets = _POSE_OFFSETS.get(_POSE_KIND)
+    if offsets is None:
+        return
+    now = time.monotonic() if now is None else now
+    bob = 0.0
+    if _POSE_KIND == POSE_GUARD:
+        # A slow, shallow bob keeps the brace alive instead of reading as a frozen T-pose.
+        bob = math.sin((now - _POSE_STARTED_AT) * 6.2)
+    try:
+        bp, by, br = entry["rot"]
+        ro = copy.copy(sm.RotOrigin)
+        ro.Pitch = int(bp + offsets["pitch"] + 170.0 * bob)
+        ro.Yaw = int(by + offsets["yaw"])
+        ro.Roll = int(br + offsets["roll"] + 120.0 * bob)
+        sm.RotOrigin = ro
+        loc = entry.get("loc")
+        if loc is not None and hasattr(sm, "Origin"):
+            origin = copy.copy(sm.Origin)
+            origin.X = float(loc[0]) + offsets["x"]
+            origin.Y = float(loc[1]) + offsets["y"]
+            origin.Z = float(loc[2]) + offsets["z"]
+            sm.Origin = origin
+        if hasattr(arms, "ForceUpdate"):
+            arms.ForceUpdate(False)
+    except Exception:
+        _write_rest_transforms()
+        _POSE_KIND = ""
+
+
+def clear_first_person_pose(pc: Any = None, kind: str = "") -> bool:
+    """Restore idle hands. Pass `kind` to only clear that specific pose."""
+    global _POSE_KIND
+    if not _POSE_KIND:
+        return True
+    if kind and _POSE_KIND != kind:
+        return False
+    _POSE_KIND = ""
+    _write_rest_transforms()
+    return True
+
+
+def _write_rest_transforms() -> None:
+    """Write every captured rest transform back (safe to call at any time)."""
+    for sm_id, entry in list(_ARMS_REST_BASELINE.items()):
+        sm = _deref_weak(entry.get("sm_ref"))
+        arms = _deref_weak(entry.get("arms_ref"))
+        if sm is None:
+            _ARMS_REST_BASELINE.pop(sm_id, None)
+            continue
+        try:
+            bp, by, br = entry["rot"]
+            ro = copy.copy(sm.RotOrigin)
+            ro.Pitch, ro.Yaw, ro.Roll = bp, by, br
+            sm.RotOrigin = ro
+            loc = entry.get("loc")
+            if loc is not None and hasattr(sm, "Origin"):
+                origin = copy.copy(sm.Origin)
+                origin.X, origin.Y, origin.Z = loc
+                sm.Origin = origin
+            if arms is not None and hasattr(arms, "ForceUpdate"):
+                arms.ForceUpdate(False)
+        except Exception:
+            pass
+
+
 def _trigger_first_person_blade_swing(
     pc: Any,
     pawn: Any,
@@ -859,17 +1022,7 @@ def _trigger_first_person_blade_swing(
     if not played_real_anim and arms is not None and not _is_dead(arms):
         sm = getattr(arms, "SkeletalMesh", None)
         if sm is not None and hasattr(sm, "RotOrigin"):
-            sm_id = id(sm)
-            if sm_id not in _ARMS_REST_BASELINE:
-                try:
-                    ro0 = sm.RotOrigin
-                    _ARMS_REST_BASELINE[sm_id] = {
-                        "arms_ref": _wrap_weak(arms),
-                        "sm_ref": _wrap_weak(sm),
-                        "rot": (int(ro0.Pitch), int(ro0.Yaw), int(ro0.Roll)),
-                    }
-                except Exception:
-                    pass
+            _capture_arms_rest_transform(arms, sm)
             sm_info = STATE.swing_motion
             sm_info.active = True
             sm_info.start_time = now
@@ -936,31 +1089,22 @@ def _trigger_first_person_blade_swing(
 
 
 def restore_all_arms_rest_transforms() -> None:
-    """Restore any modified fallback `SkeletalMesh.RotOrigin` transforms cleanly."""
+    """Restore any modified fallback `SkeletalMesh` transform cleanly.
+
+    A live secondary-attack pose (`guard` / `thrown`) is intentionally *not* torn down here: the
+    next `tick_secondary_attacks()` re-applies it on top of the restored rest transform.
+    """
     STATE.swing_motion.active = False
-    for sm_id in list(_ARMS_REST_BASELINE.keys()):
-        entry = _ARMS_REST_BASELINE.get(sm_id)
-        if not entry:
-            continue
-        sm = _deref_weak(entry.get("sm_ref"))
-        arms = _deref_weak(entry.get("arms_ref"))
-        if sm is None:
-            _ARMS_REST_BASELINE.pop(sm_id, None)
-            continue
-        try:
-            ro = copy.copy(sm.RotOrigin)
-            ro.Pitch, ro.Yaw, ro.Roll = entry["rot"]
-            sm.RotOrigin = ro
-            if arms is not None and hasattr(arms, "ForceUpdate"):
-                arms.ForceUpdate(False)
-        except Exception:
-            pass
+    _write_rest_transforms()
 
 
 def _update_first_person_slash_motion(pc: Any) -> None:
     """Drive fallback `RotOrigin` + `ForceUpdate(False)` arc only when `AnimNodeSlot` was unavailable."""
     sm_state = STATE.swing_motion
     if not sm_state.active:
+        return
+    # A guard brace / emptied throwing hand owns the transform; the fallback arc never fights it.
+    if _POSE_KIND:
         return
 
     pawn = getattr(pc, "Pawn", None) if pc is not None else None
@@ -1589,6 +1733,85 @@ def _spawn_torgue_explosion_vfx_sfx(
                     pc.ClientPlayCameraAnim(exp_canim)
                 except Exception:
                     pass
+
+
+def play_thrown_impact_feedback(pc: Any, pawn: Any, shake: bool = True) -> None:
+    """A thrown blade landing: sharp metallic impact + a short thump (Torgue adds its own blast)."""
+    ensure_combat_resources_cached()
+    if pawn is not None:
+        for path in (AK_BLADE_HIT_FLESH, AK_HEAVY_IMPACT):
+            ak = _CACHED_AKEVENTS.get(path)
+            if ak is None:
+                continue
+            try:
+                pawn.PlayAkEvent(ak)
+            except Exception:
+                pass
+    if not shake or pc is None:
+        return
+    user_shake = float(getattr(STATE, "camera_shake_scale", 0.5) or 0.0)
+    canim = _CACHED_CANIMS.get(CANIM_LIGHT_SLASH)
+    if canim is None or user_shake <= 0.001:
+        return
+    scale = 0.55 * user_shake * CAMERA_SHAKE_SLIDER_GAIN
+    try:
+        pc.ClientPlayCameraAnim(canim, scale, 0.9, 0.04, 0.20, False, False)
+    except Exception:
+        try:
+            pc.ClientPlayCameraAnim(canim)
+        except Exception:
+            pass
+
+
+def play_parry_feedback(pc: Any, pawn: Any, attacker: Any = None) -> None:
+    """The unmistakable parry moment: camera jolt, hard metal clang and a HUD callout.
+
+    A parry blocks the original `TakeDamage`, so without this the only evidence of a perfect
+    block is the reflected number. The clang + jolt + callout give the input immediate feedback.
+    """
+    ensure_combat_resources_cached()
+
+    shake = float(getattr(STATE, "camera_shake_scale", 0.5) or 0.0)
+    if pc is not None and shake > 0.001:
+        canim = _CACHED_CANIMS.get(CANIM_HEAVY_SLAM)
+        if canim is not None:
+            scale = 1.20 * shake * CAMERA_SHAKE_SLIDER_GAIN
+            try:
+                pc.ClientPlayCameraAnim(canim, scale, 0.85, 0.06, 0.26, False, False)
+            except Exception:
+                try:
+                    pc.ClientPlayCameraAnim(canim)
+                except Exception:
+                    pass
+
+    if pawn is not None:
+        # Metallic blade-on-blade clang first, then the body impact for weight.
+        for path in (AK_HEAVY_IMPACT, AK_BLADE_HIT_FLESH):
+            ak = _CACHED_AKEVENTS.get(path)
+            if ak is None:
+                continue
+            try:
+                pawn.PlayAkEvent(ak)
+            except Exception:
+                pass
+
+    if pc is not None:
+        try:
+            hud = pc.GetHUDMovie()
+            if hud is not None:
+                hud.AddTrainingText(
+                    "PERFECT PARRY!",
+                    "MELEE ARSENAL",
+                    2.5,
+                    (),
+                    "",
+                    False,
+                    0,
+                    pc.PlayerReplicationInfo,
+                    True,
+                )
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------

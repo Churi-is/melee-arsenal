@@ -511,6 +511,12 @@ class TestMeleeArsenalCore(unittest.TestCase):
         self.assertEqual(compute_parry_reflect_damage(1000.0, 0.0), 2000)
         self.assertEqual(compute_parry_reflect_damage(1000.0, 100.0), 4000)
         self.assertEqual(compute_parry_reflect_damage(0.0, 100.0), 0)
+        # The reflect is the larger of the incoming forced crit and the blade's own crit, so a weak
+        # enemy poke can never make a strong blade parry for pocket change (the 112-card / 50-damage bug).
+        self.assertEqual(compute_parry_reflect_damage(20.0, 100.0, 448.0), 448)
+        self.assertEqual(compute_parry_reflect_damage(20.0, 100.0, 0.0), 80)
+        self.assertEqual(compute_parry_reflect_damage(1000.0, 0.0, 448.0), 2000)
+        self.assertEqual(compute_parry_reflect_damage(0.0, 0.0, 313.0), 313)
 
         # Cooldown depends on parts and always stays inside sane bounds.
         hyperion = MeleeWeaponInstance(

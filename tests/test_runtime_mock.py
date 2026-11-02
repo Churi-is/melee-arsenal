@@ -204,7 +204,13 @@ class FakeUObject:
     def _path_name(self) -> str:
         outer = object.__getattribute__(self, "Outer")
         nm = object.__getattribute__(self, "Name")
-        return nm if outer is None else f"{outer._path_name()}.{nm}"
+        if outer is None:
+            return nm
+        try:
+            return f"{outer._path_name()}.{nm}"
+        except AttributeError:
+            # Components are constructed with the (mock) pawn actor as their outer.
+            return f"{getattr(outer, 'Name', repr(outer))}.{nm}"
 
     def __repr__(self) -> str:
         return f"{object.__getattribute__(self, '_cls_name')}'{self._path_name()}'"
@@ -289,6 +295,62 @@ class MockBL2World:
                 _find=lambda fn_or_prop: loc_field if fn_or_prop == "CustomLocation" else ab_fn,
             )
             obj.ApplyBehaviorToContext = lambda **kw: self._run_drop_spawner(obj, kw)
+        elif cls_name == "SkeletalMeshComponent":
+            object.__setattr__(obj, "SkeletalMesh", None)
+            object.__setattr__(obj, "Materials", [])
+            object.__setattr__(obj, "Location", self._vec())
+            object.__setattr__(obj, "Rotation", FakeWrappedStruct("Rotator", Pitch=0, Yaw=0, Roll=0))
+            object.__setattr__(obj, "Hidden", False)
+            object.__setattr__(obj, "Absolute", False)
+            record: dict = {
+                "name": name,
+                "mesh": None,
+                "materials": {},
+                "location": (0.0, 0.0, 0.0),
+                "pitch": 0,
+                "hidden": False,
+                "moves": 0,
+            }
+            self.thrown_blade_visuals.append(record)
+
+            def _set_mesh(mesh, _obj=obj, _rec=record):
+                object.__setattr__(_obj, "SkeletalMesh", mesh)
+                _rec["mesh"] = mesh
+
+            def _set_material(index, material, _obj=obj, _rec=record):
+                mats = list(_obj.Materials)
+                while len(mats) <= int(index):
+                    mats.append(None)
+                mats[int(index)] = material
+                object.__setattr__(_obj, "Materials", mats)
+                _rec["materials"][int(index)] = material
+
+            def _set_translation(vec, _obj=obj, _rec=record):
+                object.__setattr__(_obj, "Location", copy.copy(vec))
+                _rec["location"] = (float(vec.X), float(vec.Y), float(vec.Z))
+                _rec["moves"] += 1
+
+            def _set_rotation(rot, _obj=obj, _rec=record):
+                object.__setattr__(_obj, "Rotation", copy.copy(rot))
+                _rec["pitch"] = int(getattr(rot, "Pitch", 0))
+
+            def _set_hidden(flag, _obj=obj, _rec=record):
+                object.__setattr__(_obj, "Hidden", bool(flag))
+                _rec["hidden"] = bool(flag)
+
+            def _set_absolute(*flags, _obj=obj):
+                object.__setattr__(_obj, "Absolute", all(bool(f) for f in flags))
+
+            obj.SetSkeletalMesh = _set_mesh
+            obj.SetMaterial = _set_material
+            obj.SetTranslation = _set_translation
+            obj.SetRotation = _set_rotation
+            obj.SetHiddenGame = _set_hidden
+            obj.SetAbsolute = _set_absolute
+            obj.SetBlockRigidBody = lambda _flag: None
+            obj.SetCollision = lambda *_a: None
+            obj.SetScale3D = lambda scale, _rec=record: _rec.__setitem__("scale", scale)
+            obj.SetScale = lambda scale, _rec=record: _rec.__setitem__("scale", scale)
         elif cls_name == "MaterialInstanceConstant":
             object.__setattr__(obj, "Parent", None)
             object.__setattr__(obj, "_tex_params", {})
@@ -1048,6 +1110,17 @@ class MockBL2World:
             ObjectFlags=0,
         )
         self.spawned_emitters: list[tuple[str, tuple[float, float, float]]] = []
+        # Thrown-blade visual actor bookkeeping (Tediore-style flying weapon mesh) + HUD callouts
+        self.thrown_blade_visuals: list[dict] = []
+        self.attached_components: list[object] = []
+        self.detached_components: list[object] = []
+        self.hud_messages: list[tuple[str, str]] = []
+        self.thrown_blade_source_mesh = FakeUObject(
+            "SkeletalMesh", None, "Inkblade_Assembly"
+        )
+        self.thrown_blade_source_material = types.SimpleNamespace(
+            Name="Mat_Inkblade_Thrown", ObjectFlags=0
+        )
         fx_exp_pkg = self.register(FakeUObject("Package", None, "FX_WEP_Explosions"))
         fx_exp_sub = self.register(FakeUObject("Package", fx_exp_pkg, "Particles"))
         self.register(FakeUObject("ParticleSystem", fx_exp_sub, "Part_Gyrojet_Explosion"))
@@ -1087,6 +1160,8 @@ class MockBL2World:
             WorldInfo=self.world_info,
             Controller=None,
             PlayAkEvent=lambda ak: self.played_ak.append(ak._path_name()),
+            AttachComponent=lambda comp: self.attached_components.append(comp),
+            DetachComponent=lambda comp: self.detached_components.append(comp),
             IsEnemy=lambda other: getattr(other, "hostile", True),
             Behavior_CauseDamage=lambda **kw: self.caused_damages.append(
                 {
@@ -1107,7 +1182,11 @@ class MockBL2World:
             SaveGameName="Save0001",
             GetCurrentPlaythrough=lambda: 1,
             ClientPlayCameraAnim=self._client_play_camera_anim,
-            GetHUDMovie=lambda: None,
+            GetHUDMovie=lambda: types.SimpleNamespace(
+                AddTrainingText=lambda message, title, *a: self.hud_messages.append(
+                    (str(title), str(message))
+                )
+            ),
             ServerGrantMissionRewards=self._server_grant_mission_rewards,
         )
         self.pawn.Controller = self.pc
@@ -1264,6 +1343,15 @@ class MockBL2World:
         return (imp, ImpactList)
 
     def _make_live_weapon(self, dd):
+        mesh_state = {"hidden": False}
+        held_mesh = types.SimpleNamespace(
+            ObjectFlags=0,
+            SkeletalMesh=self.thrown_blade_source_mesh,
+            Materials=[self.thrown_blade_source_material],
+            Scale3D=self._vec(1.0, 1.0, 1.0),
+            SetHiddenGame=lambda flag: mesh_state.__setitem__("hidden", bool(flag)),
+            _state=mesh_state,
+        )
         wpn = types.SimpleNamespace(
             Name=f"WillowWeapon_{len(self.backpack) + 1}",
             ObjectFlags=0,
@@ -1285,6 +1373,7 @@ class MockBL2World:
             CalcWeaponFire=self._mock_calc_weapon_fire,
             GetTraceImpact=lambda: self.find_object("ImpactDefinition", "GD_Impacts.Melee.Impact_MeleeGeneric"),
             PlayImpactEffects=lambda *a: None,
+            Mesh=held_mesh,
         )
         wpn.ClearPendingFire = lambda _m: setattr(wpn, "pending_fire_cleared", True)
         return wpn
@@ -1542,6 +1631,7 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                     persistence_bridge,
                     resolver,
                     secondary as secondary_attacks,
+                    secondary_vfx,
                     state,
                     ui_item_card,
                 )
@@ -2028,6 +2118,12 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 guard_args = FakeWrappedStruct("WillowPlayerPawn.TakeDamage", Damage=1000.0)
                 self.assertTrue(secondary_attacks.try_begin_guard(sabre, sabre_inst_g, sabre_card_g))
                 self.assertTrue(secondary_attacks.is_guarding(sabre))
+                # The brace is VISIBLE: the first-person hands (and the blade attached to them)
+                # rotate into a guard posture instead of staying in the idle pose.
+                self.assertEqual(combat.active_first_person_pose(), combat.POSE_GUARD)
+                self.assertLess(world.arms_skel_mesh.RotOrigin.Pitch, -4000)
+                self.assertNotEqual(world.arms_skel_mesh.RotOrigin.Yaw, -16384)
+                self.assertGreater(world.arms_skel_mesh.Origin.Z, 3.0)
                 # Hold the guard past the parry window, then eat one hit: mitigated, then consumed.
                 secondary_attacks._GUARD.started_at -= 0.60
                 self.assertIs(
@@ -2046,6 +2142,14 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 )
                 self.assertFalse(secondary_attacks.is_guarding())
                 self.assertGreater(secondary_attacks.guard_cooldown_remaining(), 0.0)
+                # Dropping the guard restores the idle hands exactly (no drifting offsets).
+                self.assertEqual(combat.active_first_person_pose(), "")
+                self.assertEqual(world.arms_skel_mesh.RotOrigin.Pitch, 0)
+                self.assertEqual(world.arms_skel_mesh.RotOrigin.Yaw, -16384)
+                self.assertEqual(world.arms_skel_mesh.RotOrigin.Roll, 0)
+                self.assertAlmostEqual(world.arms_skel_mesh.Origin.X, 1.0)
+                self.assertAlmostEqual(world.arms_skel_mesh.Origin.Y, -2.0)
+                self.assertAlmostEqual(world.arms_skel_mesh.Origin.Z, 3.0)
                 # ...and the part-driven cooldown refuses a fresh guard
                 self.assertTrue(secondary_attacks.try_begin_guard(sabre, sabre_inst_g, sabre_card_g))
                 self.assertFalse(secondary_attacks.is_guarding())
@@ -2079,15 +2183,57 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 self.assertEqual(len(world.caused_damages), 1)
                 reflected = world.caused_damages[0]
                 self.assertIs(reflected["Target"], melee_attacker)
+                parry_ctx = combat.read_player_melee_context(world.pawn, world.pc)
+                blade_crit = compute_attack_damage(
+                    sabre_card_g, parry_ctx, is_crit=True
+                ).final_hit_damage
                 self.assertEqual(
                     reflected["DamageAmount"],
-                    float(compute_parry_reflect_damage(1000.0, sabre_card_g.crit_bonus_pct)),
+                    float(compute_parry_reflect_damage(1000.0, sabre_card_g.crit_bonus_pct, blade_crit)),
                 )
                 # ...and the reflected hit is tagged so BL2 prints a CRITICAL popup
                 self.assertIn(id(melee_attacker), combat._PENDING_CRIT_FEEDBACK)
+                # The parry is VISIBLE + AUDIBLE: HUD callout, clang and a camera jolt.
+                self.assertTrue(
+                    any("PERFECT PARRY" in msg for _title, msg in world.hud_messages),
+                    f"missing parry HUD callout: {world.hud_messages}",
+                )
+                self.assertTrue(
+                    any("Merc_impact" in path or "BladedWeap_hit" in path for path in world.played_ak)
+                )
+                self.assertTrue(world.camera_anim_calls, "parry must kick the camera")
                 combat.clear_all_pending_crit_feedback()
                 self.assertFalse(secondary_attacks.is_guarding())
                 self.assertGreater(secondary_attacks.guard_cooldown_remaining(), 0.0)
+
+                # A weak incoming poke is still parried back at the BLADE's critical scale, not as
+                # 2x of the poke (the old 112-card / "50 something" bug).
+                secondary_attacks._GUARD_COOLDOWN_UNTIL = 0.0
+                self.assertTrue(secondary_attacks.try_begin_guard(sabre, sabre_inst_g, sabre_card_g))
+                weak_args = FakeWrappedStruct(
+                    "WillowPlayerPawn.TakeDamage",
+                    Damage=20.0,
+                    DamageType=types.SimpleNamespace(
+                        _path_name=lambda: "WillowGame.WillowDmgSource_Melee"
+                    ),
+                    EventInstigator=types.SimpleNamespace(Pawn=melee_attacker),
+                )
+                world.caused_damages.clear()
+                world.hud_messages.clear()
+                self.assertIs(
+                    combat.on_player_take_damage_pre(
+                        world.pawn, weak_args, None, lambda *a: guard_re_calls.append(a)
+                    ),
+                    world.block_sentinel,
+                )
+                self.assertEqual(len(world.caused_damages), 1)
+                weak_reflect = int(world.caused_damages[0]["DamageAmount"])
+                self.assertGreaterEqual(weak_reflect, blade_crit)
+                self.assertGreater(weak_reflect, compute_parry_reflect_damage(20.0, 0.0))
+                self.assertTrue(any("PERFECT PARRY" in msg for _t, msg in world.hud_messages))
+                combat.clear_all_pending_crit_feedback()
+                self.assertFalse(secondary_attacks.is_guarding())
+                secondary_attacks._GUARD_COOLDOWN_UNTIL = 0.0
 
                 # A non-melee hit inside the parry window is still fully absorbed, but nothing is
                 # reflected (only melee blows are parried back).
@@ -2184,6 +2330,36 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 self.assertTrue(live_state["thrown"])
                 self.assertEqual(live_state["throw_phase"], "outbound")
                 self.assertIn("Throw", live_state["detail"])
+                # A real flying actor carries the weapon's own mesh: attached to the pawn, using
+                # the held weapon's SkeletalMesh + material instances (Tediore throw visual).
+                self.assertTrue(live_state["thrown_visual"])
+                self.assertTrue(secondary_vfx.has_thrown_blade_visual())
+                self.assertEqual(len(world.attached_components), 1)
+                self.assertEqual(len(world.thrown_blade_visuals), 1)
+                blade_vis = world.thrown_blade_visuals[0]
+                self.assertIs(blade_vis["mesh"], world.thrown_blade_source_mesh)
+                self.assertIs(blade_vis["materials"][0], world.thrown_blade_source_material)
+                self.assertEqual(blade_vis["location"], (8.0, 0.0, 64.0))
+                self.assertIsNotNone(blade_vis.get("scale"), "the thrown blade copies the mesh scale")
+                # The release swing still happens in the hand; the held blade is hidden once the
+                # hands drop (no double blade, empty hand while it flies).
+                self.assertFalse(cleaver.Mesh._state["hidden"])
+                self.assertEqual(combat.active_first_person_pose(), "", "hands stay up for the release")
+
+                # One clean flight frame with no enemies: the actor moves along the arc, tumbles,
+                # and the first-person hands drop out of frame after the release swing.
+                saved_pawn_list = world.world_info.PawnList
+                world.world_info.PawnList = None
+                world.next_center_trace_override = None
+                secondary_attacks._THROW.started_at -= 0.20
+                secondary_attacks.tick_secondary_attacks()
+                world.world_info.PawnList = saved_pawn_list
+                self.assertGreaterEqual(blade_vis["moves"], 2)
+                self.assertGreater(blade_vis["location"][0], 100.0)
+                self.assertGreater(blade_vis["pitch"], 0, "the thrown blade must tumble")
+                self.assertEqual(combat.active_first_person_pose(), combat.POSE_THROWN)
+                self.assertLess(world.arms_skel_mesh.Origin.Z, -40.0)
+                self.assertTrue(cleaver.Mesh._state["hidden"])
                 # LMB is locked out while the blade is airborne — no swing, no damage, no anim
                 world.played_custom_anims.clear()
                 self.assertIs(
@@ -2220,9 +2396,26 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 # ...and the blade is now rebounding, still locking LMB until it is caught
                 self.assertEqual(secondary_attacks._THROW.phase, "return")
                 self.assertTrue(secondary_attacks.is_weapon_thrown(cleaver))
+                self.assertTrue(secondary_vfx.has_thrown_blade_visual())
+                self.assertEqual(
+                    blade_vis["location"], (210.0, 0.0, 95.0), "rebound starts at the strike point"
+                )
+                moves_before_return = blade_vis["moves"]
+                secondary_attacks._THROW.return_started_at -= 0.15
+                secondary_attacks.tick_secondary_attacks()
+                self.assertTrue(secondary_attacks.is_weapon_thrown(cleaver))
+                self.assertGreaterEqual(blade_vis["moves"], moves_before_return + 1)
+                self.assertLess(blade_vis["location"][0], 210.0, "the blade flies back to the hand")
                 secondary_attacks._THROW.return_started_at -= 1.0
                 secondary_attacks.tick_secondary_attacks()
                 self.assertFalse(secondary_attacks.is_weapon_thrown(cleaver))
+                # Caught: the flying actor is detached/hidden and the hands come back.
+                self.assertFalse(secondary_vfx.has_thrown_blade_visual())
+                self.assertEqual(len(world.detached_components), 1)
+                self.assertTrue(blade_vis["hidden"])
+                self.assertFalse(cleaver.Mesh._state["hidden"], "the held blade reappears on catch")
+                self.assertEqual(combat.active_first_person_pose(), "")
+                self.assertAlmostEqual(world.arms_skel_mesh.Origin.Z, 3.0)
                 self.assertEqual(world.played_custom_anims, [])
 
                 # 4I-2. Arc expiry without touching anything: no damage, then the rebound timer
@@ -2268,7 +2461,9 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                     float(expected_bandit.final_hit_damage),
                 )
                 self.assertEqual(world.caused_radius_damages, [])
+                self.assertTrue(secondary_vfx.has_thrown_blade_visual())
                 secondary_attacks.reset_secondary_state()
+                self.assertFalse(secondary_vfx.has_thrown_blade_visual())
                 world.pawn.Weapon = cleaver
                 idle_state = secondary_attacks.describe_secondary_state()
                 self.assertNotIn("thrown", idle_state)
@@ -2370,7 +2565,7 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 from melee_arsenal.core.schemas import MeleeWeaponInstance, MeleeWeaponParts
                 from melee_arsenal.runtime import commands, custom_assets, definitions, resolver, state
 
-                self.assertEqual(melee_arsenal.__version__, "0.4.0")
+                self.assertEqual(melee_arsenal.__version__, "0.4.1")
                 self.assertTrue(definitions.ensure_definitions_built())
                 self.assertTrue(state.STATE.custom_assets_active)
                 self.assertEqual(state.STATE.custom_kit_revision, "bold_ink_visual_revision_of_r4")

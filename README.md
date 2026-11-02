@@ -1,6 +1,6 @@
 # Melee Arsenal — Borderlands 2 PythonSDK Mod & UPK Pipeline
 
-**Melee Arsenal (`v0.4.0`)** adds a standalone **Melee Weapon** class to *Borderlands 2* (`pyunrealsdk` 1.10 / `unrealsdk` 3.2 / `mods_base` 1.12+) powered by a custom 22-part modular 3D **InkBlade (`r6`)** Gestalt mesh and six 2048×2048 elemental texture atlases compiled via a pure-Python Unreal Engine 3 `.upk` pipeline.
+**Melee Arsenal (`v0.4.1`)** adds a standalone **Melee Weapon** class to *Borderlands 2* (`pyunrealsdk` 1.10 / `unrealsdk` 3.2 / `mods_base` 1.12+) powered by a custom 22-part modular 3D **InkBlade (`r6`)** Gestalt mesh and six 2048×2048 elemental texture atlases compiled via a pure-Python Unreal Engine 3 `.upk` pipeline.
 
 Primary Fire swings your equipped Melee Weapon (precision single-target strikes or frontal cleave arcs) scaling with gun-level base damage, weakspot crits, elemental DoT/splash, **player Melee Damage bonuses**, and **Roid shield buffs**, while `[V]` remains your vanilla character melee. **Right Mouse Button / Left Trigger now fires each manufacturer's secondary attack** (ADS zoom stays suppressed): **Bandit and Torgue throw their blade** for `200%` damage along a weight-driven arc, **Hyperion and Jakobs hold to guard** (double card Damage Reduction, `0.33 s` parry reflect), and **Maliwan gets nothing**.
 
@@ -42,8 +42,9 @@ ADS zoom is permanently suppressed on Melee Weapons, so the spare input drives t
 
 Press RMB to hurl the blade. It flies a real ballistic arc solved from the weapon's **weight**, which is built from the manufacturers of its actual parts: each manufacturer's blade/grip hardware has a mass (Torgue `3.8 kg` > Bandit `2.9 kg` > Jakobs `2.1 kg` > Hyperion `1.4 kg` > Maliwan `1.2 kg`), the blade contributes `72%`, the grip `28%`, and the accessory adds its own `0.08–0.32 kg`. A heavy Torgue slab therefore leaves the hand slower and lobs shorter/higher (`~9–10 m` out, `~0.95 m` apex), while a lighter Bandit blade flies flatter and further (`~11.5–12 m` out, `~0.7 m` apex).
 
-- A thrown hit uses the **exact same breakdown as the weapon's LMB swing** (player Melee bonuses, Roid shields, elemental DoT/chance, UVHM slag, and Torgue splash) multiplied to **`200%` damage**. Torgue's thrown slab still detonates its `1.8 m` explosive splash on impact.
-- It **rebounds to your hand** on the first enemy or wall impact, or once its arc expires without hitting anything (`~0.35 s` return flight).
+- A thrown hit uses the **exact same breakdown as the weapon's LMB swing** (player Melee bonuses, Roid shields, elemental DoT/chance, UVHM slag, and Torgue splash) multiplied to **`200%` damage**. Torgue's thrown slab still detonates its `1.8 m` explosive splash on impact; the Bandit blade hits and bounces with **no explosion**.
+- **You can see the throw.** The release slash plays, then the first-person hands drop out of frame so the blade is visibly gone from them. A real actor carrying the weapon's own `SkeletalMesh` + material instances — the same idea as Tediore's `Behavior_SpawnProjectile` reload throw — flies the solved arc, tumbling end over end, and only disappears when it is back in your hand.
+- It **rebounds to your hand** on the first enemy or wall impact, or once its arc expires without hitting anything: the flying blade travels back from the strike point to your hand (`~0.35 s`), the hands return, and the throw whoosh/impact camera bump and metal clang sell the catch.
 - **Primary Fire is locked out while the blade is airborne** — no swings, no damage, no first-person slash anim — and unlocks the moment you catch it. A blade already in flight cannot be thrown again.
 - The arc is swept with the weapon's own `CalcWeaponFire` trace plus a pure-Python swept-segment check, so a fast blade cannot tunnel past an enemy between frames.
 
@@ -51,7 +52,8 @@ Press RMB to hurl the blade. It flies a real ballistic arc solved from the weapo
 
 Hold RMB to brace the blade. The **next incoming hit** has the blade's rolled card **Damage Reduction applied twice** — `(damage * card DR) * card DR` — before BL2 performs its normal shield/health split. At a `60%` card roll a `1,000` damage hit lands for `160`; the item card prints the resulting braced mitigation (`84%` in that example).
 
-- A hit landing within **`0.33 s` of raising the guard is a perfect parry**: `0` damage taken, and if the blow was a **melee** attack the damage is reflected back at the attacker automatically as a **forced critical hit** (BL2's `2.0x` crit multiplier amplified by the blade's own card crit bonus — a Jakobs Sabre's `+100%` reflects at `4x`, with the vanilla `CRITICAL` popup).
+- **The brace is visible.** Raising the guard rotates the first-person hands (and the blade held in them) into a raised guard stance with a slow brace bob; releasing, parrying or swapping weapons restores the idle hands exactly.
+- A hit landing within **`0.33 s` of raising the guard is a perfect parry**: `0` damage taken, and if the blow was a **melee** attack the damage is reflected back at the attacker automatically as a **forced critical hit** with the vanilla `CRITICAL` popup, a `PERFECT PARRY!` HUD callout, a blade-on-blade clang and a camera jolt. The reflect is the **larger of the incoming blow forced to critical and the blade's own rolled critical hit** (`compute_attack_damage(..., is_crit=True)`), so a `112`-card Sabre reflects its own crit scale (`4x` on Jakobs) instead of `2x` of a weak enemy poke.
 - After a block, a parry, or a release, the guard enters a **cooldown that depends on its parts** (`~1.0–2.6 s`): blade manufacturer sets the base (Hyperion recovers faster than Jakobs), weapon mass stretches it, a matching-manufacturer grip shortens it by `15%`, and a Heavy Spine adds `+0.25 s` while a Balanced Pommel takes `-0.10 s` off.
 - Guard is dropped by the RMB release (`WillowWeapon:StopZoom`, enabled defensively so a build without it can never break the mod), by swapping weapons, or by the `6 s` safety brace limit.
 
@@ -61,7 +63,7 @@ Phaseblades get no secondary attack. RMB stays inert, no line is printed on the 
 
 ---
 
-## Combat Feel (`v0.4.0`)
+## Combat Feel (`v0.4.1`)
 
 - **Weakspot crits show the vanilla `CRITICAL!` popup.** `Behavior_CauseDamage` never reports a hit region, so BL2's recent-damage tracker cannot flag our strikes on its own; the mod tags the damaged actor for `0.75 s` and re-issues `WillowDamageTypeDefinition:DisplayRecentDamageForPlayer` with `DamageEventFlags |= DAMAGE_EVENT_FLAG_CRIT`. Only your own local player's floating numbers are affected (co-op safe), stale tags expire, and any unexpected state falls back to untouched vanilla display.
 - **Camera shake is a slow, eased bump — not a flick.** Playback runs at `0.65–0.70x` so even the anim's own opening spike is stretched out, the blend-in window is `0.30 s` (a `0.10 s` ramp simply read as a jump: the old curve eased out but never in) and the fade-out matches it at `0.32 s`. Authoring amplitudes stay `0.50` (Torgue) / `0.30` (cleave) / `0.18` (single-target), damped by swing cadence (`min(1, max(0.45, 1.45 / swings-per-second))`) and by the **`Swing Camera Shake (%)`** dial, which is rescaled by `0.20` — so the **50%** default now equals what the old curve's **10%** felt like, `100%` is twice that and `150%` three times. `0%` is a true off switch.
@@ -105,7 +107,7 @@ Phaseblades get no secondary attack. RMB stays inert, no line is printed on the 
 | `./melee generate [options]` | Regenerate the Inkblade kit through the staged pipeline (`geometry -> uv -> flat -> mottle -> linework -> decals -> textures -> export -> render`) into `build/inkblade_kit`, with a per-stage cache in `build/inkblade_stages`. Supports `--list-stages`, `--only`, `--from`, `--force`, `--decals`, `--parts`, `--out <dir\|zip>`, and `--renders [dir]` for preview PNGs + overview sheets in `build/inkblade_renders` |
 | `./melee test [args]` | Byte-compile all modules and run `unittest` (e.g. `./melee test -q`, `./melee test -k world_drop`) |
 | `./melee preview` | Roll sample Level 50 Melee Arsenal weapons and print item cards, level-scaled Damage Reduction, and Roid/Crit/UVHM hit math |
-| `./melee package [--build]` | Build `build/dist/melee_arsenal.zip`, `build/dist/melee_arsenal-v0.4.0.zip`, and `build/dist/source.zip`; builds missing inputs automatically |
+| `./melee package [--build]` | Build `build/dist/melee_arsenal.zip`, `build/dist/melee_arsenal-v0.4.1.zip`, and `build/dist/source.zip`; builds missing inputs automatically |
 | `./melee install [--bl2-dir <dir>] [--probe]` | Stage `.upk` packages and sync `sdk_mods/melee_arsenal/` into Borderlands 2 (preserving `_melee_arsenal_saves` and `melee_arsenal.log`) |
 | `./melee dev` | Fast iteration loop: run quiet tests, then install to Borderlands 2 |
 | `./melee status` | Show mod version, Python/Pillow state, kit & UPK sizes, BL2 sync status, and sidecar save count |

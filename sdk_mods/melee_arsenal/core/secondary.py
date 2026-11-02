@@ -64,6 +64,9 @@ THROW_LOFT_WEIGHT_MAX_KG: float = 4.5
 THROW_MAX_FLIGHT_SEC: float = 1.30
 # Rebound flight back into the player's hand (no damage, LMB stays locked until it lands).
 THROW_RETURN_SEC: float = 0.35
+# The release swing plays first, then the first-person hands drop out of frame so the blade is
+# visibly gone from them for the rest of the flight (and while it flies back).
+THROW_HAND_EMPTY_DELAY_SEC: float = 0.12
 # Extra forgiveness on the swept-segment hit test so a thrown blade cannot slip between legs.
 THROW_HIT_PADDING_UU: float = 22.0
 
@@ -280,12 +283,28 @@ def guard_effective_reduction_pct(card_damage_reduction_pct: float) -> int:
     return int(round((1.0 - (1.0 - dr) * (1.0 - dr)) * 100.0))
 
 
-def compute_parry_reflect_damage(incoming_damage: float, crit_bonus_pct: float = 0.0) -> int:
-    """Damage reflected by a perfect parry: the incoming melee hit, forced to critical."""
-    if incoming_damage <= 0.0:
+def compute_parry_reflect_damage(
+    incoming_damage: float,
+    crit_bonus_pct: float = 0.0,
+    blade_crit_damage: float = 0.0,
+) -> int:
+    """Damage reflected by a perfect parry: a forced critical hit at the blade's own scale.
+
+    The old formula scaled only the *incoming* hit (`incoming * 2.0 * crit bonus`), so parrying a
+    weak melee poke with a 112-damage blade reflected a number in the 50s even though the mod
+    advertised a critical hit. The reflect now takes the larger of:
+
+      * the incoming melee blow, forced to critical, and
+      * the blade's own rolled critical hit (`compute_attack_damage(..., is_crit=True)`),
+
+    so a parry always reads as a real critical hit from the weapon you are holding.
+    """
+    incoming = max(0.0, float(incoming_damage))
+    blade_crit = max(0.0, float(blade_crit_damage))
+    if incoming <= 0.0 and blade_crit <= 0.0:
         return 0
     crit_mult = PARRY_REFLECT_BASE_CRIT_MULT * (1.0 + max(0.0, float(crit_bonus_pct)) / 100.0)
-    return max(1, int(round(incoming_damage * crit_mult)))
+    return max(1, int(round(max(incoming * crit_mult, blade_crit))))
 
 
 def secondary_attack_for(manufacturer: Manufacturer) -> SecondaryAttack:
