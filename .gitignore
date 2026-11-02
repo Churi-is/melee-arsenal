@@ -5,3 +5,6 @@ __pycache__/
 .DS_Store
 sdk_mods/melee_arsenal_probe/reports/
 dist/
+
+# Staged Inkblade generator output & stage cache (./melee generate)
+build/

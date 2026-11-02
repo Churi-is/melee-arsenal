@@ -533,6 +533,21 @@ cmd_all() {
   fi
 }
 
+cmd_generate() {
+  local py
+  py="$(pick_python)"
+  case "${1:-}" in
+    --list-stages) ;;
+    *)
+      if ! "$py" -c "import PIL" >/dev/null 2>&1; then
+        die "Pillow is not installed for $py. Run './melee setup' first."
+      fi
+      info "Generating InkBlade kit through the staged pipeline"
+      ;;
+  esac
+  "$py" "$REPO_ROOT/tools/generate_inkblade_kit.py" "$@"
+}
+
 cmd_help() {
   cat <<USAGE
 ${C_BOLD}melee${C_RESET} — Melee Arsenal CLI (v$(mod_version))
@@ -544,6 +559,10 @@ ${C_BOLD}Commands:${C_RESET}
   ${C_CYAN}setup${C_RESET}                     Create .venv and install Pillow for UPK compilation
   ${C_CYAN}build${C_RESET} [--kit <path>]      Compile InkBlade kit -> CookedPCConsole/*.upk + manifest JSON
                             (defaults to ./assets/inkblade_bold_kit and syncs upk/ fallback)
+  ${C_CYAN}generate${C_RESET} [options]        Regenerate the InkBlade kit (stages: geometry -> uv -> flat ->
+                            mottle -> linework -> decals -> textures -> export)
+                            Options: --list-stages, --only <s>, --from <s>, --force <s>,
+                                     --decals <dir>, --out <dir|zip>, --parts <ids>, --no-combinations
   ${C_CYAN}test${C_RESET} [unittest-args]      Syntax-check all modules and run unit tests (e.g. -k world_drop)
   ${C_CYAN}preview${C_RESET}                   Roll & print sample Level 50 Melee Arsenal item cards & hit math
   ${C_CYAN}package${C_RESET} [--build]         Build dist/melee_arsenal.zip, dist/melee_arsenal-vX.Y.Z.zip & dist/source.zip
@@ -567,6 +586,7 @@ main() {
   shift || true
   case "$sub" in
     setup)                 cmd_setup "$@" ;;
+    generate|gen|textures) cmd_generate "$@" ;;
     build|compile)         cmd_build "$@" ;;
     test|check)            cmd_test "$@" ;;
     preview|sim)           cmd_preview "$@" ;;

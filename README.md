@@ -52,13 +52,16 @@ While a Melee Weapon is your held `Pawn.Weapon`, incoming damage on `WillowGame.
 # 2. Check repository, kit, cooked UPK, and Borderlands 2 install status
 ./melee status
 
-# 3. Compile ./assets/inkblade_bold_kit -> CookedPCConsole/*.upk + manifest JSON
+# 3. (Optional) Regenerate the modular kit through the staged pipeline -> build/inkblade_kit
+./melee generate
+
+# 4. Compile ./assets/inkblade_bold_kit -> CookedPCConsole/*.upk + manifest JSON
 ./melee build
 
-# 4. Run syntax verification & full unit test suite
+# 5. Run syntax verification & full unit test suite
 ./melee test
 
-# 5. Install UPKs + sdk_mods/melee_arsenal into Borderlands 2
+# 6. Install UPKs + sdk_mods/melee_arsenal into Borderlands 2
 #    (auto-detects Steam / Proton / CrossOver / Whisky / WSL2, or caches --bl2-dir in .bl2_dir)
 ./melee install
 # or specify your Borderlands 2 root once:
@@ -71,6 +74,7 @@ While a Melee Weapon is your held `Pawn.Weapon`, incoming damage on `WillowGame.
 | :--- | :--- |
 | `./melee setup` | Create `.venv/` and install `Pillow` for UPK compilation |
 | `./melee build [--kit <path>]` | Compile modular kit (default `./assets/inkblade_bold_kit`) into `WillowGame/CookedPCConsole/MeleeArsenal{Meshes,Textures}.upk`, update `inkblade_compiled_manifest.json`, and sync `sdk_mods/melee_arsenal/upk/` |
+| `./melee generate [options]` | Regenerate the Inkblade kit through the staged pipeline (`geometry -> uv -> flat -> mottle -> linework -> decals -> textures -> export`) into `build/inkblade_kit`, with a per-stage cache in `build/inkblade_stages`. Supports `--list-stages`, `--only`, `--from`, `--force`, `--decals`, `--parts`, `--out <dir\|zip>` |
 | `./melee test [args]` | Byte-compile all modules and run `unittest` (e.g. `./melee test -q`, `./melee test -k world_drop`) |
 | `./melee preview` | Roll sample Level 50 Melee Arsenal weapons and print item cards, level-scaled Damage Reduction, and Roid/Crit/UVHM hit math |
 | `./melee package [--build]` | Build `dist/melee_arsenal.zip`, `dist/melee_arsenal-v0.3.5.zip`, and `dist/source.zip` |
@@ -101,6 +105,8 @@ While a Melee Weapon is your held `Pawn.Weapon`, incoming damage on `WillowGame.
 │   │   └── upk/                    # Bundled fallback MeleeArsenalMeshes.upk auto-stager
 │   └── melee_arsenal_probe/        # Optional in-game UE3 diagnostics & Startup.upk donor extractor
 ├── tools/
+│   ├── generate_inkblade_kit.py    # Staged Inkblade kit generator CLI (pure Python + Pillow)
+│   ├── inkblade_gen/               # Stage stack: geometry, uv, flat/mottle/linework/decals, export
 │   ├── compile_inkblade_upk.py     # Offline GLB + PNG -> cooked BL2 UE3 .upk compiler CLI
 │   ├── preview_arsenal.py          # Offline weapon roller & damage calculator CLI
 │   └── inkblade_upk/               # Pure-Python UE3 LZO1X/zlib archive reader, SkeletalMesh/DXT1 codec & donor
