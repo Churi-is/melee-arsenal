@@ -4,6 +4,7 @@ from __future__ import annotations
 import ctypes
 import ctypes.util
 import io
+import json
 from pathlib import Path
 import struct
 import tempfile
@@ -372,6 +373,35 @@ class KitFingerprintTests(unittest.TestCase):
             self.assertNotEqual(first, kit_fingerprint(kit))
             # And so must a moved layout.
             (kit / "textures/blade_bandit_uv_layout.json").write_text('{"islands": []}')
+            self.assertNotEqual(first, kit_fingerprint(kit))
+
+    def test_generated_stage_report_does_not_change_compiled_asset_fingerprint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = self._make_kit(Path(tmp))
+            docs = kit / "docs"
+            docs.mkdir()
+            report = docs / "stages.json"
+            report.write_text('{"stages": [{"seconds": 1.0, "status": "ran"}]}')
+            first = kit_fingerprint(kit)
+            report.write_text('{"stages": [{"seconds": 99.0, "status": "cached"}]}')
+            self.assertEqual(first, kit_fingerprint(kit))
+
+    def test_socket_manifest_timing_does_not_change_compiled_asset_fingerprint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = self._make_kit(Path(tmp))
+            manifest = {
+                "schema": "inkblade.socket-kit/1.0",
+                "revision": "r6_staged",
+                "generator": {"seed": "default", "stages": [{"stage": "geometry", "fingerprint": "abc", "status": "ran", "seconds": 1.25}]},
+            }
+            socket_manifest = kit / "socket_manifest.json"
+            socket_manifest.write_text(json.dumps(manifest))
+            first = kit_fingerprint(kit)
+            manifest["generator"]["stages"][0].update(status="cached", seconds=99.5)
+            socket_manifest.write_text(json.dumps(manifest))
+            self.assertEqual(first, kit_fingerprint(kit))
+            manifest["revision"] = "r7"
+            socket_manifest.write_text(json.dumps(manifest))
             self.assertNotEqual(first, kit_fingerprint(kit))
 
     def test_fingerprint_matches_between_directory_and_archive(self) -> None:

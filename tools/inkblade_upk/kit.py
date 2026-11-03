@@ -262,9 +262,18 @@ class _KitReader:
             self._zf.close()
 
 
-#: Kit files that the UPK compiler actually consumes.  Anything else in the folder (notes, renders,
-#: `.DS_Store`) must not change the fingerprint, or every stray file would force a recompile.
-KIT_FINGERPRINT_SUFFIXES: tuple[str, ...] = (".png", ".json", ".glb")
+#: Compiler inputs: texture PNGs, model GLBs, the top-level socket manifest, and per-texture UV
+#: layouts. Generated profiling/docs JSON is intentionally excluded from the freshness hash.
+KIT_FINGERPRINT_SUFFIXES: tuple[str, ...] = (".png", ".glb")
+
+
+def _is_compiler_input(name: str) -> bool:
+    lower = name.lower()
+    return (
+        lower.endswith(KIT_FINGERPRINT_SUFFIXES)
+        or lower == "socket_manifest.json"
+        or (lower.startswith("textures/") and lower.endswith("_uv_layout.json"))
+    )
 
 
 def kit_fingerprint(kit_path: str | Path) -> str:
@@ -279,11 +288,26 @@ def kit_fingerprint(kit_path: str | Path) -> str:
     try:
         hasher = hashlib.sha256()
         for name in reader.names():
-            if not name.lower().endswith(KIT_FINGERPRINT_SUFFIXES):
+            if not _is_compiler_input(name):
                 continue
+            payload = reader.read_bytes(name)
+            # The generator socket manifest embeds profiling data for humans. Stage elapsed times
+            # and cache status vary on every run but do not affect the compiled assets, so exclude
+            # those fields from the content fingerprint while retaining stage names/source hashes.
+            if Path(name).name == "socket_manifest.json":
+                try:
+                    manifest = json.loads(payload)
+                    stages = manifest.get("generator", {}).get("stages", [])
+                    for stage in stages:
+                        if isinstance(stage, dict):
+                            stage.pop("seconds", None)
+                            stage.pop("status", None)
+                    payload = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode("utf-8")
+                except (UnicodeDecodeError, json.JSONDecodeError, AttributeError, TypeError):
+                    pass
             hasher.update(name.encode("utf-8"))
             hasher.update(b"\0")
-            hasher.update(hashlib.sha256(reader.read_bytes(name)).digest())
+            hasher.update(hashlib.sha256(payload).digest())
         return hasher.hexdigest()[:32]
     finally:
         reader.close()
