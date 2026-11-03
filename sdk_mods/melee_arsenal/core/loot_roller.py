@@ -1,99 +1,35 @@
-"""Procedural loot roller for Borderlands 2 Melee Arsenal."""
+"""Procedural loot roller for Borderlands 2 Melee Arsenal.
+
+Part-specific eligibility, weights and roll rules live in `core/parts/` next to the
+part data (`grips.roll_grip_id`, `elements.roll_element_id`,
+`accessories.roll_accessory_id`). This module is only the orchestrator: pick a
+manufacturer/Blade, roll the four part ids in order, and assemble a
+`MeleeWeaponInstance`. It also validates a set of part ids (`validate_weapon_parts`).
+"""
 from __future__ import annotations
 
 import random
-from typing import Sequence
 
-from .catalog import (
+from .enums import Manufacturer, Rarity
+from .parts.accessories import (
     ACCESSORIES,
-    BLADE_BY_MANUFACTURER,
-    BLADES,
-    ELEMENT_PART_BY_TYPE,
-    ELEMENTS,
-    GRIPS,
-    MANUFACTURERS,
+    ACCESSORY_ROLL_CHANCE,  # re-exported for older callers (runtime/definitions/balances.py, tools)
+    NO_ACCESSORY_ID,
+    eligible_accessories_for_roll,
+    roll_accessory_id,
 )
-from .enums import Element, ElementPolicy, Manufacturer, Rarity, TargetingMode
-from .schemas import (
-    AccessoryPartSpec,
-    ElementPartSpec,
-    MeleeWeaponInstance,
-    MeleeWeaponParts,
-)
+from .parts.blades import BLADES, blade_for_manufacturer
+from .parts.elements import ELEMENTS, eligible_elements_for_blade, roll_element_id
+from .parts.grips import GRIPS, roll_grip_id
+from .parts.weapon import MeleeWeaponInstance, MeleeWeaponParts
 
-# Vanilla-inspired accessory spawn probability by rarity tier
-ACCESSORY_ROLL_CHANCE: dict[Rarity, float] = {
-    Rarity.COMMON: 0.20,
-    Rarity.UNCOMMON: 0.55,
-    Rarity.RARE: 0.85,
-    Rarity.VERY_RARE: 1.00,
-    Rarity.E_TECH: 1.00,
-    Rarity.LEGENDARY: 1.00,
-    Rarity.SERAPH: 1.00,
-    Rarity.PEARLESCENT: 1.00,
-    Rarity.EFFERVESCENT: 1.00,
-}
-
-
-def _weighted_choice(rng: random.Random, items: Sequence[tuple[str, float]]) -> str:
-    total = sum(max(0.0, w) for _, w in items)
-    if total <= 0.0:
-        return items[0][0]
-    pick = rng.uniform(0.0, total)
-    acc = 0.0
-    for item_id, weight in items:
-        acc += max(0.0, weight)
-        if pick <= acc:
-            return item_id
-    return items[-1][0]
-
-
-def eligible_elements_for_blade(blade_id: str) -> list[ElementPartSpec]:
-    """Return valid ElementPartSpecs for a given Blade according to its Manufacturer's ElementPolicy."""
-    blade = BLADES[blade_id]
-    maker = MANUFACTURERS[blade.manufacturer]
-
-    if maker.element_policy == ElementPolicy.NEVER:
-        return [ELEMENTS["Elem_None"]]
-    if maker.element_policy == ElementPolicy.ALWAYS_EXPLOSIVE:
-        return [ELEMENTS["Elem_Explosive"]]
-    if maker.element_policy == ElementPolicy.ALWAYS_ELEMENTAL:
-        return [
-            ELEMENT_PART_BY_TYPE[el]
-            for el in maker.allowed_elements
-            if el not in (Element.NONE, Element.EXPLOSIVE)
-        ]
-
-    # OPTIONAL: includes Elem_None plus allowed elements
-    return [ELEMENT_PART_BY_TYPE[el] for el in maker.allowed_elements]
-
-
-def eligible_accessories_for_roll(
-    blade_id: str,
-    element_id: str,
-    rarity: Rarity,
-) -> list[AccessoryPartSpec]:
-    """Return non-empty accessories legal for `(blade, element, rarity)`."""
-    blade = BLADES[blade_id]
-    maker = MANUFACTURERS[blade.manufacturer]
-    elem = ELEMENTS[element_id].element
-    is_dot_elemental = elem in (Element.FIRE, Element.SHOCK, Element.CORROSIVE, Element.SLAG)
-    mode = maker.cleave_profile.mode
-
-    valid: list[AccessoryPartSpec] = []
-    for acc in ACCESSORIES.values():
-        if acc.part_id == "Acc_None":
-            continue
-        if int(rarity) < int(acc.min_rarity):
-            continue
-        if acc.elemental_only and not is_dot_elemental:
-            continue
-        if acc.cleave_only and mode != TargetingMode.FRONTAL_CLEAVE:
-            continue
-        if acc.single_target_only and mode != TargetingMode.SINGLE_TARGET:
-            continue
-        valid.append(acc)
-    return valid
+__all__ = [
+    "ACCESSORY_ROLL_CHANCE",
+    "eligible_accessories_for_roll",
+    "eligible_elements_for_blade",
+    "roll_melee_weapon",
+    "validate_weapon_parts",
+]
 
 
 def validate_weapon_parts(parts: MeleeWeaponParts) -> list[str]:
@@ -117,7 +53,7 @@ def validate_weapon_parts(parts: MeleeWeaponParts) -> list[str]:
             f"(allowed: {sorted(legal_elem_ids)})"
         )
 
-    if parts.accessory_id != "Acc_None" and parts.accessory_id in ACCESSORIES:
+    if parts.accessory_id != NO_ACCESSORY_ID and parts.accessory_id in ACCESSORIES:
         # Check structural compatibility (rarity-independent)
         legal_acc_ids = {
             a.part_id
@@ -141,30 +77,20 @@ def roll_melee_weapon(
     seed: int | str | None = None,
     unique_id: int | None = None,
 ) -> MeleeWeaponInstance:
-    """Roll a complete procedural `MeleeWeaponInstance` with 3-4 parts."""
+    """Roll a complete procedural `MeleeWeaponInstance` with 3-4 parts.
+
+    The RNG call order is part of the format: manufacturer -> Grip -> Element ->
+    optional Accessory -> UniqueId. Keeping those picks in the per-part modules does
+    not change it, so seeded rolls (tests, debug spawns, previews) stay reproducible.
+    """
     rng = random.Random(seed) if seed is not None else random.Random()
 
-    if manufacturer is None:
-        maker = rng.choice(tuple(Manufacturer))
-    else:
-        maker = manufacturer
+    maker = rng.choice(tuple(Manufacturer)) if manufacturer is None else manufacturer
+    blade = blade_for_manufacturer(maker)
 
-    blade = BLADE_BY_MANUFACTURER[maker]
-
-    # Grip: weighted across all 5 melee grips (any grip can spawn on any blade)
-    grip_id = _weighted_choice(rng, [(g.part_id, g.weight) for g in GRIPS.values()])
-
-    # Element: strictly governed by Blade's ElementPolicy
-    elem_choices = eligible_elements_for_blade(blade.part_id)
-    element_id = _weighted_choice(rng, [(e.part_id, e.weight) for e in elem_choices])
-
-    # Accessory: rolls according to rarity probability and blade/element compatibility
-    acc_chance = ACCESSORY_ROLL_CHANCE.get(rarity, 0.5)
-    acc_pool = eligible_accessories_for_roll(blade.part_id, element_id, rarity)
-    if acc_pool and rng.random() < acc_chance:
-        accessory_id = _weighted_choice(rng, [(a.part_id, a.weight) for a in acc_pool])
-    else:
-        accessory_id = "Acc_None"
+    grip_id = roll_grip_id(rng)
+    element_id = roll_element_id(rng, blade.part_id)
+    accessory_id = roll_accessory_id(rng, blade.part_id, element_id, rarity)
 
     uid = unique_id if unique_id is not None else rng.randint(1, 2_147_483_647)
 

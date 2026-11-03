@@ -7,15 +7,16 @@ from pathlib import Path
 from dataclasses import replace
 from typing import Any
 
-from ..core.catalog import ACCESSORIES, resolve_weapon_name
 from ..core.enums import Element, Manufacturer, Rarity
-from ..core.loot_roller import (
+from ..core.loot_roller import roll_melee_weapon, validate_weapon_parts
+from ..core.parts import (
+    ACCESSORIES,
+    NO_ACCESSORY_ID,
     eligible_accessories_for_roll,
     eligible_elements_for_blade,
-    roll_melee_weapon,
-    validate_weapon_parts,
+    resolve_weapon_name,
 )
-from ..core.schemas import MeleeWeaponInstance
+from ..core.parts.weapon import MeleeWeaponInstance
 from ..core.stats import compute_attack_damage
 from .combat import read_live_player_melee_context
 from .custom_assets import resolve_fitted_accessory_part
@@ -82,7 +83,7 @@ _ELEMENT_ALIASES: dict[str, Element] = {
 
 
 _ACCESSORY_ALIASES: dict[str, str] = {
-    "none": "Acc_None",
+    "none": NO_ACCESSORY_ID,
     "serrated": "Acc_Serrated",
     "pommel": "Acc_Counterweight",
     "counterweight": "Acc_Counterweight",
@@ -172,14 +173,14 @@ def build_validated_spawn_instance(
             return None
         element_id = candidate
     accessory_id = forced_acc if forced_acc is not None else inst.parts.accessory_id
-    if accessory_id != "Acc_None":
+    if accessory_id != NO_ACCESSORY_ID:
         legal_acc = {a.part_id for a in eligible_accessories_for_roll(blade_id, element_id, rarity)}
         if accessory_id not in legal_acc:
             if forced_acc is not None:
                 log_warn(f"Accessory {accessory_id!r} is not legal for {blade_id} / {element_id} / {rarity.name}.")
                 return None
-            accessory_id = "Acc_None"
-    from ..core.schemas import MeleeWeaponParts
+            accessory_id = NO_ACCESSORY_ID
+    from ..core.parts.weapon import MeleeWeaponParts
     inst = replace(inst, parts=MeleeWeaponParts(
         blade_id=blade_id,
         grip_id=inst.parts.grip_id,

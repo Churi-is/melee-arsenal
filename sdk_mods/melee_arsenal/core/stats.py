@@ -5,9 +5,15 @@ import zlib
 from dataclasses import dataclass
 from typing import Iterable
 
-from .catalog import ACCESSORIES, BLADES, ELEMENTS, GRIPS, MANUFACTURERS, resolve_weapon_name
 from .enums import Element, Manufacturer, ModifierMode, Rarity, SecondaryAttack, StatId, TargetingMode
-from .schemas import MeleeWeaponInstance, PlayerMeleeContext, StatModifier
+from .parts import (
+    MeleeWeaponInstance,
+    PlayerMeleeContext,
+    StatModifier,
+    is_matching_grip,
+    resolve_parts,
+    resolve_weapon_name,
+)
 from .secondary import (
     GUARD_PARRY_WINDOW_SEC,
     build_throw_flight_plan,
@@ -247,11 +253,12 @@ def apply_guard_damage_reduction(damage: float, damage_reduction_pct: float) -> 
 
 def compute_card_stats(weapon: MeleeWeaponInstance) -> ComputedCardStats:
     """Compute exact item card and runtime combat stats for a `MeleeWeaponInstance`."""
-    blade = BLADES[weapon.parts.blade_id]
-    grip = GRIPS[weapon.parts.grip_id]
-    accessory = ACCESSORIES[weapon.parts.accessory_id]
-    element_part = ELEMENTS[weapon.parts.element_id]
-    maker_spec = MANUFACTURERS[blade.manufacturer]
+    resolved = resolve_parts(weapon.parts)
+    blade = resolved.blade
+    grip = resolved.grip
+    accessory = resolved.accessory
+    element_part = resolved.element
+    maker_spec = resolved.manufacturer
 
     prefix, title, full_name = resolve_weapon_name(
         weapon.parts.blade_id,
@@ -260,7 +267,7 @@ def compute_card_stats(weapon: MeleeWeaponInstance) -> ComputedCardStats:
         weapon.parts.element_id,
     )
 
-    matching_grip = grip.manufacturer == blade.manufacturer
+    matching_grip = is_matching_grip(blade, grip)
 
     all_mods: list[StatModifier] = [
         *maker_spec.intrinsic_modifiers,
@@ -319,7 +326,7 @@ def compute_card_stats(weapon: MeleeWeaponInstance) -> ComputedCardStats:
 
     # 5. Optional Elemental Stats (Fire, Shock, Corrosive, Slag show DoT + Chance; Explosive shows Explosive element)
     element = element_part.element
-    if element in (Element.FIRE, Element.SHOCK, Element.CORROSIVE, Element.SLAG):
+    if element_part.is_dot_element:
         base_dot = level_curve * MELEE_WEAPON_TYPE_DAMAGE_SCALAR * element_part.dot_dps_ratio
         elem_dps = max(1.0, apply_bl2_modifiers(base_dot, all_mods, StatId.STATUS_DAMAGE))
         proc_chance = min(
@@ -327,7 +334,7 @@ def compute_card_stats(weapon: MeleeWeaponInstance) -> ComputedCardStats:
             max(0.01, apply_bl2_modifiers(element_part.base_proc_chance, all_mods, StatId.STATUS_CHANCE)),
         )
         show_elem = True
-    elif element == Element.EXPLOSIVE:
+    elif element_part.is_explosive:
         elem_dps = 0.0
         proc_chance = 1.0
         show_elem = True

@@ -25,9 +25,16 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from .catalog import ACCESSORIES, BLADES, GRIPS, MANUFACTURERS
-from .enums import Manufacturer, SecondaryAttack
-from .schemas import MeleeWeaponInstance
+from .parts.accessories import ACCESSORIES, ACCESSORY_GUARD_COOLDOWN_DELTA, ACCESSORY_WEIGHT_KG
+from .parts.blades import BLADES
+from .parts.grips import GRIPS
+from .parts.manufacturers import (
+    GUARD_COOLDOWN_BY_MANUFACTURER,
+    GUARD_COOLDOWN_DEFAULT_SEC,
+    MANUFACTURERS,
+    secondary_attack_for as secondary_attack_for,  # re-export: identity lives with the manufacturer data
+)
+from .parts.weapon import MeleeWeaponInstance
 
 UU_PER_METER: float = 100.0
 
@@ -106,18 +113,9 @@ THROW_HIT_PADDING_UU: float = 22.0
 THROW_BLADE_MASS_FRACTION: float = 0.72
 THROW_GRIP_MASS_FRACTION: float = 0.28
 
-# Add-on mass per accessory (kg). A reinforced weighted spine makes a heavy throw heavier; a
-# balanced pommel keeps it nimble.
-ACCESSORY_WEIGHT_KG: dict[str, float] = {
-    "Acc_None": 0.0,
-    "Acc_Serrated": 0.10,
-    "Acc_Counterweight": 0.18,
-    "Acc_ExtendedTang": 0.15,
-    "Acc_RazorFuller": 0.08,
-    "Acc_BroadSweep": 0.22,
-    "Acc_HeavySpine": 0.32,
-    "Acc_FluxCapacitor": 0.20,
-}
+# `ACCESSORY_WEIGHT_KG` is derived from `AccessoryPartSpec.throw_weight_kg` in
+# `core/parts/accessories.py` — add-on mass (kg) per accessory is part data, so it
+# lives with the accessory entry instead of being repeated here.
 
 
 @dataclass(frozen=True, slots=True)
@@ -292,13 +290,8 @@ PARRY_REFLECT_BASE_CRIT_MULT: float = 2.0
 # still drops after this long so the player can never be stuck bracing forever.
 GUARD_MAX_HOLD_SEC: float = 6.0
 
-# Base guard cooldown per blade manufacturer (seconds). Hyperion's corporate tech recovers fast;
-# Jakobs' heavy frontier steel needs a moment to reset.
-GUARD_COOLDOWN_BY_MANUFACTURER: dict[Manufacturer, float] = {
-    Manufacturer.HYPERION: 1.60,
-    Manufacturer.JAKOBS: 2.20,
-}
-GUARD_COOLDOWN_DEFAULT_SEC: float = 2.00
+# `GUARD_COOLDOWN_BY_MANUFACTURER` / `GUARD_COOLDOWN_DEFAULT_SEC` come from
+# `core/parts/manufacturers.py` (per-manufacturer `guard_cooldown_sec` field).
 GUARD_COOLDOWN_MIN_SEC: float = 1.00
 GUARD_COOLDOWN_MAX_SEC: float = 4.00
 # Heavier builds take longer to reset the stance.
@@ -306,17 +299,8 @@ GUARD_COOLDOWN_WEIGHT_REFERENCE_KG: float = 2.40
 GUARD_COOLDOWN_WEIGHT_SPAN: float = 0.25
 # A matching-manufacturer grip balances the weapon, shortening the recovery.
 GUARD_COOLDOWN_MATCHING_GRIP_SCALE: float = 0.85
-# Per-accessory cooldown deltas (seconds).
-ACCESSORY_GUARD_COOLDOWN_DELTA: dict[str, float] = {
-    "Acc_None": 0.0,
-    "Acc_Serrated": 0.0,
-    "Acc_Counterweight": -0.10,
-    "Acc_ExtendedTang": 0.05,
-    "Acc_RazorFuller": 0.0,
-    "Acc_BroadSweep": 0.10,
-    "Acc_HeavySpine": 0.25,
-    "Acc_FluxCapacitor": 0.05,
-}
+# `ACCESSORY_GUARD_COOLDOWN_DELTA` is derived from
+# `AccessoryPartSpec.guard_cooldown_delta_sec` in `core/parts/accessories.py`.
 
 
 def compute_guard_cooldown_sec(weapon: MeleeWeaponInstance) -> float:
@@ -372,7 +356,5 @@ def compute_parry_reflect_damage(
     return max(1, int(round(max(incoming * crit_mult, blade_crit))))
 
 
-def secondary_attack_for(manufacturer: Manufacturer) -> SecondaryAttack:
-    """The manufacturer's RMB attack identity (`NONE` for Maliwan)."""
-    spec = MANUFACTURERS.get(manufacturer)
-    return spec.secondary_attack if spec is not None else SecondaryAttack.NONE
+# `secondary_attack_for()` is defined in `core/parts/manufacturers.py` next to the
+# archetype data and re-exported from here for backwards compatibility.

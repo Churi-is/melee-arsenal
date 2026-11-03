@@ -7,6 +7,7 @@ This document holds implementation notes that were trimmed from the player-facin
 ## Contents
 
 - [Architecture](#architecture)
+- [Part Catalog & Adding Parts](#part-catalog--adding-parts)
 - [SDK Requirements](#sdk-requirements)
 - [Combat Engine](#combat-engine)
 - [Secondary Attacks](#secondary-attacks)
@@ -25,10 +26,22 @@ This document holds implementation notes that were trimmed from the player-facin
 
 ```
 sdk_mods/melee_arsenal/
-├── core/       # Pure Python — catalog, stats, targeting, loot roller, persistence
-│               # Zero unrealsdk imports; fully unit-testable under CPython
+├── core/
+│   ├── parts/          # DATA LAYER — one Python module per part type (pure Python)
+│   │   ├── manufacturers.py   # archetypes, element policy, cleave profile, secondary, mass
+│   │   ├── blades.py          # BladePartSpec + BLADES + title matrix + kit ids
+│   │   ├── grips.py           # GripPartSpec + GRIPS + matching-grip check + grip roll
+│   │   ├── accessories.py     # AccessoryPartSpec + ACCESSORIES + gates, eligibility, rolls
+│   │   ├── elements.py        # ElementPartSpec + ELEMENTS + policy eligibility, rolls, atlases
+│   │   ├── weapon.py          # composed weapon value types, ResolvedParts, name resolution
+│   │   ├── common.py          # shared dataclasses/helpers (StatModifier, prefixes, weights)
+│   │   └── validation.py      # PART_REGISTRIES + validate_catalog()
+│   ├── catalog.py / schemas.py  # thin backward-compatible facades (re-export parts/)
+│   ├── stats.py, loot_roller.py, item_card.py, secondary.py, targeting.py, persistence.py
 ├── data/       # Compiler-generated Gestalt manifest JSON
-└── runtime/    # Live UE3 — definitions, asset library, combat, secondary, cards, pools
+└── runtime/    # Live UE3
+    ├── definitions/   # UE3 definition builders — one module per concern, one builder per part type
+    └── combat.py, secondary.py, loot_pools.py, __init__.py, custom_assets.py, ...
 
 tools/
 ├── inkblade_gen/   # 10-stage procedural kit generator (Pillow only)
@@ -36,9 +49,54 @@ tools/
 └── compile_inkblade_upk.py / generate_inkblade_kit.py / preview_arsenal.py
 ```
 
-**Core vs Runtime boundary:** `core` owns all math: catalog (Blade→Manufacturer mapping), `compute_card_stats`, `compute_attack_damage`, `apply_incoming_damage_reduction`, targeting helpers (`Vec3`, `TargetCandidate`), throw flight plans (`build_throw_flight_plan`), and guard cooldown math. `runtime` owns UE3 object construction, hook dispatch, and side-effects. No `core` module imports `unrealsdk`.
+**Core vs Runtime boundary:** `core` owns all part data (`core/parts/`) and all math: `compute_card_stats`, `compute_attack_damage`, `apply_incoming_damage_reduction`, targeting helpers (`Vec3`, `TargetCandidate`), throw flight plans (`build_throw_flight_plan`), and guard cooldown math. `runtime` owns UE3 object construction, hook dispatch, and side-effects; it iterates the part registries rather than hardcoding part lists. No `core` module imports `unrealsdk`.
 
 **State singleton:** `runtime/state.py:RuntimeRegistry` holds rooted UObject caches, manufacturer→definition maps, and live mod option mirrors (`STATE.world_drops_enabled`, `STATE.guard_pose_scale`, etc.). Option changes sync into `STATE` via `on_change_anytime` callbacks in `runtime/__init__.py`. UObject equality/cache keys are path-first (`runtime/object_identity.py`) because Python wrapper identity is not stable across SDK calls. Disable teardown cancels pending grants/restores, removes injected loot entries, clears card overrides and crit/pose/debug caches, and resets secondary attacks; pawn changes begin a new restore epoch.
+
+---
+
+## Part Catalog & Adding Parts
+
+The SDK-independent data layer is `core/parts/`: **one Python file per part type**, each owning its spec dataclass, its complete registry, derived indexes (including InkBlade kit ids), and all pure-Python logic for that part type.
+
+| Module | Owns |
+| :--- | :--- |
+| `core/parts/manufacturers.py` | `ManufacturerSpec` / `CleaveProfile`, `MANUFACTURERS`: archetype stats, element policy, secondary attack, hardware mass, guard recovery, donor path |
+| `core/parts/blades.py` | `BladePartSpec`, `BLADES`, `BLADE_BY_MANUFACTURER`, grip-title matrix, `blade_for_manufacturer()` |
+| `core/parts/grips.py` | `GripPartSpec`, `GRIPS`, matching-grip check, weighted grip roll |
+| `core/parts/accessories.py` | `AccessoryPartSpec`, `ACCESSORIES`, rarity spawn chances, compatibility filtering, accessory roll, throw mass / guard cooldown deltas |
+| `core/parts/elements.py` | `ElementPartSpec`, `ELEMENTS`, `ELEMENT_PART_BY_TYPE`, `ElementPolicy` eligibility, element roll, atlas keys |
+| `core/parts/weapon.py` | `MeleeWeaponParts` / `MeleeWeaponInstance` / `PlayerMeleeContext`, `ResolvedParts`, `resolve_weapon_name()` |
+| `core/parts/common.py` | `StatModifier`, `GestaltFragmentMeta`, prefix resolution, weighted pick |
+| `core/parts/validation.py` | `PART_REGISTRIES`, `validate_catalog()` invariants |
+
+`core/catalog.py` and `core/schemas.py` remain as thin compatibility facades that re-export these names (existing imports keep working). `core/loot_roller.py` is now only an orchestrator — grip/element/accessory eligibility and rolls live in their part modules. `core/stats.py`, `core/secondary.py` and `core/item_card.py` are generic math that consume the registries via `resolve_parts()`. `runtime/definitions/` and `runtime/resolver.py` iterate the registries, and `runtime/custom_assets.py` imports the derived `*_TO_KIT_ID` / `ELEMENT_ID_TO_ATLAS_KEY` maps from the part specs instead of duplicating them. `PartSlot.BODY_HOST` / `MATERIAL` are SDK-side structural slots with no data-side registry.
+
+### SDK definition builders (`runtime/definitions/`)
+
+The UE3 construction code used to be a single 1,550-line `runtime/definitions.py`. It is now a package:
+
+| Module | Owns |
+| :--- | :--- |
+| `helpers.py` / `donors.py` / `resources.py` | UE3 find/subpackage/struct helpers, vanilla donor harvesting, combat resource cache |
+| `context.py` | `BuildContext`: root packages + donors shared by all builders |
+| `firing_modes.py` / `weapon_types.py` | element melee firing modes (incl. Torgue splash), per-maker WeaponTypeDefinitions |
+| `name_parts.py` | title/prefix name parts + inventory preview tuning |
+| `parts.py` | `build_body_parts` / `build_blade_parts` / `build_grip_parts` / `build_accessory_parts` / `build_element_parts` / `build_material_parts` — one function per part type |
+| `balances.py` | part-list collections, 20 balances and dedicated drop pools |
+| `__init__.py` | `ensure_definitions_built()` orchestrator + AssetLibraryManager registration + all historical re-exports |
+
+Builders run in a fixed order from `ensure_definitions_built()` and iterate the `core/parts/` registries, so a new part needs **no SDK code changes**. `tests/test_definitions_package.py` locks the layout, builder order and compatibility re-exports.
+
+### Adding a part (example: a new accessory)
+
+1. Open `sdk_mods/melee_arsenal/core/parts/accessories.py` and add **one** `AccessoryPartSpec(...)` entry to `ACCESSORIES`: `part_id`, display name, prefixes, modifiers, roll `weight`, `min_rarity` / compatibility flags, `gestalt` + `donor_part_path`, `kit_id`, `throw_weight_kg`, `guard_cooldown_delta_sec`. Derived tables (`ACCESSORY_TO_KIT_ID`, `ACCESSORY_WEIGHT_KG`, `ACCESSORY_GUARD_COOLDOWN_DELTA`), eligibility pools and rolls are computed from that registry at import time — there is no second table to update.
+2. Run `python -m unittest discover -s tests`. `validate_catalog()` checks id/key agreement, donor paths, element policies, duplicate Gestalt/kit ids and roll weights; `tests/test_parts_catalog.py` covers the whole data layer.
+3. Add the matching mesh/atlas fragment in `tools/inkblade_gen/`, then rebuild the kit and UPKs (`./melee generate && ./melee build`): the compiled manifest is keyed by the part's `kit_id`. A `kit_id=None` part falls back to donor geometry.
+4. No `runtime/` edits are needed — `runtime/definitions/parts.py` iterates the registries when it builds UE3 parts, and `runtime/custom_assets.py` binds the kit fragments.
+5. Adding a **manufacturer** additionally needs a `MANUFACTURERS` entry, a Blade (`blades.py`) and a Grip (`grips.py`): every `Manufacturer` member must have both.
+
+Still comparatively large, but already registry-driven (no part edits needed): `runtime/combat.py` (hook-driven swing engine), `runtime/secondary.py` (throw/guard), `runtime/loot_pools.py` (world/vendors) and `runtime/__init__.py` (options, hooks, console commands). Those are the next candidates for a concern-level split.
 
 ---
 

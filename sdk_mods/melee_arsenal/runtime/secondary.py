@@ -45,7 +45,7 @@ from mods_base import hook  # type: ignore[import-not-found]
 from unrealsdk.hooks import Type, prevent_hooking_direct_calls  # type: ignore[import-not-found]
 
 from ..core.enums import Element, SecondaryAttack
-from ..core.schemas import MeleeWeaponInstance
+from ..core.parts.weapon import MeleeWeaponInstance
 from ..core.secondary import (
     GUARD_MAX_HOLD_SEC,
     GUARD_PARRY_WINDOW_SEC,

@@ -20,7 +20,7 @@ No custom sound files are bundled. Combat audio uses verified live BL2 `AkEvent`
 
 ## Palette & Lore
 
-Manufacturer palettes (`tools/inkblade_gen/config.py:PALETTE`) and element colours are original, chosen for readability against the charcoal ink linework. Weapon names, flavor text, and balance values derive from `sdk_mods/melee_arsenal/core/catalog.py` and `stats.py`, not from datamined BL2 strings.
+Manufacturer palettes (`tools/inkblade_gen/config.py:PALETTE`) and element colours are original, chosen for readability against the charcoal ink linework. Weapon names, flavor text, and balance values derive from `sdk_mods/melee_arsenal/core/parts/` (one module per part type) and `core/stats.py`, not from datamined BL2 strings.
 
 ## Third-Party
 
