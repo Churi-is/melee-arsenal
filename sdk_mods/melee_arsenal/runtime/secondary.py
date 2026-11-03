@@ -67,7 +67,7 @@ from ..core.secondary import (
 )
 from ..core.stats import ComputedCardStats, apply_guard_damage_reduction, compute_attack_damage
 from . import secondary_vfx
-from .log import log_error, log_info
+from .log import log_debug, log_debug_once, log_error, log_info
 from .resolver import get_local_player_controller, resolve_melee_weapon, unwrap_weapon_object
 from .state import STATE
 
@@ -93,7 +93,8 @@ def _is_dead(obj: Any) -> bool:
     try:
         flags = getattr(obj, "ObjectFlags", 0)
         return bool(int(flags) & _DEAD_OBJECT_FLAGS)
-    except Exception:
+    except Exception as exc:
+        log_debug_once("secondary._is_dead", f"_is_dead failed: {exc!r}")
         return False
 
 

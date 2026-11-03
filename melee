@@ -155,9 +155,14 @@ cmd_setup() {
   if [ ! -d "$REPO_ROOT/.venv" ]; then
     "$sys_py" -m venv "$REPO_ROOT/.venv"
   fi
-  "$REPO_ROOT/.venv/bin/python" -m pip install --upgrade pip Pillow
+  "$REPO_ROOT/.venv/bin/python" -m pip install --upgrade pip
+  if [ -f "$REPO_ROOT/requirements.txt" ]; then
+    "$REPO_ROOT/.venv/bin/python" -m pip install -r "$REPO_ROOT/requirements.txt"
+  else
+    "$REPO_ROOT/.venv/bin/python" -m pip install "Pillow>=10.1,<14"
+  fi
   ensure_gitignored ".venv/"
-  ok "Environment ready at .venv (Pillow installed)."
+  ok "Environment ready at .venv (Pillow installed from requirements.txt)."
 }
 
 kit_fingerprint() {
@@ -320,7 +325,7 @@ ver_zip.write_bytes(mod_zip.read_bytes())
 
 src_zip = dist / "source.zip"
 with zipfile.ZipFile(src_zip, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zs:
-    for top in ("README.md", ".gitignore", "melee", "sdk_mods", "tests", "tools"):
+    for top in ("README.md", "LICENSE", "requirements.txt", "pyproject.toml", ".gitignore", "melee", "sdk_mods", "tests", "tools", "docs"):
         target = repo / top
         if target.is_file():
             zs.write(target, target.name)

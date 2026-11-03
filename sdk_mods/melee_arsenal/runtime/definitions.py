@@ -42,7 +42,7 @@ from .custom_assets import (
     resolve_fitted_material_part,
     setup_custom_inkblade_assets,
 )
-from .log import log_error, log_info, log_warn, obj_path
+from .log import log_debug, log_debug_once, log_error, log_info, log_warn, obj_path
 from .state import KEEP_ALIVE_FLAGS, STATE
 
 
@@ -100,7 +100,8 @@ def _find(cls_name: str, path: str) -> Any:
         return None
     try:
         return unrealsdk.find_object(cls_name, path)
-    except Exception:
+    except Exception as exc:
+        log_debug_once(f"definitions._find:{cls_name}:{path}", f"_find {cls_name} {path} failed: {exc!r}")
         return None
 
 
@@ -131,8 +132,8 @@ def _harvest_pistol_donors() -> dict[str, Any]:
     for pkg_name in ("GD_Manufacturers", "GD_Weap_Pistol", "GD_Weap_Shotgun", "GD_Itempools"):
         try:
             unrealsdk.load_package(pkg_name)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_debug(f"load_package {pkg_name} failed: {exc!r}")
 
     donors: dict[str, Any] = {
         "wt": {},

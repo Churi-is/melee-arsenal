@@ -15,7 +15,7 @@ try:
 except ImportError:  # pragma: no cover
     unrealsdk = None  # type: ignore[assignment]
 
-from .log import log_info, log_warn, obj_path
+from .log import log_debug, log_info, log_warn, obj_path
 from .state import KEEP_ALIVE_FLAGS, STATE
 
 
@@ -42,8 +42,8 @@ def _get_live_managers() -> list[Any]:
         wg = unrealsdk.find_class("WillowGlobals").ClassDefaultObject.GetWillowGlobals()
         if wg is not None and getattr(wg, "AssLibMan", None) is not None:
             managers.append(wg.AssLibMan)
-    except Exception:
-        pass
+    except Exception as exc:
+        log_debug(f"_get_live_managers failed: {exc!r}")
     return managers
 
 
