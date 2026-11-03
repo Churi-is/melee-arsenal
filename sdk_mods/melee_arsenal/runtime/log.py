@@ -18,6 +18,39 @@ except ImportError:  # pragma: no cover
 
 LOG_FILE: Path = Path(MODS_DIR) / "melee_arsenal" / "melee_arsenal.log"
 
+_DEBUG_ONCE_KEYS: set[str] = set()
+
+
+def _should_log_debug() -> bool:
+    """Return True if debug logging is enabled, or if STATE is unavailable (offline tests)."""
+    try:
+        from .state import STATE  # local import to avoid cycle
+
+        return bool(getattr(STATE, "debug_attack_log", False))
+    except Exception:
+        return True
+
+
+def log_debug(msg: str) -> None:
+    """Debug-level log — gated by `STATE.debug_attack_log` when inside BL2."""
+    if not _should_log_debug():
+        return
+    line = f"[MeleeArsenal][DEBUG] {msg}"
+    if unrealsdk is not None:
+        try:
+            unrealsdk.logging.info(line)
+        except Exception:
+            pass
+    _append_file(line)
+
+
+def log_debug_once(key: str, msg: str) -> None:
+    """Log a debug message once per unique `key` to avoid per-frame spam."""
+    if key in _DEBUG_ONCE_KEYS:
+        return
+    _DEBUG_ONCE_KEYS.add(key)
+    log_debug(msg)
+
 
 def log_info(msg: str) -> None:
     line = f"[MeleeArsenal] {msg}"
@@ -47,6 +80,11 @@ def log_error(msg: str) -> None:
         except Exception:
             pass
     _append_file(line)
+
+
+def clear_debug_once_cache() -> None:
+    """Test helper — reset the once-per-site cache."""
+    _DEBUG_ONCE_KEYS.clear()
 
 
 def _append_file(line: str) -> None:

@@ -30,7 +30,7 @@ except ImportError:  # pragma: no cover
 from ..core.enums import Rarity
 from .custom_assets import assign_struct_array
 from .definitions import ensure_definitions_built
-from .log import log_error, log_info, log_warn, obj_path
+from .log import log_debug, log_debug_once, log_error, log_info, log_warn, obj_path
 from .state import KEEP_ALIVE_FLAGS, STATE
 
 # Sum of the 6 vanilla weapon classes in `Pool_Weapons_All_*`:
@@ -148,7 +148,8 @@ def _iter_loaded_pools() -> list[Any]:
         if callable(finder):
             try:
                 found = list(finder("ItemPoolDefinition"))
-            except Exception:
+            except Exception as exc:
+                log_debug_once("loot_pools._iter_loaded_pools", f"find_all ItemPoolDefinition failed: {exc!r}")
                 found = []
     _POOL_OBJECT_CACHE = found
     return found
@@ -162,8 +163,8 @@ def _find_pool(path: str) -> Any:
         found = unrealsdk.find_object("ItemPoolDefinition", path)
         if found is not None:
             return found
-    except Exception:
-        pass
+    except Exception as exc:
+        log_debug_once(f"loot_pools._find_pool:{path}", f"_find_pool {path} failed: {exc!r}")
     wanted = path.lower()
     for obj in _iter_loaded_pools():
         try:

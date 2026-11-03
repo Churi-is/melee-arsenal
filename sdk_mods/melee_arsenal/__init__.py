@@ -3,8 +3,9 @@
 - `melee_arsenal.core`: 100% SDK-independent CPython data & math layer (5 Blade-defined
   manufacturers, 3–4 part system, gun-scaled flat damage + player melee/Roid stacking,
   single-target & frontal-cleave 3D targeting, custom item cards, loot roller, and persistence).
-- `melee_arsenal.runtime`: Live Borderlands 2 PythonSDK (`unrealsdk` 3.2 / `mods_base` 3.8)
-  integration built against verified in-game object paths and function signatures.
+- `melee_arsenal.runtime`: Live Borderlands 2 PythonSDK integration for
+  Willow2 Mod Manager v3.8+ (mods_base 1.12+ / unrealsdk 3.2 / pyunrealsdk 1.10)
+  built against verified in-game object paths and function signatures.
 """
 from __future__ import annotations
 

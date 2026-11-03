@@ -1,0 +1,21 @@
+[project]
+name = "melee-arsenal"
+version = "0.4.5"
+description = "Borderlands 2 PythonSDK Mod — Melee Arsenal (InkBlade r6) + UPK pipeline"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+dependencies = ["Pillow>=10.1,<14"]
+authors = [{ name = "MeleeArsenal" }]
+
+[tool.pytest.pytest_plugins]
+# tests are plain unittest; no pytest config needed
+
+[project.urls]
+Homepage = "https://github.com/Churi-is/melee-arsenal"
+Repository = "https://github.com/Churi-is/melee-arsenal"
+Issues = "https://github.com/Churi-is/melee-arsenal/issues"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"

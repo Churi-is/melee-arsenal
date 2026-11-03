@@ -21,7 +21,7 @@ from ..core.persistence import (
     write_save_records_atomic,
 )
 from .definitions import ensure_definitions_built
-from .log import log_error, log_info, log_warn
+from .log import log_debug, log_debug_once, log_error, log_info, log_warn
 from .resolver import (
     apply_instance_to_definition_data,
     get_local_player_controller,
@@ -42,8 +42,8 @@ def _sanity_saver_active() -> bool:
             for mod in get_ordered_mod_list():
                 if str(getattr(mod, "name", "")) == "Sanity Saver":
                     return bool(getattr(mod, "is_enabled", False))
-        except Exception:
-            pass
+        except Exception as exc:
+            log_debug(f"Sanity Saver check failed: {exc!r}")
     for name, module in list(sys.modules.items()):
         if name.endswith("SanitySaver") and getattr(module, "instance", None) is not None:
             return bool(getattr(module.instance, "IsEnabled", False))
@@ -63,8 +63,8 @@ def _get_save_name_from_pc(pc: Any) -> str | None:
             last = getattr(sgm, "LastLoadedFilePath", None) or getattr(sgm, "SaveGameFile", None)
             if last and str(last).strip():
                 return Path(str(last)).stem
-    except Exception:
-        pass
+    except Exception as exc:
+        log_debug_once("persistence._get_save_name", f"GetSaveGameManager failed: {exc!r}")
     return None
 
 
@@ -89,8 +89,8 @@ def _collect_carried_melee_weapons(pawn: Any) -> list[tuple[Any, str]]:
                 if resolve_melee_weapon(wpn, sync_weapon_props=False) is not None:
                     found.append((wpn, tag))
             cur = getattr(cur, "Inventory", None)
-    except Exception:
-        pass
+    except Exception as exc:
+        log_debug(f"InventoryChain scan failed: {exc!r}")
 
     try:
         for item in getattr(inv_mgr, "Backpack", []) or []:
@@ -99,8 +99,8 @@ def _collect_carried_melee_weapons(pawn: Any) -> list[tuple[Any, str]]:
                 seen_ids.add(id(wpn))
                 if resolve_melee_weapon(wpn, sync_weapon_props=False) is not None:
                     found.append((wpn, "backpack"))
-    except Exception:
-        pass
+    except Exception as exc:
+        log_debug(f"Backpack scan failed: {exc!r}")
 
     return found
 
@@ -172,7 +172,8 @@ def restore_player_melee_inventory(pc: Any = None, explicit_save_name: str | Non
     try:
         target = save_record_path(SAVES_DIR, save_name)
         records = read_save_records(target)
-    except Exception:
+    except Exception as exc:
+        log_debug(f"read_save_records for restore failed: {exc!r}")
         return 0
 
     if not records:

@@ -1,4 +1,4 @@
-"""Live BL2 Melee Weapon Combat, Wall-Occluded Cleave & First-Person `Bladed_Melee` Engine (v0.2.6).
+"""Live BL2 Melee Weapon Combat, Wall-Occluded Cleave & First-Person `Bladed_Melee` Engine.
 
 Built 100% on empirical results from `melee_combat_probe_report.json` (Sanctuary live capture):
 
@@ -75,7 +75,7 @@ from ..core.stats import (
     compute_attack_damage,
 )
 from ..core.targeting import TargetCandidate, Vec3
-from .log import log_error, log_info
+from .log import log_debug, log_debug_once, log_error, log_info
 from .resolver import get_local_player_controller, resolve_melee_weapon, unwrap_weapon_object
 from .secondary import (
     begin_throw,
@@ -254,7 +254,8 @@ def _is_dead(obj: Any) -> bool:
     try:
         flags = getattr(obj, "ObjectFlags", 0)
         return bool(int(flags) & DEAD_OBJECT_FLAGS)
-    except Exception:
+    except Exception as exc:
+        log_debug_once("combat._is_dead", f"_is_dead failed on {obj!r}: {exc!r}")
         return False
 
 
@@ -265,7 +266,8 @@ def _wrap_weak(obj: Any) -> Any:
     if wp_cls is not None:
         try:
             return wp_cls(obj)
-        except Exception:
+        except Exception as exc:
+            log_debug_once("combat._wrap_weak", f"_wrap_weak failed on {obj!r}: {exc!r}")
             return obj
     return obj
 
@@ -277,7 +279,8 @@ def _deref_weak(ref: Any) -> Any:
         try:
             obj = ref()
             return None if _is_dead(obj) else obj
-        except Exception:
+        except Exception as exc:
+            log_debug_once("combat._deref_weak", f"_deref_weak callable failed on {ref!r}: {exc!r}")
             return None
     return None if _is_dead(ref) else ref
 
@@ -285,7 +288,8 @@ def _deref_weak(ref: Any) -> Any:
 def _safe_find(cls_name: str, path: str) -> Any:
     try:
         return unrealsdk.find_object(cls_name, path)
-    except Exception:
+    except Exception as exc:
+        log_debug_once(f"combat._safe_find:{cls_name}:{path}", f"_safe_find {cls_name} {path} failed: {exc!r}")
         return None
 
 
@@ -297,11 +301,12 @@ def _make_vec_from(template_vec: Any, x: float, y: float, z: float) -> Any:
             v.Y = float(y)
             v.Z = float(z)
             return v
-        except Exception:
-            pass
+        except Exception as exc:
+            log_debug_once("combat._make_vec_from.copy", f"_make_vec_from copy failed: {exc!r}")
     try:
         return unrealsdk.make_struct("Vector", X=float(x), Y=float(y), Z=float(z))
-    except Exception:
+    except Exception as exc:
+        log_debug_once("combat._make_vec_from.make_struct", f"_make_vec_from make_struct failed: {exc!r}")
         return (float(x), float(y), float(z))
 
 
@@ -344,8 +349,8 @@ def ensure_combat_resources_cached() -> None:
         ):
             try:
                 unrealsdk.load_package(pkg)
-            except Exception:
-                pass
+            except Exception as exc:
+                log_debug_once(f"combat.ensure_cached.load:{pkg}", f"load_package {pkg} failed: {exc!r}")
 
     for path in (ATTR_MELEE_MODIFIER, ATTR_ROID_BUFF, ATTR_STATUS_DMG_MOD, ATTR_STATUS_CHANCE_MOD):
         if path not in _CACHED_ATTRS or _CACHED_ATTRS[path] is None:
@@ -375,13 +380,15 @@ def ensure_combat_resources_cached() -> None:
     if _CACHED_BULLET_DMG_CLS is None:
         try:
             _CACHED_BULLET_DMG_CLS = unrealsdk.find_class("WillowDmgSource_Bullet")
-        except Exception:
+        except Exception as exc:
+            log_debug(f"find_class WillowDmgSource_Bullet failed: {exc!r}")
             _CACHED_BULLET_DMG_CLS = None
 
     if _CACHED_GRENADE_DMG_CLS is None:
         try:
             _CACHED_GRENADE_DMG_CLS = unrealsdk.find_class("WillowDmgSource_Grenade")
-        except Exception:
+        except Exception as exc:
+            log_debug(f"find_class WillowDmgSource_Grenade failed: {exc!r}")
             _CACHED_GRENADE_DMG_CLS = _CACHED_BULLET_DMG_CLS
 
     _cache_torgue_explosion_assets()
@@ -1396,7 +1403,7 @@ def _update_first_person_slash_motion(pc: Any) -> None:
 
 
 def tick_melee_projectiles() -> None:
-    """Kept as a no-op compatibility hook for `runtime/__init__.py` (`v0.2.6` hits synchronously)."""
+    """Kept as a no-op compatibility hook for `runtime/__init__.py` (hits are synchronous)."""
     return None
 
 

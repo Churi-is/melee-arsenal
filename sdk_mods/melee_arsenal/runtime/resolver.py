@@ -51,7 +51,7 @@ from .definitions import (
     get_or_create_prefix_part,
     get_or_create_title_part,
 )
-from .log import log_error, log_info, log_warn, obj_path
+from .log import log_debug, log_debug_once, log_error, log_info, log_warn, obj_path
 from .state import STATE
 
 
@@ -81,16 +81,16 @@ def unwrap_weapon_object(item_or_pickup: Any) -> Any:
         ptr = getattr(item_or_pickup, "ObjectPointer", None)
         if ptr is not None and ptr is not item_or_pickup:
             item_or_pickup = ptr
-    except Exception:
-        pass
+    except Exception as exc:
+        log_debug_once("resolver.unwrap.ObjectPointer", f"unwrap ObjectPointer failed: {exc!r}")
     if hasattr(item_or_pickup, "DefinitionData"):
         return item_or_pickup
     try:
         pickup_inv = getattr(item_or_pickup, "Inventory", None)
         if pickup_inv is not None and hasattr(pickup_inv, "DefinitionData"):
             return pickup_inv
-    except Exception:
-        pass
+    except Exception as exc:
+        log_debug_once("resolver.unwrap.Inventory", f"unwrap Inventory failed: {exc!r}")
     return None
 
 
@@ -104,7 +104,8 @@ def is_melee_definition_data(dd: Any) -> bool:
             return True
         if obj_path(getattr(dd, "BalanceDefinition", None)) in STATE.balance_path_to_meta:
             return True
-    except Exception:
+    except Exception as exc:
+        log_debug_once("resolver.is_melee_definition_data", f"is_melee_definition_data check failed: {exc!r}")
         return False
     return False
 
@@ -115,7 +116,8 @@ def is_melee_weapon(item_or_pickup: Any) -> bool:
         return False
     try:
         return is_melee_definition_data(wpn.DefinitionData)
-    except Exception:
+    except Exception as exc:
+        log_debug_once("resolver.is_melee_weapon", f"is_melee_weapon check failed: {exc!r}")
         return False
 
 
@@ -132,7 +134,8 @@ def _infer_rarity(wpn: Any, dd: Any) -> Rarity:
         if rl == 3:
             return Rarity.RARE
         return Rarity.VERY_RARE
-    except Exception:
+    except Exception as exc:
+        log_debug_once("resolver._infer_rarity", f"_infer_rarity failed: {exc!r}")
         return Rarity.UNCOMMON
 
 
