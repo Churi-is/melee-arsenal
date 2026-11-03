@@ -269,9 +269,21 @@ cmd_package() {
     esac
   done
 
-  if [ "$do_build" -eq 1 ] || [ "$(upk_kit_state)" = "stale" ]; then
-    cmd_build
-  fi
+  case "$(upk_kit_state)" in
+    stale)
+      cmd_build
+      ;;
+    unknown)
+      if [ "$do_build" -eq 1 ]; then
+        cmd_build
+      else
+        warn "Cannot verify the kit fingerprint (no kit/Python). Packaging the existing UPKs; run './melee package --build' to recompile from source."
+      fi
+      ;;
+    current)
+      if [ "$do_build" -eq 1 ]; then cmd_build; fi
+      ;;
+  esac
 
   local py ver
   py="$(pick_python)"
@@ -304,14 +316,16 @@ ver_zip = dist / f"melee_arsenal-v{ver}.zip"
 
 meshes_upk = repo / "build" / "WillowGame" / "CookedPCConsole" / "MeleeArsenalMeshes.upk"
 tex_upk = repo / "build" / "WillowGame" / "CookedPCConsole" / "MeleeArsenalTextures.upk"
-if not meshes_upk.is_file() or not tex_upk.is_file():
-    raise SystemExit("Missing cooked UPKs in build/WillowGame/CookedPCConsole/. Run './melee build' first.")
+manifest_src = repo / "build" / "inkblade_compiled_manifest.json"
+if not meshes_upk.is_file() or not tex_upk.is_file() or not manifest_src.is_file():
+    raise SystemExit("Missing cooked UPKs or manifest in build/. Run './melee build' first.")
 
 with zipfile.ZipFile(mod_zip, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
     zf.write(meshes_upk, "WillowGame/CookedPCConsole/MeleeArsenalMeshes.upk")
     zf.write(tex_upk, "WillowGame/CookedPCConsole/MeleeArsenalTextures.upk")
     zf.write(meshes_upk, "sdk_mods/melee_arsenal/upk/MeleeArsenalMeshes.upk")
-    zf.write(repo / "build" / "inkblade_compiled_manifest.json", "sdk_mods/melee_arsenal/data/inkblade_compiled_manifest.json")
+    zf.write(tex_upk, "sdk_mods/melee_arsenal/upk/MeleeArsenalTextures.upk")
+    zf.write(manifest_src, "sdk_mods/melee_arsenal/data/inkblade_compiled_manifest.json")
     mod_dir = repo / "sdk_mods" / "melee_arsenal"
     for f in sorted(mod_dir.rglob("*")):
         if f.is_file():
@@ -416,6 +430,9 @@ cmd_install() {
   # A regenerated kit leaves perfectly valid, perfectly stale UPKs behind: same file names, same
   # texture names, old pixels.  Compare the kit fingerprint the packages were built from against a
   # fresh one, so `./melee dev` after `./melee generate` actually ships the new art.
+  if [ ! -f "$meshes_upk" ] || [ ! -f "$tex_upk" ] || [ ! -f "$BUILD_MANIFEST" ]; then
+    die "Missing cooked UPKs or manifest in $COOKED_REL. Run './melee build' first (or drop --no-rebuild)."
+  fi
   if [ "$no_rebuild" -eq 1 ]; then
     if [ "$(upk_kit_state)" = "stale" ]; then
       warn "Installing packages that do not match the kit on disk (--no-rebuild) — the game will show the old textures."
@@ -446,6 +463,7 @@ cmd_install() {
   sync_python_mod_dir "$REPO_ROOT/$MOD_REL" "$sdk_dir/melee_arsenal"
   mkdir -p "$sdk_dir/melee_arsenal/upk" "$sdk_dir/melee_arsenal/data"
   cp -f "$meshes_upk" "$sdk_dir/melee_arsenal/upk/MeleeArsenalMeshes.upk"
+  cp -f "$tex_upk" "$sdk_dir/melee_arsenal/upk/MeleeArsenalTextures.upk"
   cp -f "$BUILD_MANIFEST" "$sdk_dir/melee_arsenal/data/inkblade_compiled_manifest.json"
   ok "Synced mod -> $sdk_dir/melee_arsenal/ (sidecar saves in _melee_arsenal_saves preserved)"
 
@@ -560,12 +578,14 @@ cmd_status() {
     local sdk_dir
     sdk_dir="$(resolve_sdk_mods_dir "$bl2")"
     printf "  BL2 install     : %s✓%s %s\n" "$C_GREEN" "$C_RESET" "$bl2"
-    if [ -d "$sdk_dir/melee_arsenal" ] && [ -f "$bl2/WillowGame/CookedPCConsole/MeleeArsenalTextures.upk" ]; then
-      if cmp -s "$REPO_ROOT/$MOD_REL/__init__.py" "$sdk_dir/melee_arsenal/__init__.py" && \
-         [ -f "$t_upk" ] && cmp -s "$t_upk" "$bl2/WillowGame/CookedPCConsole/MeleeArsenalTextures.upk"; then
-        printf "  Installed state : %s✓ installed & in sync%s\n" "$C_GREEN" "$C_RESET"
+    if [ -d "$sdk_dir/melee_arsenal" ] || [ -f "$bl2/WillowGame/CookedPCConsole/MeleeArsenalTextures.upk" ]; then
+      local sync_json
+      if sync_json="$("$py" "$REPO_ROOT/tools/check_install_sync.py" --repo "$REPO_ROOT" --sdk-dir "$sdk_dir" --cooked-dir "$bl2/WillowGame/CookedPCConsole" 2>/dev/null)"; then
+        printf "  Installed state : %s✓ installed & in sync (full payload hash)%s\n" "$C_GREEN" "$C_RESET"
       else
-        printf "  Installed state : %s! installed (out of sync — run ./melee install)%s\n" "$C_YELLOW" "$C_RESET"
+        local sync_detail
+        sync_detail="$("$py" -c 'import json,sys; d=json.loads(sys.argv[1]); print(f"{len(d.get(\"missing\",[]))} missing, {len(d.get(\"different\",[]))} different of {d.get(\"checked\",0)} files")' "$sync_json" 2>/dev/null || echo "partial payload")"
+        printf "  Installed state : %s! installed (out of sync — %s; run ./melee install)%s\n" "$C_YELLOW" "$sync_detail" "$C_RESET"
       fi
     else
       printf "  Installed state : not installed (run ./melee install)\n"

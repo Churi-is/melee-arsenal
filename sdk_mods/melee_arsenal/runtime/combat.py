@@ -76,6 +76,14 @@ from ..core.stats import (
 )
 from ..core.targeting import TargetCandidate, Vec3
 from .log import log_debug, log_debug_once, log_error, log_info
+from .object_identity import (
+    cache_key,
+    deref_weak,
+    is_dead,
+    same_uobject,
+    uobject_key,
+    wrap_weak,
+)
 from .resolver import get_local_player_controller, resolve_melee_weapon, unwrap_weapon_object
 from .secondary import (
     begin_throw,
@@ -84,8 +92,6 @@ from .secondary import (
     try_begin_guard,
 )
 from .state import STATE
-
-DEAD_OBJECT_FLAGS = 0x0000200000000000 | 0x0000000200000000 | 0x8000 | 0x10000
 
 ATTR_MELEE_MODIFIER = "D_Attributes.DamageSourceModifiers.InstigatedMeleeDamageModifier"
 ATTR_ROID_BUFF = "D_Attributes.DamageSourceModifiers.InstigatedMeleeDamageAddedBuff"
@@ -153,7 +159,7 @@ DAMAGE_EVENT_FLAG_CRIT = 1
 # apply exact, already-crit-multiplied damage) carries no HitInfo, so without help the crit text never
 # appears. We tag each victim we crit and re-issue the vanilla display call with the crit bit forced.
 CRIT_FEEDBACK_WINDOW_SEC = 0.75
-_PENDING_CRIT_FEEDBACK: dict[int, float] = {}
+_PENDING_CRIT_FEEDBACK: dict[str, float] = {}
 
 # ADS zoom stays suppressed on Melee Weapons (see `on_melee_weapon_start_zoom_pre`) because RMB /
 # Left Trigger now drives each manufacturer's secondary attack: Bandit & Torgue throw their blade,
@@ -187,10 +193,10 @@ _EXPLOSION_ASSETS_SCANNED: bool = False
 
 # Cached `Pawn.Arms` AnimNodeSlots keyed by `id(arms)`:
 #   id(arms) -> {"action": WeakPointer|obj, "custom": WeakPointer|obj, "recoil": WeakPointer|obj}
-_ARMS_SLOT_CACHE: dict[int, dict[str, Any]] = {}
+_ARMS_SLOT_CACHE: dict[str, dict[str, Any]] = {}
 
 # Fallback `Arms.SkeletalMesh` rest baseline if procedural fallback is ever used
-_ARMS_REST_BASELINE: dict[int, dict[str, Any]] = {}
+_ARMS_REST_BASELINE: dict[str, dict[str, Any]] = {}
 
 # Live first-person posture for the secondary attacks ("" = normal idle hands):
 #   POSE_GUARD  — blade braced across the view while RMB is held
@@ -248,41 +254,11 @@ _FIRST_SWING_LOGGED: bool = False
 # Safe Object, WeakPointer & Struct Helpers
 # ---------------------------------------------------------------------------
 
-def _is_dead(obj: Any) -> bool:
-    if obj is None:
-        return True
-    try:
-        flags = getattr(obj, "ObjectFlags", 0)
-        return bool(int(flags) & DEAD_OBJECT_FLAGS)
-    except Exception as exc:
-        log_debug_once("combat._is_dead", f"_is_dead failed on {obj!r}: {exc!r}")
-        return False
-
-
-def _wrap_weak(obj: Any) -> Any:
-    if obj is None:
-        return None
-    wp_cls = getattr(unrealsdk.unreal, "WeakPointer", None) if hasattr(unrealsdk, "unreal") else None
-    if wp_cls is not None:
-        try:
-            return wp_cls(obj)
-        except Exception as exc:
-            log_debug_once("combat._wrap_weak", f"_wrap_weak failed on {obj!r}: {exc!r}")
-            return obj
-    return obj
-
-
-def _deref_weak(ref: Any) -> Any:
-    if ref is None:
-        return None
-    if callable(ref) and not hasattr(ref, "_path_name") and not hasattr(ref, "PlayCustomAnim"):
-        try:
-            obj = ref()
-            return None if _is_dead(obj) else obj
-        except Exception as exc:
-            log_debug_once("combat._deref_weak", f"_deref_weak callable failed on {ref!r}: {exc!r}")
-            return None
-    return None if _is_dead(ref) else ref
+# Shared identity/weak-reference helpers (see runtime.object_identity).  Keep the historical
+# private names as aliases because diagnostics and tests patch them at the combat boundary.
+_is_dead = is_dead
+_wrap_weak = wrap_weak
+_deref_weak = deref_weak
 
 
 def _safe_find(cls_name: str, path: str) -> Any:
@@ -325,6 +301,80 @@ def _rot_to_forward(rot: Any) -> tuple[float, float, float]:
     yaw = _s16(getattr(rot, "Yaw", 0)) * (math.pi / 32768.0)
     cp = math.cos(pitch)
     return (cp * math.cos(yaw), cp * math.sin(yaw), math.sin(pitch))
+
+# ---------------------------------------------------------------------------
+# Shared attack-status / camera-motion policy (primary swings and throws)
+# ---------------------------------------------------------------------------
+
+_STATUS_CHANCE_FIELDS = (
+    "BaseStatusEffectChanceModifierBaseValue",
+    "BaseStatusEffectChanceModifier",
+    "StatusEffectChanceModifierBaseValue",
+    "StatusEffectChanceModifier",
+)
+
+
+def set_weapon_status_chance(wpn: Any, value: float) -> None:
+    for attr_n in _STATUS_CHANCE_FIELDS:
+        try:
+            setattr(wpn, attr_n, float(value))
+        except Exception as exc:
+            log_debug_once(f"combat.status_chance:{attr_n}", f"set {attr_n} failed: {exc!r}")
+
+
+def sync_weapon_status_damage(wpn: Any, breakdown: Any) -> None:
+    """Write the player-scaled DoT value used by the native status-effect pipeline."""
+    dot = float(max(0.0, getattr(breakdown, "effective_dot_dps", 0.0)))
+    for attr_n in ("StatusEffectDamageBaseValue", "StatusEffectDamage"):
+        try:
+            setattr(wpn, attr_n, dot)
+        except Exception as exc:
+            log_debug_once(f"combat.status_damage:{attr_n}", f"set {attr_n} failed: {exc!r}")
+
+
+def select_attack_damage_type(wpn: Any, card: ComputedCardStats, breakdown: Any) -> tuple[Any, bool]:
+    """One authoritative proc roll for both LMB and thrown hits.
+
+    The chance comes from the *player-scaled* breakdown, not the raw card, and the weapon's
+    native status modifiers are forced so BL2 does not double-roll behind our back.
+    """
+    proc = False
+    if card.element in (Element.FIRE, Element.SHOCK, Element.CORROSIVE, Element.SLAG):
+        proc = random.random() < float(breakdown.effective_proc_chance)
+        if proc:
+            dt_def = _CACHED_DMG_TYPES_PROC.get(card.element)
+            set_weapon_status_chance(wpn, 50.0)
+        else:
+            dt_def = _CACHED_DMG_TYPES_NODOT.get(card.element) or _CACHED_DMG_TYPES_PROC.get(card.element)
+            set_weapon_status_chance(wpn, 0.0)
+    else:
+        dt_def = _CACHED_DMG_TYPES_PROC.get(card.element)
+        set_weapon_status_chance(wpn, 0.0)
+    return dt_def, proc
+
+
+def play_camera_anim(
+    pc: Any,
+    canim: Any,
+    scale: float,
+    rate: float,
+    blend_in: float,
+    blend_out: float,
+) -> bool:
+    """Play a mod-authored camera animation, honoring the user's motion scale.
+
+    Never falls back to an unmodified `ClientPlayCameraAnim(canim)` call: that would bypass
+    the accessibility setting on SDK builds with a different signature.
+    """
+    if pc is None or canim is None or float(scale) <= 0.001:
+        return False
+    try:
+        pc.ClientPlayCameraAnim(canim, float(scale), float(rate), float(blend_in), float(blend_out), False, False)
+        return True
+    except Exception as exc:
+        log_debug_once("combat.play_camera_anim", f"ClientPlayCameraAnim failed: {exc!r}")
+        return False
+
 
 
 # ---------------------------------------------------------------------------
@@ -623,7 +673,7 @@ def on_player_take_damage_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
     """
     try:
         pc = get_local_player_controller()
-        if pc is None or obj is None or getattr(pc, "Pawn", None) is not obj:
+        if pc is None or obj is None or not same_uobject(getattr(pc, "Pawn", None), obj):
             return None
 
         # RMB Guard (Hyperion / Jakobs) supersedes the passive perk: a braced hit has the card
@@ -685,12 +735,12 @@ def _mark_pending_crit_feedback(victim: Any) -> None:
     for stale_id, expires_at in list(_PENDING_CRIT_FEEDBACK.items()):
         if expires_at < now:
             _PENDING_CRIT_FEEDBACK.pop(stale_id, None)
-    _PENDING_CRIT_FEEDBACK[id(victim)] = now + CRIT_FEEDBACK_WINDOW_SEC
+    _PENDING_CRIT_FEEDBACK[cache_key(victim)] = now + CRIT_FEEDBACK_WINDOW_SEC
 
 
 def _clear_pending_crit_feedback(victim: Any) -> None:
     if victim is not None:
-        _PENDING_CRIT_FEEDBACK.pop(id(victim), None)
+        _PENDING_CRIT_FEEDBACK.pop(cache_key(victim), None)
 
 
 def clear_all_pending_crit_feedback() -> None:
@@ -721,22 +771,22 @@ def on_display_recent_damage_pre(obj: Any, args: Any, ret: Any, func: Any) -> An
         if actor is None:
             return None
 
-        expires_at = _PENDING_CRIT_FEEDBACK.get(id(actor))
+        expires_at = _PENDING_CRIT_FEEDBACK.get(cache_key(actor))
         if expires_at is None:
             return None
         if time.monotonic() > expires_at:
-            _PENDING_CRIT_FEEDBACK.pop(id(actor), None)
+            _PENDING_CRIT_FEEDBACK.pop(cache_key(actor), None)
             return None
 
         # Only ever touch the local player's own client-side numbers (co-op safe).
         pc = getattr(args, "PC", None)
         local_pc = get_local_player_controller()
-        if pc is not None and local_pc is not None and pc is not local_pc:
+        if pc is not None and local_pc is not None and not same_uobject(pc, local_pc):
             return None
 
         flags = int(getattr(data, "DamageEventFlags", 0) or 0)
         if flags & DAMAGE_EVENT_FLAG_CRIT:
-            _PENDING_CRIT_FEEDBACK.pop(id(actor), None)
+            _PENDING_CRIT_FEEDBACK.pop(cache_key(actor), None)
             return None
 
         try:
@@ -745,7 +795,7 @@ def on_display_recent_damage_pre(obj: Any, args: Any, ret: Any, func: Any) -> An
             return None
 
         # Consume the tag so later DoT ticks / follow-up hits never inherit a stale crit flag.
-        _PENDING_CRIT_FEEDBACK.pop(id(actor), None)
+        _PENDING_CRIT_FEEDBACK.pop(cache_key(actor), None)
         try:
             with prevent_hooking_direct_calls():
                 func(args)
@@ -820,7 +870,7 @@ def _get_arms_anim_slots(arms: Any) -> dict[str, Any]:
     """Locate & cache `WeaponAction`, `CustomAnimSlot`, and `WeaponRecoil` on `Pawn.Arms`."""
     if arms is None or _is_dead(arms):
         return {}
-    aid = id(arms)
+    aid = cache_key(arms)
     cached = _ARMS_SLOT_CACHE.get(aid)
     if cached is not None:
         act = _deref_weak(cached.get("action"))
@@ -836,7 +886,7 @@ def _get_arms_anim_slots(arms: Any) -> dict[str, Any]:
         for slot in list(unrealsdk.find_all("AnimNodeSlot", exact=False)):
             if _is_dead(slot):
                 continue
-            if getattr(slot, "SkelComponent", None) != arms:
+            if not same_uobject(getattr(slot, "SkelComponent", None), arms):
                 continue
             nname = str(getattr(slot, "NodeName", ""))
             if nname == "WeaponAction":
@@ -850,6 +900,7 @@ def _get_arms_anim_slots(arms: Any) -> dict[str, Any]:
 
     if found_act is not None or found_cus is not None or found_rec is not None:
         _ARMS_SLOT_CACHE[aid] = {
+            "arms_ref": _wrap_weak(arms),
             "action": _wrap_weak(found_act),
             "custom": _wrap_weak(found_cus),
             "recoil": _wrap_weak(found_rec),
@@ -857,24 +908,8 @@ def _get_arms_anim_slots(arms: Any) -> dict[str, Any]:
     return {"action": found_act, "custom": found_cus, "recoil": found_rec}
 
 
-def _uobject_key(obj: Any) -> str:
-    """Stable identity string for a UObject wrapper (`""` when it cannot be read)."""
-    if obj is None:
-        return ""
-    try:
-        return str(obj._path_name())
-    except Exception:
-        return ""
-
-
-def _same_uobject(a: Any, b: Any) -> bool:
-    """Identity check that survives pyunrealsdk handing back a fresh Python wrapper."""
-    if a is None or b is None:
-        return False
-    if a is b:
-        return True
-    ka, kb = _uobject_key(a), _uobject_key(b)
-    return bool(ka) and ka == kb
+_uobject_key = uobject_key
+_same_uobject = same_uobject
 
 
 def _snapshot_hands(sm: Any, arms: Any) -> dict[str, Any] | None:
@@ -905,13 +940,13 @@ def _capture_arms_rest_transform(arms: Any, sm: Any) -> dict[str, Any] | None:
         # The hands are currently displaced by a pose: whatever is on the mesh right now is NOT the
         # rest transform, so capturing it would bake the offset in for good.
         return None
-    entry = _ARMS_REST_BASELINE.get(id(sm))
+    entry = _ARMS_REST_BASELINE.get(cache_key(sm))
     if entry is not None:
         # A recycled `id()` (map change / pawn respawn) must never be mistaken for the same mesh,
         # or the pose would be restored onto a dead object and the live hands would stay offset.
-        if _deref_weak(entry.get("sm_ref")) is sm:
+        if same_uobject(_deref_weak(entry.get("sm_ref")), sm):
             return entry
-        _ARMS_REST_BASELINE.pop(id(sm), None)
+        _ARMS_REST_BASELINE.pop(cache_key(sm), None)
     try:
         ro0 = sm.RotOrigin
         origin0 = getattr(sm, "Origin", None)
@@ -925,7 +960,7 @@ def _capture_arms_rest_transform(arms: Any, sm: Any) -> dict[str, Any] | None:
                 else None
             ),
         }
-        _ARMS_REST_BASELINE[id(sm)] = entry
+        _ARMS_REST_BASELINE[cache_key(sm)] = entry
         log_info(
             f"Captured first-person arms rest transform: rot={entry['rot']}, loc={entry.get('loc')}"
         )
@@ -1153,14 +1188,14 @@ def capture_first_person_rest_transform() -> bool:
     snap = _snapshot_hands(sm, arms)
     if snap is None:
         return False
-    entry = _ARMS_REST_BASELINE.get(id(sm))
+    entry = _ARMS_REST_BASELINE.get(cache_key(sm))
     if (
         entry is None
         or entry.get("rot") != snap["rot"]
         or entry.get("loc") != snap["loc"]
         or entry.get("sm_key") != snap["sm_key"]
     ):
-        _ARMS_REST_BASELINE[id(sm)] = snap
+        _ARMS_REST_BASELINE[cache_key(sm)] = snap
         log_info(
             f"Captured first-person arms rest transform: rot={snap['rot']}, loc={snap.get('loc')}"
         )
@@ -1195,7 +1230,7 @@ def _write_rest_transforms() -> None:
     _restore_blade()
     entries = list(_ARMS_REST_BASELINE.items())
     if _POSE_REST is not None:
-        entries.append((-1, _POSE_REST))
+        entries.append(("__pose__", _POSE_REST))
     for sm_id, entry in entries:
         sm = _deref_weak(entry.get("sm_ref"))
         arms = _deref_weak(entry.get("arms_ref"))
@@ -1310,22 +1345,7 @@ def _trigger_first_person_blade_swing(
         shake_scale = float(getattr(STATE, "camera_shake_scale", 0.5) or 0.0)
         scale *= cadence_damping * shake_scale * CAMERA_SHAKE_SLIDER_GAIN
 
-        if canim is not None and scale > 0.001:
-            try:
-                pc.ClientPlayCameraAnim(
-                    canim,
-                    scale,
-                    rate,
-                    CAMERA_SHAKE_BLEND_IN_SEC,
-                    CAMERA_SHAKE_BLEND_OUT_SEC,
-                    False,
-                    False,
-                )
-            except Exception:
-                try:
-                    pc.ClientPlayCameraAnim(canim)
-                except Exception:
-                    pass
+        play_camera_anim(pc, canim, scale, rate, CAMERA_SHAKE_BLEND_IN_SEC, CAMERA_SHAKE_BLEND_OUT_SEC)
 
     # 4. Crisp melee slash whoosh audio
     if pawn is not None:
@@ -1375,7 +1395,7 @@ def _update_first_person_slash_motion(pc: Any) -> None:
 
     arms = getattr(pawn, "Arms", None)
     sm = getattr(arms, "SkeletalMesh", None) if arms is not None else None
-    entry = _ARMS_REST_BASELINE.get(id(sm)) if sm is not None else None
+    entry = _ARMS_REST_BASELINE.get(cache_key(sm)) if sm is not None else None
     if sm is None or entry is None:
         sm_state.active = False
         return
@@ -1400,11 +1420,6 @@ def _update_first_person_slash_motion(pc: Any) -> None:
             arms.ForceUpdate(False)
     except Exception:
         sm_state.active = False
-
-
-def tick_melee_projectiles() -> None:
-    """Kept as a no-op compatibility hook for `runtime/__init__.py` (hits are synchronous)."""
-    return None
 
 
 # ---------------------------------------------------------------------------
@@ -1472,12 +1487,12 @@ def _snapshot_cleave_candidates(shooter: Any) -> tuple[list[TargetCandidate], di
     if world_info is None:
         return candidates, pawn_map
 
-    seen: set[int] = set()
+    seen: set[str] = set()
     cur = getattr(world_info, "PawnList", None)
     steps = 0
     while cur is not None and steps < 800:
         steps += 1
-        cid = id(cur)
+        cid = cache_key(cur)
         if cid in seen:
             break
         seen.add(cid)
@@ -1673,12 +1688,7 @@ def _execute_melee_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCar
     dmg_normal = compute_attack_damage(card, ctx, is_crit=False)
     dmg_crit = compute_attack_damage(card, ctx, is_crit=True)
 
-    if dmg_normal.effective_dot_dps > 0:
-        for attr_n in ("StatusEffectDamageBaseValue", "StatusEffectDamage"):
-            try:
-                setattr(wpn, attr_n, float(dmg_normal.effective_dot_dps))
-            except Exception:
-                pass
+    sync_weapon_status_damage(wpn, dmg_normal)
 
     # 4. Primary 0-width crosshair trace (detects headshots, Target Dummies, barrels, or ground/walls)
     _combat_breadcrumb("before center trace")
@@ -1690,10 +1700,10 @@ def _execute_melee_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCar
 
     # List of `(actor, hit_xyz, bone_name)` to strike
     targets_to_strike: list[tuple[Any, tuple[float, float, float], str]] = []
-    seen_ids: set[int] = set()
+    seen_ids: set[str] = set()
 
     if _is_valid_melee_victim(shooter, center_actor):
-        seen_ids.add(id(center_actor))
+        seen_ids.add(cache_key(center_actor))
         targets_to_strike.append((center_actor, center_hit_xyz or center_end_xyz, center_bone))
 
     # 5. Cone acquisition (`SINGLE_TARGET` 22.5° assist vs `FRONTAL_CLEAVE` full arc)
@@ -1717,7 +1727,7 @@ def _execute_melee_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCar
 
         for cand in candidates:
             cpawn = pawn_map.get(cand.target_id)
-            if cpawn is None or id(cpawn) in seen_ids:
+            if cpawn is None or cache_key(cpawn) in seen_ids:
                 continue
             cp = cand.chest_point
             dx = cp.x - eye_x
@@ -1750,7 +1760,7 @@ def _execute_melee_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCar
             clear, hit_pt, bone = _candidate_has_clear_los(wpn, vec_tpl, start_xyz, cand, cpawn)
             _combat_breadcrumb("after candidate LOS trace")
             if clear:
-                seen_ids.add(id(cpawn))
+                seen_ids.add(cache_key(cpawn))
                 targets_to_strike.append((cpawn, hit_pt, bone))
 
     # 6. Apply `Behavior_CauseDamage` to each struck target + hit FX & audio
@@ -1764,18 +1774,6 @@ def _execute_melee_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCar
     if imp_def is None:
         imp_def = _CACHED_MELEE_IMPACT
 
-    def _set_wpn_status_chance_mods(val: float) -> None:
-        for attr_n in (
-            "BaseStatusEffectChanceModifierBaseValue",
-            "BaseStatusEffectChanceModifier",
-            "StatusEffectChanceModifierBaseValue",
-            "StatusEffectChanceModifier",
-        ):
-            try:
-                setattr(wpn, attr_n, float(val))
-            except Exception:
-                pass
-
     hits_dealt = 0
     dots_procced = 0
     any_crit = False
@@ -1787,22 +1785,10 @@ def _execute_melee_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCar
             any_crit = True
         hit_amount = float(dmg_crit.final_hit_damage if is_crit else dmg_normal.final_hit_damage)
 
-        # Single authoritative proc roll using the exact Item Card Effect Chance % + player status chance bonuses.
-        # When `proc` succeeds, force `WeaponCombinedStatusEffectChanceModifier = 2500.0` (50 * 50) so BL2's
-        # internal `CauseDamage` status roll succeeds 100% instead of double-rolling ~8% on top of Python's roll!
-        proc = False
-        if card.element in (Element.FIRE, Element.SHOCK, Element.CORROSIVE, Element.SLAG):
-            proc = random.random() < dmg_normal.effective_proc_chance
-            if proc:
-                dt_def = _CACHED_DMG_TYPES_PROC.get(card.element)
-                _set_wpn_status_chance_mods(50.0)
-                dots_procced += 1
-            else:
-                dt_def = _CACHED_DMG_TYPES_NODOT.get(card.element)
-                _set_wpn_status_chance_mods(0.0)
-        else:
-            dt_def = _CACHED_DMG_TYPES_PROC.get(card.element)
-            _set_wpn_status_chance_mods(0.0)
+        # Shared primary/throw proc policy: player-scaled chance + native modifier forcing.
+        dt_def, proc = select_attack_damage_type(wpn, card, dmg_normal)
+        if proc:
+            dots_procced += 1
 
         # Tag the victim BEFORE the call: `Behavior_CauseDamage` can synchronously feed BL2's recent
         # damage tracker, which is what produces the floating number (and needs the crit bit already set).
@@ -1845,7 +1831,7 @@ def _execute_melee_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCar
                 pass
 
     # Restore clean rest status chance modifiers on weapon after hit loop
-    _set_wpn_status_chance_mods(1.0)
+    set_weapon_status_chance(wpn, 1.0)
 
     # 7. Torgue Blast-Cleaver Explosive Area Slam (`Behavior_CauseRadiusDamage` + Explosion VFX & Boom SFX)
     splash_triggered = False
@@ -1979,16 +1965,9 @@ def _spawn_torgue_explosion_vfx_sfx(
         except Exception:
             pass
 
-    if pc is not None:
-        exp_canim = _CACHED_CANIMS.get(CANIM_EXPLOSION_MEDIUM)
-        if exp_canim is not None:
-            try:
-                pc.ClientPlayCameraAnim(exp_canim, 0.72, 1.0, 0.03, 0.18, False, False)
-            except Exception:
-                try:
-                    pc.ClientPlayCameraAnim(exp_canim)
-                except Exception:
-                    pass
+    user_shake = float(getattr(STATE, "camera_shake_scale", 0.5) or 0.0)
+    exp_canim = _CACHED_CANIMS.get(CANIM_EXPLOSION_MEDIUM)
+    play_camera_anim(pc, exp_canim, 0.72 * user_shake / 0.5, 1.0, 0.03, 0.18)
 
 
 def play_thrown_impact_feedback(pc: Any, pawn: Any, shake: bool = True) -> None:
@@ -2010,13 +1989,7 @@ def play_thrown_impact_feedback(pc: Any, pawn: Any, shake: bool = True) -> None:
     if canim is None or user_shake <= 0.001:
         return
     scale = 0.55 * user_shake * CAMERA_SHAKE_SLIDER_GAIN
-    try:
-        pc.ClientPlayCameraAnim(canim, scale, 0.9, 0.04, 0.20, False, False)
-    except Exception:
-        try:
-            pc.ClientPlayCameraAnim(canim)
-        except Exception:
-            pass
+    play_camera_anim(pc, canim, scale, 0.9, 0.04, 0.20)
 
 
 def play_parry_feedback(pc: Any, pawn: Any, attacker: Any = None) -> None:
@@ -2032,13 +2005,7 @@ def play_parry_feedback(pc: Any, pawn: Any, attacker: Any = None) -> None:
         canim = _CACHED_CANIMS.get(CANIM_HEAVY_SLAM)
         if canim is not None:
             scale = 1.20 * shake * CAMERA_SHAKE_SLIDER_GAIN
-            try:
-                pc.ClientPlayCameraAnim(canim, scale, 0.85, 0.06, 0.26, False, False)
-            except Exception:
-                try:
-                    pc.ClientPlayCameraAnim(canim)
-                except Exception:
-                    pass
+            play_camera_anim(pc, canim, scale, 0.85, 0.06, 0.26)
 
     if pawn is not None:
         # Metallic blade-on-blade clang first, then the body impact for weight.

@@ -4,7 +4,6 @@ from __future__ import annotations
 import time
 from typing import Any
 
-import unrealsdk  # type: ignore[import-not-found]
 from mods_base import (  # type: ignore[import-not-found]
     BoolOption,
     ButtonOption,
@@ -34,18 +33,20 @@ from .combat import (
     on_weapon_reload_pre,
     on_weapon_shared_fire_post,
     restore_all_arms_rest_transforms,
-    tick_melee_projectiles,
 )
 from .commands import (
+    export_asset_registry_command,
     dump_held_melee_weapon,
     spawn_all_five_archetypes,
     spawn_single_command,
     tune_ui_preview_command,
 )
 from .definitions import ensure_combat_resources_cached, ensure_definitions_built
-from .log import log_info
-from .loot_pools import inspect_loot_pools, refresh_vending_machines, sync_loot_pools
+from .log import clear_debug_once_cache, log_info
+from .loot_pools import inspect_loot_pools, refresh_vending_machines, remove_melee_loot_entries, sync_loot_pools
 from .persistence_bridge import (
+    acknowledge_restored_inventory,
+    clear_pending_restores,
     on_apply_weapon_save_data_pre,
     on_save_game_pre,
     on_validate_weapon_definition_pre,
@@ -54,16 +55,13 @@ from .persistence_bridge import (
 )
 from .secondary import (
     describe_secondary_state,
-    disable_optional_hooks,
-    enable_optional_hooks,
-    is_any_weapon_thrown,
-    is_guarding,
     on_melee_weapon_client_stop_zoom_pre,
     on_melee_weapon_stop_zoom_pre,
     reset_secondary_state,
     tick_secondary_attacks,
 )
 from .resolver import (
+    cancel_pending_spawns,
     get_local_player_controller,
     is_melee_weapon,
     on_choose_random_name_parts_post,
@@ -76,7 +74,9 @@ from .resolver import (
     tick_spawner_restore,
 )
 from .state import STATE
+from .object_identity import cache_key
 from .ui_item_card import (
+    clear_active_card_overrides,
     on_set_fun_stats_pre,
     on_set_item_card_ex_post,
     on_set_item_card_ex_pre,
@@ -137,6 +137,10 @@ def _on_guard_pose_changed(_opt: Any, new_val: float) -> None:
 
 def _on_damage_reduction_changed(_opt: Any, new_val: bool) -> None:
     STATE.damage_reduction_enabled = bool(new_val)
+
+
+def _on_guard_damage_reduction_changed(_opt: Any, new_val: bool) -> None:
+    STATE.guard_damage_reduction_enabled = bool(new_val)
 
 
 def _on_spawn_all_button(_opt: Any) -> None:
@@ -221,11 +225,21 @@ opt_damage_reduction = BoolOption(
     "Melee Weapon Damage Reduction",
     True,
     description=(
-        "While a Melee Weapon is equipped, incoming damage is reduced by that weapon's rolled "
+        "Passive perk: while a Melee Weapon is equipped, incoming damage is reduced by that weapon's rolled "
         "Damage Reduction (30% at Lv 1, climbing with level/parts to a 70% cap at Lv 80 + OP10; "
-        "unique rarities go higher). Shown on its item card."
+        "unique rarities go higher). Shown on its item card. Guard mitigation has its own toggle."
     ),
     on_change_anytime=_on_damage_reduction_changed,
+)
+
+opt_guard_damage_reduction = BoolOption(
+    "Guard Damage Reduction",
+    True,
+    description=(
+        "Active perk: Hyperion/Jakobs RMB guard applies the blade's Damage Reduction a second time "
+        "and allows perfect parries. Disable to keep the guard pose/feedback without mitigation."
+    ),
+    on_change_anytime=_on_guard_damage_reduction_changed,
 )
 
 btn_spawn_all = ButtonOption(
@@ -256,9 +270,7 @@ def _run_frame_tick() -> None:
 
     # 1. Drain staggered multi-weapon grants & restore reward mission template
     tick_spawner_restore()
-
-    # 2. Enforce exact meter reach on active melee light projectiles
-    tick_melee_projectiles()
+    acknowledge_restored_inventory()
 
     # 2a. Capture the idle first-person arms transform once, before any secondary-attack pose can
     #     run: a pose must never be able to bake itself in as the "rest" transform.
@@ -269,12 +281,8 @@ def _run_frame_tick() -> None:
             pass
 
     # 2b. Advance thrown blades (Bandit/Torgue arcs), keep the held guard honest, and self-heal
-    #     any first-person pose whose state has ended. The RMB-release hooks are registered with
-    #     `ALL_HOOKS` at load; `enable_optional_hooks()` only reports them.
-    try:
-        enable_optional_hooks()
-    except Exception:
-        pass
+    #     any first-person pose whose state has ended. RMB-release hooks are registered with
+    #     `ALL_HOOKS` at load.
     tick_secondary_attacks()
 
     # 3. Drive smooth 1st-person slash motion ONLY during active ~150ms swing window
@@ -301,22 +309,15 @@ def _run_frame_tick() -> None:
         if map_name in ("menumap", "loader", "exampleentry"):
             return
 
-        # A live throw/guard must never be yanked out from under the player: resetting the
-        # secondary state mid-flight deletes the flying blade without a rebound.
-        if is_any_weapon_thrown() or is_guarding():
-            return
-
-        # Key the pawn by its *path name*, not `id()`: pyunrealsdk can hand back a fresh Python
-        # wrapper for the same UObject, and an id that churns re-ran the whole map-load restore
-        # (inventory re-grant + secondary reset) on a perfectly normal pawn.
-        try:
-            pawn_key = str(pawn._path_name())
-        except Exception:
-            pawn_key = ""
+        # Key the pawn by its stable UObject path, not Python wrapper identity. A new pawn/map
+        # cancels any old throw/guard before sidecar restoration; wrapper churn on the same pawn
+        # must not re-run inventory grants.
+        pawn_key = cache_key(pawn)
         if not pawn_key:
-            pawn_key = f"id:{id(pawn)}"
+            return
         if pawn_key != _last_restored_pawn_key:
             if _map_restore_ready_at == 0.0:
+                reset_secondary_state()
                 restore_all_arms_rest_transforms()
                 sync_loot_pools()
                 _map_restore_ready_at = now + 2.0
@@ -324,7 +325,6 @@ def _run_frame_tick() -> None:
             if now >= _map_restore_ready_at:
                 _last_restored_pawn_key = pawn_key
                 _map_restore_ready_at = 0.0
-                reset_secondary_state()
                 ensure_combat_resources_cached()
                 ensure_live_combat_cached()
                 # Always re-sync on map load so SparkLevelPatchEntry / BLCMM / UCP hotfixes never wipe our pools
@@ -704,15 +704,25 @@ ALL_OPTIONS = [
     opt_guard_pose,
     opt_debug_log,
     opt_damage_reduction,
+    opt_guard_damage_reduction,
     btn_spawn_all,
 ]
 
 
 def _on_mod_disable() -> None:
+    cancel_pending_spawns()
+    clear_pending_restores()
+    remove_melee_loot_entries()
+    clear_active_card_overrides()
     restore_all_arms_rest_transforms()
     clear_all_pending_crit_feedback()
     reset_secondary_state()
-    disable_optional_hooks()
+    clear_debug_once_cache()
+
+
+@command("melee_export_asset_registry", game=Game.BL2)
+def _cmd_export_asset_registry() -> None:
+    export_asset_registry_command()
 
 
 def build_runtime_mod(version: str, author: str) -> Any:
@@ -745,5 +755,6 @@ def build_runtime_mod(version: str, author: str) -> Any:
     )
     STATE.debug_attack_log = bool(getattr(opt_debug_log, "value", False))
     STATE.damage_reduction_enabled = bool(getattr(opt_damage_reduction, "value", True))
+    STATE.guard_damage_reduction_enabled = bool(getattr(opt_guard_damage_reduction, "value", True))
     log_info(f"Melee Arsenal v{version} loaded and armed.")
     return mod_instance

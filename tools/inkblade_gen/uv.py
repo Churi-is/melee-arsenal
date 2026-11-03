@@ -83,7 +83,7 @@ def project_face(verts: Sequence[Vec3], density: float, padding: int) -> Project
     normal = newell_normal(vs)
     if _length(normal) < 1e-10:
         normal = _unit(_cross(_sub(vs[1], vs[0]), _sub(vs[2], vs[0])))
-    edges = [_sub(b, a) for a, b in zip(vs, vs[1:] + vs[:1])]
+    edges = [_sub(b, a) for a, b in zip(vs, vs[1:] + vs[:1], strict=False)]
     u = _unit(max(edges, key=_length))
     v = _unit(_cross(normal, u))
     pts = [

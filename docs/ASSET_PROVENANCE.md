@@ -8,7 +8,7 @@ All InkBlade weapon visuals are **procedurally generated in pure Python + Pillow
 - **UV atlases → PNG textures** via the 10-stage pipeline (`flat → mottle → detail → decals → linework → textures`) — palette fills, paint washes, brushed metal, stamped markings, and bold ink contours. Decal art (`tools/inkblade_gen/decals.py`) is procedural except for an optional external `--decals` directory.
 - **GLB → UE3 UPK** via `tools/inkblade_upk/` (pure-Python LZO1X / DXT1 / SkeletalMesh codec). Cooked packages are `build/WillowGame/CookedPCConsole/MeleeArsenalMeshes.upk` and `MeleeArsenalTextures.upk`.
 
-Reproducibility: `tools/compile_inkblade_upk.py --fingerprint-only` hashes the kit's texture/UV/mesh content; `melee install` auto-recompiles stale packages. Pillow version changes can affect pixel hashes — see `requirements.txt` (`Pillow>=10.1,<14`).
+Reproducibility: `tools/compile_inkblade_upk.py --fingerprint-only` hashes the kit's texture/UV/mesh content; `melee install` auto-recompiles stale packages. Pillow version changes can affect pixel hashes; builds are pinned to `Pillow==13.0.0` in `requirements.txt` and `pyproject.toml`.
 
 ## Donor / Reference Assets
 

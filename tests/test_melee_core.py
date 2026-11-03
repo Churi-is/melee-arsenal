@@ -39,7 +39,6 @@ from melee_arsenal.core import (  # noqa: E402
     THROW_TIME_SCALE,
     apply_guard_damage_reduction,
     apply_incoming_damage_reduction,
-    build_asset_sublibrary_manifest,
     build_throw_flight_plan,
     build_item_card_payload,
     compute_attack_damage,
@@ -641,12 +640,15 @@ class TestMeleeArsenalCore(unittest.TestCase):
             self.assertEqual(restored.game_stage, 61)
             self.assertEqual(restored.parts, wpn.parts)
 
-    def test_asset_sublibrary_manifest_deterministic(self) -> None:
-        m1 = build_asset_sublibrary_manifest()
-        m2 = build_asset_sublibrary_manifest()
-        self.assertEqual(m1, m2)
-        self.assertEqual(len(m1["WeaponTypeDefinition"]), 5)
-        self.assertEqual(len(m1["WeaponBalanceDefinition"]), 20)
+    def test_sidecar_rejects_zero_id_and_unknown_schema(self) -> None:
+        wpn = roll_melee_weapon(game_stage=10, rarity=Rarity.RARE, manufacturer=Manufacturer.JAKOBS, seed="schema")
+        from dataclasses import replace
+        with self.assertRaises(ValueError):
+            serialize_weapon(replace(wpn, unique_id=0))
+        rec = serialize_weapon(wpn)
+        rec["schema"] = 999
+        with self.assertRaises(ValueError):
+            deserialize_weapon(rec)
 
 
 if __name__ == "__main__":

@@ -17,6 +17,8 @@ except ImportError:  # pragma: no cover
 
 
 LOG_FILE: Path = Path(MODS_DIR) / "melee_arsenal" / "melee_arsenal.log"
+LOG_MAX_BYTES: int = 1_000_000
+LOG_BACKUP_COUNT: int = 2
 
 _DEBUG_ONCE_KEYS: set[str] = set()
 
@@ -45,8 +47,8 @@ def log_debug(msg: str) -> None:
 
 
 def log_debug_once(key: str, msg: str) -> None:
-    """Log a debug message once per unique `key` to avoid per-frame spam."""
-    if key in _DEBUG_ONCE_KEYS:
+    """Log a debug message once per unique `key` while debug logging is enabled."""
+    if key in _DEBUG_ONCE_KEYS or not _should_log_debug():
         return
     _DEBUG_ONCE_KEYS.add(key)
     log_debug(msg)
@@ -87,9 +89,24 @@ def clear_debug_once_cache() -> None:
     _DEBUG_ONCE_KEYS.clear()
 
 
+def _rotate_log_if_needed() -> None:
+    try:
+        if not LOG_FILE.exists() or LOG_FILE.stat().st_size < LOG_MAX_BYTES:
+            return
+        for idx in range(LOG_BACKUP_COUNT - 1, 0, -1):
+            src = LOG_FILE.with_suffix(f".{idx}.log")
+            dst = LOG_FILE.with_suffix(f"{idx + 1}.log")
+            if src.exists():
+                src.replace(dst)
+        LOG_FILE.replace(LOG_FILE.with_suffix(".1.log"))
+    except Exception:
+        pass
+
+
 def _append_file(line: str) -> None:
     try:
         LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _rotate_log_if_needed()
         stamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
         with LOG_FILE.open("a", encoding="utf-8") as fp:
             fp.write(f"[{stamp}] {line}\n")

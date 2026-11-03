@@ -30,7 +30,7 @@ except ImportError:  # pragma: no cover
 from ..core.enums import Rarity
 from .custom_assets import assign_struct_array
 from .definitions import ensure_definitions_built
-from .log import log_debug, log_debug_once, log_error, log_info, log_warn, obj_path
+from .log import log_debug_once, log_error, log_info, log_warn, obj_path
 from .state import KEEP_ALIVE_FLAGS, STATE
 
 # Sum of the 6 vanilla weapon classes in `Pool_Weapons_All_*`:
@@ -684,3 +684,34 @@ def inspect_loot_pools(resync_first: bool = True) -> dict[str, Any]:
         "subpools_built": sorted(STATE.custom_melee_pools.keys()),
         "pools": pool_rows,
     }
+
+
+def remove_melee_loot_entries() -> int:
+    """Remove injected Melee entries without changing the player's saved drop preference.
+
+    Used on mod disable and map teardown.  Existing vendor shelves are re-rolled afterwards so
+    disabled melee stock does not linger until the next map load.
+    """
+    global _LAST_LOG_SIGNATURE, _POOL_OBJECT_CACHE
+    removed = 0
+    _POOL_OBJECT_CACHE = None
+    try:
+        for _category, target_path, _key in TARGET_POOL_MATRIX:
+            target_pool = _find_pool(target_path)
+            if target_pool is None:
+                continue
+            raw_items = list(getattr(target_pool, "BalancedItems", []) or [])
+            clean_items = [copy.copy(it) for it in raw_items if not _is_melee_pool_entry(it)]
+            if len(clean_items) != len(raw_items):
+                assign_struct_array(target_pool, "BalancedItems", clean_items)
+                removed += len(raw_items) - len(clean_items)
+    except Exception as exc:
+        log_error(f"remove_melee_loot_entries failed: {exc!r}")
+    STATE.pools_injected = False
+    STATE.injected_pool_count = 0
+    STATE.vendor_refresh_signature = None
+    _LAST_LOG_SIGNATURE = None
+    if removed > 0:
+        refresh_vending_machines()
+        log_info(f"Removed {removed} Melee Arsenal loot-pool entry(ies) on teardown.")
+    return removed

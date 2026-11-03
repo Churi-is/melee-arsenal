@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt ruff==0.17.3
+      - name: Lint
+        run: ruff check sdk_mods tools tests
+      - name: Unit tests
+        run: ./melee test -q
+      - name: Build UPKs and verify tracked manifest
+        if: matrix.python-version == '3.11'
+        run: |
+          ./melee build
+          cmp build/inkblade_compiled_manifest.json sdk_mods/melee_arsenal/data/inkblade_compiled_manifest.json
+      - name: Package release archives
+        if: matrix.python-version == '3.11'
+        run: ./melee package
+      - name: Upload release archives
+        if: matrix.python-version == '3.11'
+        uses: actions/upload-artifact@v4
+        with:
+          name: melee-arsenal-dist
+          path: build/dist/*.zip

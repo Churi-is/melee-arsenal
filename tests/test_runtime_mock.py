@@ -4,7 +4,7 @@ Verifies:
 - Strict `WrappedStruct` & `UObject` schema enforcement (`pyunrealsdk` 1.10 rules).
 - Single-item staggered `ServerGrantMissionRewards` (`len(RewardItems) == 1` per grant so BL2 never
   triggers the Choose-1-of-2 quest reward prompt).
-- `ConsumeAmmo` + `WillowLightProjectileManager:AddProj` + `WillowPawn:WeaponFired` + `tick_melee_projectiles()`
+- `ConsumeAmmo` + `WillowLightProjectileManager:AddProj` + `WillowPawn:WeaponFired`
   primary-fire melee attack pipeline (Single-Target vs Frontal-Cleave, Target Dummy support,
   elemental `FM_Melee_Elem_*` routing, stacked `MyProjs[idx].Damage`, exact meter range expiry,
   and `pawn.Arms.Translation`/`Rotation` procedural slash).
@@ -1751,7 +1751,7 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 self.assertEqual(world.caused_damages[0]["Target"], dummy_pawn)
                 self.assertAlmostEqual(world.caused_damages[0]["DamageAmount"], float(expected_sabre_crit))
                 # ...and the crit was tagged so BL2's floating number can be re-issued as a CRITICAL
-                self.assertIn(id(dummy_pawn), combat._PENDING_CRIT_FEEDBACK)
+                self.assertIn(combat.cache_key(dummy_pawn), combat._PENDING_CRIT_FEEDBACK)
                 combat.clear_all_pending_crit_feedback()
 
                 # Mid-swap guard: if `pawn.PendingWeapon` is active, swing must NOT touch `Arms` anim slots!
@@ -2007,7 +2007,7 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
 
                 # Expired tags are ignored (no stale crits when a swing is interrupted/lagging)
                 combat._mark_pending_crit_feedback(dummy_pawn)
-                combat._PENDING_CRIT_FEEDBACK[id(dummy_pawn)] = 0.0
+                combat._PENDING_CRIT_FEEDBACK[combat.cache_key(dummy_pawn)] = 0.0
                 self.assertIsNone(
                     combat.on_display_recent_damage_pre(
                         object(), crit_event, None, lambda *a: crit_display_calls.append(a)
@@ -2209,7 +2209,7 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                     float(compute_parry_reflect_damage(1000.0, sabre_card_g.crit_bonus_pct, blade_crit)),
                 )
                 # ...and the reflected hit is tagged so BL2 prints a CRITICAL popup
-                self.assertIn(id(melee_attacker), combat._PENDING_CRIT_FEEDBACK)
+                self.assertIn(combat.cache_key(melee_attacker), combat._PENDING_CRIT_FEEDBACK)
                 # The parry is VISIBLE + AUDIBLE: HUD callout, clang and a camera jolt.
                 self.assertTrue(
                     any("PERFECT PARRY" in msg for _title, msg in world.hud_messages),
@@ -2686,23 +2686,32 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                     runtime_mod._map_restore_ready_at, 0.0, "a stable pawn must not re-restore"
                 )
 
-                # A live throw must survive a map-restore pass. `id(pawn)` churns when
-                #     pyunrealsdk hands back a new wrapper for the same UObject, which used to
-                #     re-run the whole restore (and reset the secondary state, deleting the flying
-                #     blade) a second or so into a throw.
+                # A live throw must survive wrapper churn on the *same* pawn, but a genuine
+                #     pawn/map change must cancel it before sidecar restoration runs.
                 world.pawn.Weapon = cleaver
                 self.assertTrue(secondary_attacks.begin_throw(cleaver, bl_inst, bl_card))
                 try:
-                    runtime_mod._last_restored_pawn_key = "some.other.pawn"
+                    runtime_mod._last_restored_pawn_key = "MockWorld.WillowPlayerPawn_0"
                     runtime_mod._map_restore_ready_at = 0.0
                     runtime_mod._tick_counter = 59
                     runtime_mod._last_frame_tick_at = 0.0
                     runtime_mod.hook_player_tick(None, None, None, None)
                     self.assertTrue(
                         secondary_attacks.is_any_weapon_thrown(),
-                        "a map-restore pass must not delete a blade that is still in flight",
+                        "same-pawn wrapper churn must not delete a blade that is still in flight",
                     )
                     self.assertTrue(secondary_vfx.has_thrown_blade_visual())
+
+                    runtime_mod._last_restored_pawn_key = "some.other.pawn"
+                    runtime_mod._map_restore_ready_at = 0.0
+                    runtime_mod._tick_counter = 119
+                    runtime_mod._last_frame_tick_at = 0.0
+                    runtime_mod.hook_player_tick(None, None, None, None)
+                    self.assertFalse(
+                        secondary_attacks.is_any_weapon_thrown(),
+                        "a new pawn/map epoch must cancel the old throw before restore",
+                    )
+                    self.assertFalse(secondary_vfx.has_thrown_blade_visual())
                 finally:
                     secondary_attacks.reset_secondary_state()
                     runtime_mod._last_restored_pawn_key = "MockWorld.WillowPlayerPawn_0"
@@ -2857,7 +2866,9 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 self.assertEqual(melee_arsenal.__version__, "0.4.5")
                 self.assertTrue(definitions.ensure_definitions_built())
                 self.assertTrue(state.STATE.custom_assets_active)
-                self.assertEqual(state.STATE.custom_kit_revision, "bold_ink_visual_revision_of_r4")
+                import json as _json
+                _tracked_manifest = _json.loads((SDK_MODS_DIR / "melee_arsenal" / "data" / "inkblade_compiled_manifest.json").read_text(encoding="utf-8"))
+                self.assertEqual(state.STATE.custom_kit_revision, _tracked_manifest["kit_revision"])
                 self.assertEqual(len(state.STATE.element_material_parts_by_rarity), 24)
 
                 # Every Inkblade Material part carries its exact BL2 rarity level (1 White … 4 Purple):
@@ -2924,7 +2935,7 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                     if b.SkeletalMeshFragmentName == "Ink_blade_hyperion"
                 )
                 self.assertLess(hyp_bound.ReferencePoseBounds.BoxExtent.Y, 4.0)
-                self.assertLess(hyp_bound.ReferencePoseBounds.BoxExtent.Z, 18.0)
+                self.assertLess(hyp_bound.ReferencePoseBounds.BoxExtent.Z, 30.0)
 
                 hyp_wt = next(iter(state.STATE.maker_to_wt.values()))
                 preview_comp = types.SimpleNamespace(

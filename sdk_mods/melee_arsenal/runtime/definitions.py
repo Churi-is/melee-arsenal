@@ -827,7 +827,7 @@ def ensure_definitions_built() -> bool:
             wt.ReloadTime = 0.10
             wt.FireRate = round(1.0 / mspec.base_swing_speed, 4)
             # Keep internal aim trace long so crosshair targeting has zero muzzle parallax;
-            # actual melee reach is clamped by camera-eye strike endpoints + `tick_melee_projectiles()`.
+            # actual melee reach is clamped by camera-eye strike endpoints in the synchronous combat path.
             wt.Range = 4096.0
             wt.Spread = 0.0
             wt.PerShotAccuracyImpulse = 0.0

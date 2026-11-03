@@ -38,7 +38,8 @@ except ImportError:  # pragma: no cover - offline CPython unit testing
     ButtonOption = None  # type: ignore[assignment]
     Game = None  # type: ignore[assignment]
     build_mod = None  # type: ignore[assignment]
-    get_pc = lambda: None  # type: ignore[assignment]
+    def get_pc():  # type: ignore[no-redef]
+        return None
 
     class Type:  # type: ignore[no-redef]
         PRE = "PRE"

@@ -1,6 +1,3 @@
-# Melee Arsenal — build-time dependencies
-# Runtime in Borderlands 2 requires only Willow2 Mod Manager (no pip packages).
-# Pillow is needed only for kit generation and UPK texture compilation.
-# Version range pinned for reproducible pixel hashes; 10.1+ is tested, <14 caps next major.
-
-Pillow>=10.1,<14
+# Build-time dependencies (runtime in Borderlands 2 uses no pip packages).
+# Exact Pillow pin keeps generated texture pixels and compiled package inputs reproducible.
+Pillow==13.0.0

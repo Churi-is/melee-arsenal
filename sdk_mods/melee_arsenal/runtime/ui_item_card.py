@@ -32,6 +32,7 @@ from ..core.enums import Element
 from ..core.item_card import CompareArrow, ItemCardPayload, build_item_card_payload
 from ..core.stats import ComputedCardStats
 from .log import log_error
+from .object_identity import cache_key
 from .resolver import resolve_melee_weapon, unwrap_weapon_object
 
 
@@ -45,7 +46,7 @@ class ActiveCardOverride:
     depth: int = 1
 
 
-_ACTIVE_CARDS: dict[int, ActiveCardOverride] = {}
+_ACTIVE_CARDS: dict[str, ActiveCardOverride] = {}
 _COMPARE_ENUM_MAP: dict[CompareArrow, int] | None = None
 
 _ELEMENT_ICON_FALLBACK: dict[Element, str] = {
@@ -221,7 +222,7 @@ def _apply_melee_card_override(gfx_obj: Any, ov: ActiveCardOverride) -> None:
 
 def on_set_item_card_ex_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
     """Begin Melee Item Card override (`SetItemCard` or `SetItemCardEx`)."""
-    existing = _ACTIVE_CARDS.get(id(obj))
+    existing = _ACTIVE_CARDS.get(cache_key(obj))
     if existing is not None:
         existing.depth += 1
         return None
@@ -242,7 +243,7 @@ def on_set_item_card_ex_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
         if cmp_item is not None and cmp_card is None:
             gun_arrow = _compare_against_vanilla_gun_damage(card, cmp_item)
 
-        _ACTIVE_CARDS[id(obj)] = ActiveCardOverride(
+        _ACTIVE_CARDS[cache_key(obj)] = ActiveCardOverride(
             card_stats=card,
             payload=payload,
             gun_compare_arrow=gun_arrow,
@@ -255,7 +256,7 @@ def on_set_item_card_ex_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
 
 def on_set_title_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
     """Ensure the card title & elemental icon match our Melee Weapon name & element."""
-    ov = _ACTIVE_CARDS.get(id(obj))
+    ov = _ACTIVE_CARDS.get(cache_key(obj))
     if ov is None:
         return None
     try:
@@ -297,7 +298,7 @@ def on_set_title_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
 
 def on_set_top_stat_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
     """Capture Gearbox's Flash icon names and suppress Accuracy/Reload/Mag Size on melee cards."""
-    ov = _ACTIVE_CARDS.get(id(obj))
+    ov = _ACTIVE_CARDS.get(cache_key(obj))
     if ov is None:
         return None
     try:
@@ -314,19 +315,24 @@ def on_set_top_stat_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
 
 def on_set_fun_stats_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
     """Suppress donor gun fun stats during SetItemCardEx; we write melee fun stats in POST."""
-    if id(obj) in _ACTIVE_CARDS:
+    if cache_key(obj) in _ACTIVE_CARDS:
         return Block
     return None
 
 
 def on_set_item_card_ex_post(obj: Any, args: Any, ret: Any, func: Any) -> Any:
     """Finalize Melee Weapon top stats, optional elemental stats, and fun stats on the card."""
-    ov = _ACTIVE_CARDS.get(id(obj))
+    ov = _ACTIVE_CARDS.get(cache_key(obj))
     if ov is None:
         return None
     ov.depth -= 1
     if ov.depth > 0:
         return None
-    _ACTIVE_CARDS.pop(id(obj), None)
+    _ACTIVE_CARDS.pop(cache_key(obj), None)
     _apply_melee_card_override(obj, ov)
     return None
+
+
+def clear_active_card_overrides() -> None:
+    """Drop nested card-override state on mod disable / map teardown."""
+    _ACTIVE_CARDS.clear()

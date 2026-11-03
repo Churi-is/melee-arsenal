@@ -35,7 +35,7 @@ from .loot_roller import (
 )
 from .persistence import (
     PACKAGE_ROOT,
-    build_asset_sublibrary_manifest,
+    SAVE_SCHEMA,
     deserialize_weapon,
     read_save_records,
     sanitize_save_name,
@@ -124,6 +124,7 @@ __all__ = [
     "GRIPS",
     "MANUFACTURERS",
     "PACKAGE_ROOT",
+    "SAVE_SCHEMA",
     "AccessoryPartSpec",
     "AttackDamageBreakdown",
     "BladePartSpec",
@@ -160,7 +161,6 @@ __all__ = [
     "apply_guard_damage_reduction",
     "apply_incoming_damage_reduction",
     "build_throw_flight_plan",
-    "build_asset_sublibrary_manifest",
     "build_item_card_payload",
     "compute_attack_damage",
     "compute_card_stats",

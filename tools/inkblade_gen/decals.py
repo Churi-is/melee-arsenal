@@ -24,7 +24,7 @@ from dataclasses import dataclass
 import hashlib
 import math
 import random
-from typing import Iterable, Sequence
+from typing import Sequence
 
 from PIL import Image, ImageDraw, ImageFilter
 
@@ -81,7 +81,7 @@ def _fit_plane_map(verts: Sequence[Sequence[float]], pixels: Sequence[Vec2]):
     normal = [[0.0] * 4 for _ in range(4)]
     bx = [0.0] * 4
     by = [0.0] * 4
-    for vert, pixel in zip(verts, pixels):
+    for vert, pixel in zip(verts, pixels, strict=False):
         h = (float(vert[0]), float(vert[1]), float(vert[2]), 1.0)
         for i in range(4):
             for j in range(4):
@@ -330,7 +330,6 @@ def draw_text(
             cursor += SPACE * scale
             continue
         glyph = GLYPHS.get(char.upper())
-        cx = cursor + 2.0 * scale
         if glyph:
             for stroke_points in glyph:
                 points = []
@@ -1011,7 +1010,7 @@ def _blade_maliwan(size: tuple[int, int], rng: random.Random, variant: Variant =
     w, h = layer.size
     if variant != "primary":
         return layer.finish()
-    for i, y in enumerate((0.14, 0.86)):
+    for _i, y in enumerate((0.14, 0.86)):
         layer.line([(w * 0.04, h * y), (w * 0.96, h * y)], width=max(1.0, h * 0.012),
                    fill=(44, 60, 76, 185))
         for k in range(8):

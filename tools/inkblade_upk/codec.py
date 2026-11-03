@@ -5,7 +5,7 @@ Verified byte-for-byte against `Ribs Arsenal 1.4` cooked packages (`MaliwanBarre
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import hashlib
 import io
 import math
@@ -596,7 +596,7 @@ class PackageBuilder:
 
         # Serialize ExportTable
         exp_buf = bytearray()
-        for exp, (ser_off, payload) in zip(self.exports, resolved_payloads):
+        for exp, (ser_off, payload) in zip(self.exports, resolved_payloads, strict=False):
             exp_buf.extend(
                 struct.pack(
                     "<iiiiiiQiiii",
@@ -765,7 +765,8 @@ class SkeletalMeshBinary:
     @classmethod
     def from_archive_export(cls, ar: UE3PackageArchive, exp: ExportEntry) -> SkeletalMeshBinary:
         eb = memoryview(ar.read_export_bytes(exp))
-        name_of = lambda idx: ar.names[idx].name
+        def name_of(idx):
+            return ar.names[idx].name
         pos = 0
         (net_index,) = struct.unpack_from("<i", eb, pos)
         pos += 4
@@ -1427,7 +1428,7 @@ def replace_with_custom_fragments(
             for vi, gv in enumerate(gpu_verts):
                 ch = mesh.chunk_for_vertex(vi)
                 remapped_b: list[int] = []
-                for bi_local, wt in zip(gv.influence_bones, gv.influence_weights):
+                for bi_local, wt in zip(gv.influence_bones, gv.influence_weights, strict=False):
                     skel_b = ch.bone_map[bi_local] if wt > 0 and bi_local < len(ch.bone_map) else 0
                     if skel_b not in bmap_lookup:
                         bmap_lookup[skel_b] = len(merged_bmap)
@@ -1468,7 +1469,7 @@ def replace_with_custom_fragments(
         bmin = (min(xs), min(ys), min(zs))
         bmax = (max(xs), max(ys), max(zs))
 
-        for pos, nrm, tan, uv in zip(frag.positions, frag.normals, frag.tangents, frag.uvs):
+        for pos, nrm, tan, uv in zip(frag.positions, frag.normals, frag.tangents, frag.uvs, strict=False):
             tx = pack_normal(tan[0], tan[1], tan[2], 1.0)
             tz = pack_normal(nrm[0], nrm[1], nrm[2], tan[3])
             dup_uvs = tuple((uv[0], uv[1]) for _ in range(ntc))

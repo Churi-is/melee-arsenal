@@ -13,6 +13,7 @@ from __future__ import annotations
 import copy
 import math
 import random
+import secrets
 import traceback
 from collections import deque
 from typing import Any
@@ -51,7 +52,7 @@ from .definitions import (
     get_or_create_prefix_part,
     get_or_create_title_part,
 )
-from .log import log_debug, log_debug_once, log_error, log_info, log_warn, obj_path
+from .log import log_debug_once, log_error, log_info, log_warn, obj_path
 from .state import STATE
 
 
@@ -67,6 +68,25 @@ _DEFERRED_STEP_TICKS: int = 0
 _MISSION_BACKUP: dict[str, Any] | None = None
 _MISSION_RESTORE_TICKS: int = 0
 _STAMPED_UIDS: set[int] = set()
+_MAX_UNIQUE_ID: int = 2_147_483_647
+
+
+def allocate_unique_id(reserved: set[int] | None = None) -> int:
+    """Allocate a positive engine-compatible UniqueId that is not already reserved."""
+    reserved = reserved or set()
+    for _ in range(1000):
+        candidate = secrets.randbelow(_MAX_UNIQUE_ID) + 1
+        if candidate not in reserved and candidate not in _STAMPED_UIDS:
+            return candidate
+    raise RuntimeError("Could not allocate a free Melee Arsenal UniqueId")
+
+
+def grant_was_stamped(unique_id: int) -> bool:
+    return int(unique_id) in _STAMPED_UIDS
+
+
+def has_pending_grants() -> bool:
+    return bool(_DEFERRED_SPAWN_QUEUE) or any(_PENDING_GRANTS.values())
 
 
 def unwrap_weapon_object(item_or_pickup: Any) -> Any:
@@ -457,6 +477,20 @@ def _grant_one_now(inst: MeleeWeaponInstance, pc: Any = None) -> bool:
     _MISSION_RESTORE_TICKS = 30
     pc.ServerGrantMissionRewards(mission, False)
     return True
+
+
+def cancel_pending_spawns() -> None:
+    """Cancel deferred grants/drops and restore the donor mission immediately (mod disable/travel)."""
+    global _DEFERRED_STEP_TICKS, _MISSION_RESTORE_TICKS, _LAST_DROP_COUNT
+    _DEFERRED_SPAWN_QUEUE.clear()
+    _PENDING_DROP_INSTANCES.clear()
+    for q in _PENDING_GRANTS.values():
+        q.clear()
+    _DEFERRED_STEP_TICKS = 0
+    _MISSION_RESTORE_TICKS = 0
+    _LAST_DROP_COUNT = 0
+    _restore_spawner_mission_if_needed()
+    _STAMPED_UIDS.clear()
 
 
 def tick_spawner_restore() -> None:

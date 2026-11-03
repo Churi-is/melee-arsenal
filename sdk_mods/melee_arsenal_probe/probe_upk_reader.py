@@ -724,7 +724,8 @@ def extract_pistol_donor_and_bounds(
 ) -> dict[str, Any]:
     """Parse `GestaltDef_Pistol_GestaltSkeletalMesh`, compute all fragment 3D bounds, and build stripped donor `.upk`."""
     eb = memoryview(ar.read_range(mesh_exp.serial_offset, mesh_exp.serial_size))
-    name_of = lambda i: ar.names[i]
+    def name_of(i):
+        return ar.names[i]
     pos = 4
     props, pos = parse_tagged_props(eb, pos, name_of)
 
@@ -741,7 +742,6 @@ def extract_pistol_donor_and_bounds(
                     sprops, _ = parse_tagged_props(seb, 4, name_of)
                     sockets.append((sexp.object_name, sexp.object_name_num, sprops))
 
-    has_vcolor = any(pr.name == "bHasVertexColors" and pr.bool_val for pr in props)
     clean_props: list[TaggedProp] = []
     for pr in props:
         if pr.name == "bHasVertexColors":

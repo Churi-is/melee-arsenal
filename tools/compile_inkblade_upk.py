@@ -11,7 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tools.inkblade_upk.kit import (
+from tools.inkblade_upk.kit import (  # noqa: E402
     WeaponFrameCalibration,
     compile_inkblade_kit_to_upks,
     kit_fingerprint,
