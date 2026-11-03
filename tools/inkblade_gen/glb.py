@@ -373,11 +373,3 @@ def merge_glbs(pieces: Iterable[tuple[dict[str, Any], bytes | bytearray, Sequenc
     return write_glb(doc, data)
 
 
-def part_root_children(doc: dict[str, Any]) -> list[int]:
-    """Root node children indices (used by tests and the assembler)."""
-    roots = doc["scenes"][doc.get("scene", 0)]["nodes"]
-    return list(doc["nodes"][roots[0]].get("children", []))
-
-
-def node_name(doc: dict[str, Any], index: int) -> str:
-    return str(doc["nodes"][index].get("name", ""))

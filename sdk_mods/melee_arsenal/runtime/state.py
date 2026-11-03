@@ -18,7 +18,6 @@ class SwingMotionState:
     active: bool = False
     start_time: float = 0.0
     duration: float = 0.16
-    style: str = "slash"          # "katana", "sabre", "cleave_wide", "cleave_heavy"
     swing_sign: int = 1           # Alternates +1 / -1 on consecutive swings for fluid left/right combo feel
 
 

@@ -1202,13 +1202,6 @@ def capture_first_person_rest_transform() -> bool:
     return True
 
 
-def pose_held_seconds() -> float:
-    """How long the current pose has been applied (0.0 when idle)."""
-    if not _POSE_KIND:
-        return 0.0
-    return max(0.0, time.monotonic() - _POSE_STARTED_AT)
-
-
 def clear_first_person_pose(pc: Any = None, kind: str = "") -> bool:
     """Restore idle hands. Pass `kind` to only clear that specific pose."""
     global _POSE_KIND, _POSE_REST, _POSE_BLADE_REST
@@ -1318,7 +1311,6 @@ def _trigger_first_person_blade_swing(
             sm_info.active = True
             sm_info.start_time = now
             sm_info.duration = min(0.55, swing_interval * 0.88)
-            sm_info.style = card.manufacturer.value
             sm_info.swing_sign *= -1
 
     # 3. Manufacturer-tuned CameraAnim impact feel — soft, slow and eased on purpose.
@@ -2064,9 +2056,6 @@ def on_weapon_consume_ammo_post(obj: Any, args: Any, ret: Any, func: Any) -> Any
     return None
 
 
-on_weapon_consume_ammo_pre = on_weapon_consume_ammo_post
-
-
 def on_weapon_instant_fire_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
     """Primary `LMB` melee attack intercept (`WillowWeapon:InstantFire` PRE -> `Block`)."""
     global _HANDLED_SHOT_SEQ
@@ -2155,13 +2144,6 @@ def on_weapon_reload_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
     except Exception:
         pass
     return Block
-
-
-def on_player_tick_post(obj: Any, args: Any, ret: Any, func: Any) -> Any:
-    """Update active Combo Hit 2 Right->Left return slash right after `PlayerTick`."""
-    if STATE.swing_motion.active:
-        _update_first_person_slash_motion(obj)
-    return None
 
 
 def on_ai_take_damage_post(obj: Any, args: Any, ret: Any, func: Any) -> Any:

@@ -243,11 +243,6 @@ def build_throw_flight_plan(
     )
 
 
-def compute_throw_damage_scale() -> float:
-    """Multiplier applied to the normal LMB breakdown for a thrown hit (100%, i.e. a normal hit)."""
-    return THROW_DAMAGE_MULTIPLIER
-
-
 def point_segment_distance_uu(
     point: tuple[float, float, float],
     start: tuple[float, float, float],

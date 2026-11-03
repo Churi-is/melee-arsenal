@@ -384,29 +384,6 @@ def skew_box(x: float, y: float, w: float, h: float, shear: float) -> list[Vec2]
 # ---------------------------------------------------------------------------
 # Manufacturer emblems
 # ---------------------------------------------------------------------------
-def hyperion_emblem(layer: Layer, cx: float, cy: float, width: float, alpha: int = 255) -> None:
-    """Yellow skewed band + italic `HYPERION` + the four black parallelograms."""
-    height = width * 0.34
-    h = height
-    band = skew_box(cx - width / 2.0, cy - h * 0.5, width, h, shear=h * 0.42)
-    layer.poly(band, fill=(226, 186, 44, alpha))
-    # The two-plus-two parallelogram cluster that sits behind the wordmark.
-    square = h * 0.52
-    offset = width * 0.30
-    layer.poly(skew_box(cx + offset, cy - h * 0.98, square, square, shear=square * 0.45),
-               fill=(22, 22, 22, alpha))
-    layer.poly(skew_box(cx + offset + square * 1.32, cy - h * 0.98, square, square,
-                        shear=square * 0.45), fill=(22, 22, 22, alpha))
-    layer.poly(skew_box(cx - offset - square * 1.32, cy + h * 0.46, square, square,
-                        shear=square * 0.45), fill=(22, 22, 22, alpha))
-    layer.poly(skew_box(cx - offset, cy + h * 0.46, square, square, shear=square * 0.45),
-               fill=(22, 22, 22, alpha))
-    draw_text(
-        layer, "HYPERION", cx, cy - h * 0.30, h * 0.66, (20, 20, 20, alpha),
-        stroke=h * 0.16, shear=0.28, tracking=width * 0.012, align="center",
-    )
-
-
 def torgue_emblem(layer: Layer, cx: float, cy: float, width: float, alpha: int = 255) -> None:
     """Torgue's badge: a black hexagon plate with an orange rim and a detonation star.
 
@@ -433,50 +410,6 @@ def torgue_emblem(layer: Layer, cx: float, cy: float, width: float, alpha: int =
         x = cx - width * 0.30 + i * width * 0.10
         layer.line([(x, cy + height * 0.22), (x, cy + height * 0.32)],
                    width=width * 0.012, fill=(214, 96, 34, alpha))
-
-
-def jakobs_emblem(layer: Layer, cx: float, cy: float, width: float, alpha: int = 255) -> None:
-    """Engraved scrollwork flourish: a central letter block framed by symmetric leaf curls."""
-    height = width * 0.40
-    gold = (188, 148, 74, alpha)
-    dark = (58, 44, 32, alpha)
-    # Two mirrored filigree curls, drawn as engraved hair-lines.
-    for sign in (-1.0, 1.0):
-        start = (cx + sign * width * 0.12, cy + height * 0.30)
-        curl = bezier([
-            start,
-            (cx + sign * width * 0.48, cy + height * 0.34),
-            (cx + sign * width * 0.50, cy - height * 0.30),
-            (cx + sign * width * 0.28, cy - height * 0.34),
-        ])
-        layer.line(curl, width=width * 0.012, fill=dark)
-        layer.line([(x, y - width * 0.008) for x, y in curl], width=width * 0.005, fill=gold)
-        for step in (6, 12, 18):
-            if step >= len(curl):
-                continue
-            x, y = curl[step]
-            leaf = bezier([(x, y),
-                           (x + sign * width * 0.10, y - height * 0.26),
-                           (x + sign * width * 0.02, y - height * 0.30)])
-            layer.line(leaf, width=width * 0.006, fill=dark)
-    # Centre cartouche: an engraved lozenge between two rules.  No lettering - Jakobs signs its
-    # work with gilt scrollwork and a proof mark, the way a gunmaker stamps an escutcheon.
-    plate_w = width * 0.46
-    plate = skew_box(cx - plate_w / 2.0, cy - height * 0.30, plate_w, height * 0.60, shear=height * 0.10)
-    layer.poly(plate, fill=(70, 46, 32, alpha), outline=gold, width=width * 0.008)
-    for scale, colour, line_w in ((1.0, gold, 0.007), (0.58, (232, 214, 168, alpha), 0.005)):
-        layer.poly([(cx, cy - height * 0.26 * scale),
-                    (cx + plate_w * 0.40 * scale, cy),
-                    (cx, cy + height * 0.26 * scale),
-                    (cx - plate_w * 0.40 * scale, cy)],
-                   outline=colour, width=width * line_w)
-    layer.ellipse(cx, cy, width * 0.014, width * 0.014, fill=(232, 214, 168, alpha))
-    # Rules flanking the cartouche, and a hairline under it, the way an engraver frames a proof.
-    for sign in (-1.0, 1.0):
-        layer.line([(cx + sign * plate_w * 0.44, cy), (cx + sign * plate_w * 0.66, cy)],
-                   width=width * 0.005, fill=gold)
-    layer.line([(cx - width * 0.13, cy + height * 0.20), (cx + width * 0.13, cy + height * 0.20)],
-               width=width * 0.005, fill=gold)
 
 
 def maliwan_emblem(layer: Layer, cx: float, cy: float, width: float, alpha: int = 255) -> None:
@@ -787,31 +720,6 @@ def fit_height(text: str, height: float, max_width: float | None, tracking: floa
     if width <= max_width:
         return height
     return max(1.0, height * max_width / width)
-
-
-def _outlined_text(
-    layer: Layer,
-    text: str,
-    x: float,
-    y: float,
-    height: float,
-    fill: RGBA,
-    outline: RGBA,
-    *,
-    tracking: float = 0.0,
-    shear: float = 0.0,
-    rng: random.Random | None = None,
-    jitter: float = 0.0,
-    align: str = "center",
-    max_width: float | None = None,
-) -> float:
-    """Stencilled lettering with a dark halo, so it reads on steel, paint and rust alike."""
-    height = fit_height(text, height, max_width, tracking)
-    stroke = max(1.0, height * 0.22)
-    draw_text(layer, text, x, y, height, outline, stroke=stroke * 1.9, tracking=tracking,
-              shear=shear, rng=rng, jitter=jitter, align=align)
-    return draw_text(layer, text, x, y, height, fill, stroke=stroke, tracking=tracking,
-                     shear=shear, rng=rng, jitter=jitter, align=align)
 
 
 def _blade_hyperion(size: tuple[int, int], rng: random.Random, variant: Variant = "primary") -> Image.Image:

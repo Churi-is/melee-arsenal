@@ -48,12 +48,6 @@ def hex_to_rgb(value: str) -> tuple[int, int, int]:
     return (int(raw[0:2], 16), int(raw[2:4], 16), int(raw[4:6], 16))
 
 
-def rgb_unit(value: str) -> tuple[float, float, float]:
-    """`'#rrggbb'` -> `(r, g, b)` in 0..1 (used for glTF material factors)."""
-    r, g, b = hex_to_rgb(value)
-    return (r / 255.0, g / 255.0, b / 255.0)
-
-
 # ---------------------------------------------------------------------------
 # Run configuration
 # ---------------------------------------------------------------------------

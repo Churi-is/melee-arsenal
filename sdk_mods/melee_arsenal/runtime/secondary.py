@@ -250,10 +250,6 @@ def is_any_weapon_thrown() -> bool:
     return _THROW is not None
 
 
-def thrown_weapon() -> Any:
-    return _deref_weak(_THROW.wpn_ref) if _THROW is not None else None
-
-
 def _throw_point(st: ThrowState, elapsed: float) -> tuple[float, float, float]:
     forward, height = st.plan.offset_at(elapsed)
     return (

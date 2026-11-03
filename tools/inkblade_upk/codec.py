@@ -84,19 +84,6 @@ def pack_normal(nx: float, ny: float, nz: float, w_sign: float = 1.0) -> int:
     return bx | (by << 8) | (bz << 16) | (bw << 24)
 
 
-def unpack_normal(packed: int) -> tuple[float, float, float, float]:
-    bx = packed & 0xFF
-    by = (packed >> 8) & 0xFF
-    bz = (packed >> 16) & 0xFF
-    bw = (packed >> 24) & 0xFF
-    return (
-        (bx / 127.5) - 1.0,
-        (by / 127.5) - 1.0,
-        (bz / 127.5) - 1.0,
-        (bw / 127.5) - 1.0,
-    )
-
-
 def quat_rotate_vec(
     q: tuple[float, float, float, float],
     v: tuple[float, float, float],

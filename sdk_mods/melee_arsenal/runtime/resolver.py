@@ -711,15 +711,6 @@ def spawn_melee_weapon_batch(
         return 0
 
 
-def spawn_melee_weapon_instance(
-    inst: MeleeWeaponInstance,
-    pc: Any = None,
-    delivery: str = "drop",
-    yaw_offset_deg: float = 0.0,
-) -> int:
-    return spawn_melee_weapon_batch([inst], pc=pc, delivery=delivery)
-
-
 def on_place_spawned_items_post(obj: Any, args: Any, ret: Any, func: Any) -> Any:
     """Stamp exact player level (`GameStage`), `UniqueId`, and names onto dropped Melee Arsenal pickups."""
     global _LAST_DROP_COUNT

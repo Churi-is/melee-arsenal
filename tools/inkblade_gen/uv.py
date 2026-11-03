@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import math
-from typing import Iterable, Sequence
+from typing import Sequence
 
 from .config import RunConfig
 from .geometry import Face, Part
@@ -275,5 +275,3 @@ def unwrap_parts(parts: dict[str, Part], cfg: RunConfig) -> dict[str, PartLayout
     return {part_id: unwrap_part(part, cfg) for part_id, part in parts.items() if cfg.part_enabled(part_id)}
 
 
-def owned_islands(layout: PartLayout) -> Iterable[Island]:
-    return (isl for isl in layout.islands if isl.owner)
