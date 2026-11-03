@@ -9,7 +9,6 @@ from .enums import (
     ElementPolicy,
     Manufacturer,
     ModifierMode,
-    PartSlot,
     Rarity,
     SecondaryAttack,
     StatId,

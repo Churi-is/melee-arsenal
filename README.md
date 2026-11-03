@@ -80,7 +80,7 @@ Item cards show **Damage**, **Range** (meters), **Swing Speed** (/sec), and elem
 
 - Starts near 30% at Lv 1, climbs to 70% by Lv 80/OP10 (76% on Legendary/Seraph/Pearlescent).
 - Only your held weapon grants it; only your own pawn is affected (co-op safe).
-- Toggle: **MODS → Melee Arsenal → Melee Weapon Damage Reduction**.
+- Primary-blade DR toggle: **MODS → Melee Arsenal → Melee Weapon Damage Reduction**. Guard DR can be independently disabled with **Guard Damage Reduction**; the guard pose and parry still work.
 
 ---
 
@@ -95,7 +95,8 @@ Open **MODS → Melee Arsenal**:
 | **1st-Person Slash Motion (%)** | 100 | Slash animation intensity. |
 | **Swing Camera Shake (%)** | 50 | Camera bump per swing (0 = off, up to 150). |
 | **Guard Blade Tilt (%)** | 100 | Visual guard angle; negative flips direction. |
-| **Melee Weapon Damage Reduction** | On | Enable the equipped-blade DR perk. |
+| **Melee Weapon Damage Reduction** | On | Enable the equipped-blade damage-reduction perk. |
+| **Guard Damage Reduction** | On | Enable mitigation while guarding; disabling it leaves the guard pose and parry active. |
 | **Log Swing Damage Breakdown** | Off | Debug log per hit to `melee_arsenal.log`. |
 | **Spawn All 5 Melee Archetypes** | Button | Drops the five archetypes in front of you. |
 
@@ -164,7 +165,7 @@ Repository layout:
 ## Dependencies
 
 - **Runtime:** Borderlands 2 + Willow2 Mod Manager v3.8+ — no Python packages required to play.
-- **Build-time (kit & UPK):** Pillow — see [requirements.txt](requirements.txt) for the pinned range (`Pillow>=10.1,<14`). Generator pixel hashes can shift between Pillow releases; the range is tested.
+- **Build-time (kit & UPK):** Pillow — see [requirements.txt](requirements.txt) for the exact reproducibility pin (`Pillow==13.0.0`).
 
 Install with:
 

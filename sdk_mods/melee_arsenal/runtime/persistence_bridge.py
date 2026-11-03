@@ -1,7 +1,10 @@
 """Save-game sidecar persistence & `ValidateWeaponDefinition` sanity-check guard for Melee Arsenal."""
 from __future__ import annotations
 
+import copy
 import sys
+import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +18,7 @@ except ImportError:  # pragma: no cover
 
 from ..core.persistence import (
     deserialize_weapon,
+    quarantine_corrupt_save,
     read_save_records,
     save_record_path,
     serialize_weapon,
@@ -22,7 +26,9 @@ from ..core.persistence import (
 )
 from .definitions import ensure_definitions_built
 from .log import log_debug, log_debug_once, log_error, log_info, log_warn
+from .object_identity import cache_key
 from .resolver import (
+    allocate_unique_id,
     apply_instance_to_definition_data,
     get_local_player_controller,
     is_melee_definition_data,
@@ -33,6 +39,9 @@ from .resolver import (
 
 
 SAVES_DIR: Path = Path(MODS_DIR) / "_melee_arsenal_saves"
+
+_PENDING_RESTORES: dict[str, dict[int, float]] = {}
+_RESTORE_ACK_TIMEOUT_SEC: float = 20.0
 
 
 def _sanity_saver_active() -> bool:
@@ -71,7 +80,7 @@ def _get_save_name_from_pc(pc: Any) -> str | None:
 def _collect_carried_melee_weapons(pawn: Any) -> list[tuple[Any, str]]:
     """Return `(wpn_obj, slot_tag)` for all Melee Arsenal weapons in equipped slots & backpack."""
     found: list[tuple[Any, str]] = []
-    seen_ids: set[int] = set()
+    seen_ids: set[str] = set()
     inv_mgr = getattr(pawn, "InvManager", None) if pawn is not None else None
     if inv_mgr is None:
         return found
@@ -82,8 +91,8 @@ def _collect_carried_melee_weapons(pawn: Any) -> list[tuple[Any, str]]:
         while cur is not None and steps < 64:
             steps += 1
             wpn = unwrap_weapon_object(cur)
-            if wpn is not None and id(wpn) not in seen_ids:
-                seen_ids.add(id(wpn))
+            if wpn is not None and cache_key(wpn) not in seen_ids:
+                seen_ids.add(cache_key(wpn))
                 slot_num = int(getattr(wpn, "QuickSelectSlot", 0) or 0)
                 tag = f"equip_slot_{slot_num}" if 1 <= slot_num <= 4 else "backpack"
                 if resolve_melee_weapon(wpn, sync_weapon_props=False) is not None:
@@ -95,14 +104,68 @@ def _collect_carried_melee_weapons(pawn: Any) -> list[tuple[Any, str]]:
     try:
         for item in getattr(inv_mgr, "Backpack", []) or []:
             wpn = unwrap_weapon_object(item)
-            if wpn is not None and id(wpn) not in seen_ids:
-                seen_ids.add(id(wpn))
+            if wpn is not None and cache_key(wpn) not in seen_ids:
+                seen_ids.add(cache_key(wpn))
                 if resolve_melee_weapon(wpn, sync_weapon_props=False) is not None:
                     found.append((wpn, "backpack"))
     except Exception as exc:
         log_debug(f"Backpack scan failed: {exc!r}")
 
     return found
+
+
+def _read_sidecar_for_update(target: Path) -> dict[str, dict[str, Any]]:
+    try:
+        return read_save_records(target)
+    except (ValueError, OSError) as exc:
+        quarantined = quarantine_corrupt_save(target)
+        log_warn(f"Quarantined unreadable melee sidecar {target.name}: {exc!r} -> {quarantined}")
+        return {}
+
+
+def _assign_live_unique_id(wpn: Any, inst: Any, reserved: set[int]) -> Any | None:
+    """Commit a fresh positive UniqueId to the live weapon before it can be serialized."""
+    new_id = allocate_unique_id(reserved)
+    try:
+        dd = copy.copy(wpn.DefinitionData)
+        dd.UniqueId = new_id
+        wpn.DefinitionData = dd
+        if int(getattr(wpn.DefinitionData, "UniqueId", 0) or 0) != new_id:
+            raise ValueError("engine did not retain the assigned UniqueId")
+    except Exception as exc:
+        log_error(f"Could not assign a stable UniqueId for sidecar save: {exc!r}")
+        return None
+    reserved.add(new_id)
+    return replace(inst, unique_id=new_id)
+
+
+def clear_pending_restores() -> None:
+    _PENDING_RESTORES.clear()
+
+
+def acknowledge_restored_inventory(pc: Any = None) -> None:
+    """Drop restore acknowledgements once the granted UniqueIds are actually carried."""
+    if not _PENDING_RESTORES:
+        return
+    pc = pc or get_local_player_controller()
+    pawn = getattr(pc, "Pawn", None) if pc is not None else None
+    if pawn is None:
+        return
+    present: set[int] = set()
+    for wpn, _slot in _collect_carried_melee_weapons(pawn):
+        resolved = resolve_melee_weapon(wpn, sync_weapon_props=False)
+        if resolved is not None and int(resolved[0].unique_id) > 0:
+            present.add(int(resolved[0].unique_id))
+    now = time.monotonic()
+    for save_name, pending in list(_PENDING_RESTORES.items()):
+        for uid, started in list(pending.items()):
+            if uid in present:
+                pending.pop(uid, None)
+            elif now - started > _RESTORE_ACK_TIMEOUT_SEC:
+                pending.pop(uid, None)
+                log_warn(f"Restore acknowledgement timed out for {save_name} uid={uid}; will retry on next map load.")
+        if not pending:
+            _PENDING_RESTORES.pop(save_name, None)
 
 
 def snapshot_player_melee_inventory(pc: Any = None, explicit_save_name: str | None = None) -> int:
@@ -116,29 +179,37 @@ def snapshot_player_melee_inventory(pc: Any = None, explicit_save_name: str | No
     if not save_name:
         return 0
 
-    try:
-        target = save_record_path(SAVES_DIR, save_name)
-        existing = read_save_records(target)
-    except ValueError:
-        return 0
-    except Exception as exc:
-        log_warn(f"Could not read existing sidecar for {save_name!r}: {exc}")
-        existing = {}
+    target = save_record_path(SAVES_DIR, save_name)
+    existing = _read_sidecar_for_update(target)
 
     carried = _collect_carried_melee_weapons(pawn)
     updates: dict[str, dict[str, Any]] = {}
     carried_uids: list[str] = []
+    reserved: set[int] = {int(k) for k in existing if str(k).lstrip("-").isdigit()}
+    legacy_zero = existing.get("0") if isinstance(existing.get("0"), dict) else None
+    legacy_zero_used = False
 
     for wpn, slot_tag in carried:
         resolved = resolve_melee_weapon(wpn, sync_weapon_props=False)
         if resolved is None:
             continue
         inst, _ = resolved
+        previous = existing.get(str(int(inst.unique_id)))
+        if int(inst.unique_id) <= 0 or str(int(inst.unique_id)) in updates:
+            if int(inst.unique_id) <= 0 and legacy_zero is not None and not legacy_zero_used:
+                previous = legacy_zero
+                legacy_zero_used = True
+            inst = _assign_live_unique_id(wpn, inst, reserved)
+            if inst is None:
+                continue
         key = str(int(inst.unique_id))
-        rec = serialize_weapon(inst, previous_record=existing.get(key))
+        rec = serialize_weapon(inst, previous_record=previous)
         rec["carried_slot"] = slot_tag
         updates[key] = rec
         carried_uids.append(key)
+
+    if legacy_zero_used and "0" in existing:
+        updates["0"] = {**legacy_zero, "carried_slot": ""}
 
     for k, old_rec in existing.items():
         if k.startswith("_") or not isinstance(old_rec, dict):
@@ -159,7 +230,11 @@ def snapshot_player_melee_inventory(pc: Any = None, explicit_save_name: str | No
 
 
 def restore_player_melee_inventory(pc: Any = None, explicit_save_name: str | None = None) -> int:
-    """Fallback restore of any carried Melee Arsenal weapons missing from inventory after load."""
+    """Fallback restore of carried Melee Arsenal weapons missing from inventory after load.
+
+    Restoration is acknowledged by UniqueId, not by the number of queued grants.  A second
+    call while the spawner is still delivering the first batch is a no-op for those IDs.
+    """
     pc = pc or get_local_player_controller()
     pawn = getattr(pc, "Pawn", None) if pc is not None else None
     if pawn is None or not ensure_definitions_built():
@@ -180,12 +255,20 @@ def restore_player_melee_inventory(pc: Any = None, explicit_save_name: str | Non
         return 0
 
     present_uids: set[int] = set()
+    zero_present = 0
     for wpn, _ in _collect_carried_melee_weapons(pawn):
-        res = resolve_melee_weapon(wpn, sync_weapon_props=True)
+        res = resolve_melee_weapon(wpn, sync_weapon_props=False)
         if res is not None:
-            present_uids.add(int(res[0].unique_id))
+            uid = int(res[0].unique_id)
+            if uid > 0:
+                present_uids.add(uid)
+            else:
+                zero_present += 1
 
+    pending = _PENDING_RESTORES.setdefault(save_name, {})
     missing_instances = []
+    migration_updates: dict[str, dict[str, Any]] = {}
+    reserved = set(present_uids) | {int(k) for k in records if str(k).lstrip("-").isdigit()}
     for key, rec in records.items():
         if key.startswith("_") or not isinstance(rec, dict):
             continue
@@ -194,17 +277,47 @@ def restore_player_melee_inventory(pc: Any = None, explicit_save_name: str | Non
             continue
         try:
             inst = deserialize_weapon(rec)
-            if int(inst.unique_id) not in present_uids:
-                missing_instances.append(inst)
+            uid = int(inst.unique_id)
+            if uid <= 0:
+                # Legacy collapsed zero-ID record. If a zero-ID weapon is already carried we
+                # cannot know whether it is this record, so do not duplicate it; snapshot will
+                # assign stable IDs. Otherwise migrate the record to a fresh positive ID.
+                if zero_present > 0:
+                    log_warn(f"Skipping legacy zero-ID sidecar entry for {save_name}; a zero-ID weapon is already carried.")
+                    continue
+                inst = replace(inst, unique_id=allocate_unique_id(reserved))
+                reserved.add(int(inst.unique_id))
+                migration_updates[str(int(inst.unique_id))] = {**serialize_weapon(inst, previous_record=rec), "carried_slot": slot_tag}
+                migration_updates[key] = {**rec, "carried_slot": ""}
+                uid = int(inst.unique_id)
+            if uid in present_uids or uid in pending:
+                continue
+            missing_instances.append(inst)
         except Exception as exc:
             log_warn(f"Skipping invalid melee sidecar entry {key}: {exc}")
 
+    if migration_updates:
+        try:
+            merged = {k: v for k, v in records.items() if isinstance(v, dict)}
+            merged.update(migration_updates)
+            write_save_records_atomic(target, merged)
+        except Exception as exc:
+            log_error(f"Could not migrate legacy zero-ID sidecar entry: {exc!r}")
+            return 0
+
     if not missing_instances:
+        if not pending:
+            _PENDING_RESTORES.pop(save_name, None)
         return 0
 
     restored = spawn_melee_weapon_batch(missing_instances, pc=pc, delivery="backpack")
     if restored > 0:
-        log_info(f"Restored {restored} Melee Arsenal weapon(s) from {target.name}.")
+        now = time.monotonic()
+        for inst in missing_instances:
+            pending[int(inst.unique_id)] = now
+        log_info(f"Queued restore of {restored} Melee Arsenal weapon(s) from {target.name}; awaiting inventory acknowledgement.")
+    else:
+        _PENDING_RESTORES.pop(save_name, None)
     return restored
 
 

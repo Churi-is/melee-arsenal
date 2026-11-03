@@ -1,12 +1,20 @@
 """Console commands & ModMenu actions for spawning and inspecting Melee Arsenal weapons."""
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from dataclasses import replace
 from typing import Any
 
 from ..core.catalog import ACCESSORIES, resolve_weapon_name
 from ..core.enums import Element, Manufacturer, Rarity
-from ..core.loot_roller import roll_melee_weapon
+from ..core.loot_roller import (
+    eligible_accessories_for_roll,
+    eligible_elements_for_blade,
+    roll_melee_weapon,
+    validate_weapon_parts,
+)
 from ..core.schemas import MeleeWeaponInstance
 from ..core.stats import compute_attack_damage
 from .combat import read_live_player_melee_context
@@ -113,6 +121,78 @@ def _format_spawned_summary(inst: MeleeWeaponInstance) -> str:
     )
 
 
+def _parse_spawn_request(
+    maker_arg: str,
+    rarity_arg: str,
+    element_arg: str,
+    accessory_arg: str,
+) -> tuple[Manufacturer | None, Rarity, Element | None, str | None] | None:
+    maker_token = maker_arg.strip().lower()
+    maker = _MAKER_ALIASES.get(maker_token) if maker_token else None
+    if maker_token and maker is None:
+        log_warn(f"Unknown manufacturer/blade {maker_arg!r}. Try: hyperion, bandit, jakobs, maliwan, torgue.")
+        return None
+    rarity_token = rarity_arg.strip().lower()
+    rarity = _RARITY_ALIASES.get(rarity_token, Rarity.VERY_RARE if not rarity_token else None)
+    if rarity is None:
+        log_warn(f"Unknown rarity {rarity_arg!r}. Try: white, green, blue, purple.")
+        return None
+    elem_token = element_arg.strip().lower()
+    forced_elem = _ELEMENT_ALIASES.get(elem_token) if elem_token else None
+    if elem_token and forced_elem is None:
+        log_warn(f"Unknown element {element_arg!r}. Try: none, fire, shock, corrosive, slag, explosive.")
+        return None
+    acc_token = accessory_arg.strip()
+    forced_acc = (
+        _ACCESSORY_ALIASES.get(acc_token.lower())
+        or (acc_token if acc_token in ACCESSORIES else None)
+    ) if acc_token else None
+    if acc_token and forced_acc is None:
+        log_warn(f"Unknown accessory {accessory_arg!r}. Try: none, serrated, pommel, fuller, razor, sweep, spine, coil.")
+        return None
+    return maker, rarity, forced_elem, forced_acc
+
+
+def build_validated_spawn_instance(
+    maker: Manufacturer | None,
+    rarity: Rarity,
+    forced_elem: Element | None,
+    forced_acc: str | None,
+    game_stage: int,
+) -> MeleeWeaponInstance | None:
+    """Construct a debug/menu spawn deterministically and reject illegal part combinations."""
+    inst = roll_melee_weapon(game_stage=game_stage, manufacturer=maker, rarity=rarity)
+    blade_id = inst.parts.blade_id
+    element_id = inst.parts.element_id
+    if forced_elem is not None:
+        legal_elements = {ep.part_id for ep in eligible_elements_for_blade(blade_id)}
+        candidate = next((ep.part_id for ep in eligible_elements_for_blade(blade_id) if ep.element == forced_elem), None)
+        if candidate is None:
+            log_warn(f"Element {forced_elem.value!r} is not legal for {blade_id} (allowed: {sorted(legal_elements)}).")
+            return None
+        element_id = candidate
+    accessory_id = forced_acc if forced_acc is not None else inst.parts.accessory_id
+    if accessory_id != "Acc_None":
+        legal_acc = {a.part_id for a in eligible_accessories_for_roll(blade_id, element_id, rarity)}
+        if accessory_id not in legal_acc:
+            if forced_acc is not None:
+                log_warn(f"Accessory {accessory_id!r} is not legal for {blade_id} / {element_id} / {rarity.name}.")
+                return None
+            accessory_id = "Acc_None"
+    from ..core.schemas import MeleeWeaponParts
+    inst = replace(inst, parts=MeleeWeaponParts(
+        blade_id=blade_id,
+        grip_id=inst.parts.grip_id,
+        accessory_id=accessory_id,
+        element_id=element_id,
+    ))
+    errors = validate_weapon_parts(inst.parts)
+    if errors:
+        log_warn(f"Refusing to spawn invalid melee weapon: {'; '.join(errors)}")
+        return None
+    return inst
+
+
 def spawn_single_command(
     maker_arg: str = "",
     rarity_arg: str = "purple",
@@ -120,32 +200,20 @@ def spawn_single_command(
     accessory_arg: str = "",
     delivery: str = "drop",
 ) -> int:
-    """Roll and drop one Melee Weapon in front of the player matching optional maker / rarity / element / accessory."""
+    """Roll and drop one validated Melee Weapon matching optional maker / rarity / element / accessory."""
+    parsed = _parse_spawn_request(maker_arg, rarity_arg, element_arg, accessory_arg)
+    if parsed is None:
+        return 0
+    maker, rarity, forced_elem, forced_acc = parsed
     if not ensure_definitions_built():
         return 0
     sync_loot_pools()
 
     pc = get_local_player_controller()
     lvl = get_player_level(pc)
-
-    maker = _MAKER_ALIASES.get(maker_arg.strip().lower()) if maker_arg.strip() else None
-    rarity = _RARITY_ALIASES.get(rarity_arg.strip().lower(), Rarity.VERY_RARE)
-    forced_elem = _ELEMENT_ALIASES.get(element_arg.strip().lower()) if element_arg.strip() else None
-    acc_token = accessory_arg.strip()
-    forced_acc = (
-        _ACCESSORY_ALIASES.get(acc_token.lower())
-        or (acc_token if acc_token in ACCESSORIES else None)
-    )
-
-    inst = roll_melee_weapon(game_stage=lvl, manufacturer=maker, rarity=rarity)
-    if forced_elem is not None:
-        for _ in range(40):
-            cand = roll_melee_weapon(game_stage=lvl, manufacturer=maker, rarity=rarity)
-            if cand.parts.element_id.lower().endswith(forced_elem.name.lower()):
-                inst = cand
-                break
-    if forced_acc is not None and forced_acc in ACCESSORIES:
-        inst = replace(inst, parts=replace(inst.parts, accessory_id=forced_acc))
+    inst = build_validated_spawn_instance(maker, rarity, forced_elem, forced_acc, lvl)
+    if inst is None:
+        return 0
 
     spawned = spawn_melee_weapon_batch([inst], pc=pc, delivery=delivery)
     if spawned > 0:
@@ -161,7 +229,10 @@ def spawn_all_five_archetypes(rarity_arg: str = "purple", delivery: str = "drop"
 
     pc = get_local_player_controller()
     lvl = get_player_level(pc)
-    rarity = _RARITY_ALIASES.get(rarity_arg.strip().lower(), Rarity.VERY_RARE)
+    rarity = _RARITY_ALIASES.get(rarity_arg.strip().lower(), Rarity.VERY_RARE if not rarity_arg.strip() else None)
+    if rarity is None:
+        log_warn(f"Unknown rarity {rarity_arg!r}. Try: white, green, blue, purple.")
+        return 0
 
     batch = [
         roll_melee_weapon(game_stage=lvl, manufacturer=maker, rarity=rarity)
@@ -285,3 +356,21 @@ def dump_held_melee_weapon() -> dict[str, Any] | None:
     }
     log_info(f"Held Melee Weapon Breakdown: {summary}")
     return summary
+
+
+def export_asset_registry_command() -> int:
+    """Write the live AssetLibrary registration order to data/asset_library_manifest.json.
+
+    Run after definitions are built (e.g. after spawning a blade). Copy the resulting file into
+    the repository and commit it; CI asserts future registrations keep this exact prefix/order.
+    """
+    from .asset_library import snapshot_asset_library_manifest
+    manifest = snapshot_asset_library_manifest()
+    if not manifest.get("libraries"):
+        log_warn("No asset registrations observed yet; spawn a Melee Weapon first.")
+        return 0
+    target = Path(__file__).resolve().parents[1] / "data" / "asset_library_manifest.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    log_info(f"Exported asset-library registry -> {target}")
+    return sum(len(v) for v in manifest["libraries"].values())

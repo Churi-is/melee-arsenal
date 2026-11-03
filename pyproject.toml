@@ -5,7 +5,7 @@ description = "Borderlands 2 PythonSDK Mod — Melee Arsenal (InkBlade r6) + UPK
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
-dependencies = ["Pillow>=10.1,<14"]
+dependencies = ["Pillow==13.0.0"]
 authors = [{ name = "MeleeArsenal" }]
 
 [tool.pytest.pytest_plugins]
@@ -19,3 +19,16 @@ Issues = "https://github.com/Churi-is/melee-arsenal/issues"
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+extend-exclude = [".venv", "build", "tools/inkblade_upk/donors"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "B"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tools/inkblade_gen/stages.py" = ["B023"]  # callbacks are invoked immediately inside the loop
+"tools/inkblade_gen/textures.py" = ["B023"]

@@ -38,7 +38,7 @@ tools/
 
 **Core vs Runtime boundary:** `core` owns all math: catalog (Blade→Manufacturer mapping), `compute_card_stats`, `compute_attack_damage`, `apply_incoming_damage_reduction`, targeting helpers (`Vec3`, `TargetCandidate`), throw flight plans (`build_throw_flight_plan`), and guard cooldown math. `runtime` owns UE3 object construction, hook dispatch, and side-effects. No `core` module imports `unrealsdk`.
 
-**State singleton:** `runtime/state.py:RuntimeRegistry` holds rooted UObject caches, manufacturer→definition maps, and live mod option mirrors (`STATE.world_drops_enabled`, `STATE.guard_pose_scale`, etc.). Option changes sync into `STATE` via `on_change_anytime` callbacks in `runtime/__init__.py`.
+**State singleton:** `runtime/state.py:RuntimeRegistry` holds rooted UObject caches, manufacturer→definition maps, and live mod option mirrors (`STATE.world_drops_enabled`, `STATE.guard_pose_scale`, etc.). Option changes sync into `STATE` via `on_change_anytime` callbacks in `runtime/__init__.py`. UObject equality/cache keys are path-first (`runtime/object_identity.py`) because Python wrapper identity is not stable across SDK calls. Disable teardown cancels pending grants/restores, removes injected loot entries, clears card overrides and crit/pose/debug caches, and resets secondary attacks; pawn changes begin a new restore epoch.
 
 ---
 
@@ -80,14 +80,14 @@ Candidate snapshot caps at 800 `PawnList` steps with a seen-set to avoid loops (
 ### Speed Scaling & Camera
 
 - Per-hit damage: `min(1.35, max(0.60, (1.50 / swing_speed) ** 0.55))` — fast blades trade damage for cadence.
-- Camera shake: playback 0.65–0.70×, blend-in 0.30 s / blend-out 0.32 s, amplitude 0.50 (Torgue) / 0.30 (cleave) / 0.18 (single-target), cadence-damped `min(1, max(0.45, 1.45 / sps))`, final scale `* shake_scale * 0.20`. The 0.20 rescaling makes 50% default equal old 10% feel; 100% is double, 150% triple.
+- Camera shake: playback 0.65–0.70×, blend-in 0.30 s / blend-out 0.32 s, amplitude 0.50 (Torgue) / 0.30 (cleave) / 0.18 (single-target), cadence-damped `min(1, max(0.45, 1.45 / sps))`, final scale `* shake_scale * 0.20`. The final multiplier is proportional to the user slider. A value at or below 0.1% skips playback entirely; there is no fallback call at unmodified scale.
 - See `GUARD_BLADE_PITCH/YAW/ROLL` and `CAMERA_SHAKE_*` constants for the tuned values.
 
 ### Frame Driver
 
 Both `Engine.GameViewportClient:Tick` and `WillowGame.WillowPlayerController:PlayerTick` drive the same per-frame body (de-duplicated to 2 ms). The viewport tick is not a UFunction on every BL2 build, so the player tick guarantees thrown blades and poses advance. RMB-release hooks (`StopZoom` / `ClientStopZoom`) are registered at load, not lazily.
 
-**Historical:** Up to v0.2.6 the combat path was synchronous; `tick_melee_projectiles()` remains as a no-op compatibility hook.
+**Historical:** Up to v0.2.6 the combat path was synchronous. The obsolete `tick_melee_projectiles()` hook has been removed; frame-driven work is owned by the runtime frame driver.
 
 ---
 
@@ -105,7 +105,7 @@ RMB/LT is free because ADS zoom is suppressed at `WillowWeapon:StartZoom` / `Cli
 - **Ground handling:** the planned arc is prediction only; the blade flies its real parabola per-frame and lands on whatever the trace actually hits. Not teleported to probed ground (which read as "stops mid-air, then jumps"). 30 s fail-safe + 8 s homing timeout; fall limit off cliffs.
 - **Swept collision:** `CalcWeaponFire` trace + pure-Python swept-segment check prevents tunneling.
 - **Visuals:** release slash → hands drop out of frame (`POSE_THROWN`) → actor carrying `SkeletalMesh` + materials flies the arc (Tediore-style) tumbling, then homes on hand (`~0.35 s` to catch, faster if behind).
-- **Damage:** identical breakdown as LMB (melee bonuses, Roid, elemental DoT/chance, UVHM slag, Torgue splash) at normal hit damage (was 200% in v0.4.3, out-damaged the kit).
+- **Damage:** shared LMB/throw attack-damage and elemental proc policy (melee bonuses, Roid, elemental DoT/chance, Torgue splash) at normal hit damage (was 200% in v0.4.3, out-damaged the kit). The native UVHM slag interaction has not been verified in a live BL2 session; do not assume the Python-side hit path reproduces the game’s slag multiplier.
 - **Lockout:** Primary Fire blocked while airborne; cannot throw twice.
 
 ### Guard (Hyperion Katana, Jakobs Sabre)
@@ -136,7 +136,7 @@ No secondary; RMB inert, no card line.
 - **Roll:** stable from weapon construction (Blade + Grip + Accessory + Element + rarity) + level, never `UniqueId` (zeroed on re-assembly). Curve ~30% Lv 1 (parts nudge 0–4%) → 70% cap Lv 80/OP10, 76% for unique rarities with headroom.
 - **Application:** `WillowPlayerPawn:TakeDamage` PRE checks local pawn + `resolve_melee_weapon`, reads the field via `_read_take_damage_amount` (tries `Damage`, `DamageAmount`, `InDamage`, etc. for build drift), blocks original hit, re-calls with `Damage * (1 - pct/100)` inside `prevent_hooking_direct_calls()` so shield/health split, flinch, and FFYL remain vanilla. Only local pawn, co-op safe, any unexpected state falls through.
 - **Item card:** `ItemCardGFxObject` `SetFunStats` injects `Damage Reduction NN% (Equipped)`. Old green "Stacks with Player Melee & Roid Bonuses" removed in v0.3.4 (clipped into logo, redundant).
-- **Toggle:** `ModMenu Damage Reduction` bool; guard still applies the same value twice.
+- **Toggle:** `Melee Weapon Damage Reduction` controls the equipped-blade perk. `Guard Damage Reduction` independently gates guard mitigation and parry damage reduction; disabling it does not disable the guard pose, attack-blocking window, or parry response.
 
 ---
 
@@ -175,6 +175,7 @@ Injects proportionally across 23 weapon pools, idempotent per-map:
 - **Generator:** 10-stage stack `geometry → uv → flat → mottle → detail → decals → linework → textures → export → render` (see `tools/inkblade_gen/README.md` for stage table, caching fingerprints, and `--only`/`--from` flags).
 - **Compiler:** `tools/compile_inkblade_upk.py` merges GLB + PNG → `MeleeArsenalMeshes.upk` / `MeleeArsenalTextures.upk` + `inkblade_compiled_manifest.json` with `kit_fingerprint` (hash of textures/UV/meshes). `melee install`/`dev` compare fingerprints and auto-recompile stale packages — hence `generate && dev` suffices.
 - **Gestalt:** unified 22-part mesh + bifacial sockets + elemental atlas materials built in `runtime/custom_assets.py` / `asset_library.py`.
+- **AssetLibrary registration:** `data/asset_library_manifest.json` freezes the current per-class registration order; additions append after the frozen prefix rather than alphabetically reshuffling prior IDs. The in-game `melee_export_asset_registry` command exports the observed order for deliberate baseline updates. The mock suite verifies ordering, but a live BL2 save/bank compatibility test remains required before changing registrations.
 - **Testing:** `tests/test_inkblade_generator.py` (stage contract, cache chaining, geometry/texture regression hashes, bifacial, render), `tests/test_inkblade_upk.py` (UE3 codec, archive).
 
 ---
@@ -186,7 +187,7 @@ Injects proportionally across 23 weapon pools, idempotent per-map:
 ./melee test -k throw # filter
 ```
 
-Suites: `test_melee_core` (core math), `test_runtime_mock` (strict typed mock SDK), `test_inkblade_generator`, `test_inkblade_upk`, `test_probe_mock`, `test_melee_cli`.
+Suites: `test_melee_core` (core math), `test_runtime_mock` (strict typed mock SDK), `test_runtime_regressions` (identity, persistence, lifecycle, options), `test_inkblade_generator`, `test_inkblade_upk`, `test_probe_mock`, `test_melee_cli`. The full suite has 4 optional donor/library-dependent skips; live BL2 save/bank, co-op, controller, and visual/performance checks are not simulated.
 
 Mock SDK: fake `unrealsdk.find_object`, `find_class`, `construct_object`, `make_struct`, `WeakPointer`; validates `build_mod` options/hooks/commands and combat dispatch without a game install.
 
@@ -215,8 +216,9 @@ This keeps the defensive safety of broad catches while making real regressions v
 | `./melee package [--build]` | Build `build/dist/{melee_arsenal.zip,melee_arsenal-vVERSION.zip,source.zip}` |
 | `./melee install [--bl2-dir DIR] [--probe] [--no-rebuild]` | Stage UPKs + sync `sdk_mods/melee_arsenal` to BL2 |
 | `./melee dev` | Quiet test + install (auto-recompiles stale UPKs) |
-| `./melee status` | Repo, kit, UPK, BL2 sync, sidecar counts |
+| `./melee status` | Repo, kit, full installed-payload hash sync (including both UPKs), sidecar counts |
 | `./melee logs [-f] [-n LINES]` | Tail `sdk_mods/melee_arsenal/melee_arsenal.log` |
+| `melee_export_asset_registry` (in game) | Export observed AssetLibrary registration order to the installed mod’s `data/asset_library_manifest.json`; copy it back to the source tree when intentionally freezing a new baseline. |
 | `./melee uninstall [--purge-saves]` | Remove mod & UPKs |
 | `./melee clean` | Remove bytecode caches, probe reports, `build/` |
 | `./melee all` | `build → test → package → install` |
@@ -227,7 +229,7 @@ Environment: `BL2_DIR` (or cached `.bl2_dir` via `--bl2-dir`), `PYTHON` override
 
 ## Historical Notes
 
-- **Camera shake:** early blends were 40–120 ms with scale 0.45–0.90 at rate 0.95–1.35, reading as a flick. Now 300 ms in / 320 ms out at 0.65–0.70×, 0.20 rescaling.
+- **Camera shake:** earlier blends were shorter and weaker; current camera playback is centralized, user-scaled, and skipped entirely at zero (no nonzero fallback).
 - **Guard pose:** earlier rotated `Arms.SkeletalMesh`; now tilts `WillowWeapon.Mesh`. Restore was once lazy and drifted; now snapshot-at-apply + unconditional restore (v0.4.4).
 - **Throw:** once read as "stops in mid-air, then jumps"; now continuous parabola with fallback ground trace disabled in favor of pure sweep. Damage was 200% in v0.3.3–v0.4.3.
 - **FunStats:** green "Stacks with Player Melee & Roid Bonuses" line removed in v0.3.4.

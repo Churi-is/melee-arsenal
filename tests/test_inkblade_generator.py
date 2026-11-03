@@ -13,6 +13,7 @@ from unittest import mock
 from PIL import Image, ImageChops
 
 from tools.inkblade_gen import Pipeline, RunConfig, decals, textures
+from tools.inkblade_gen.pipeline import PipelineError
 from tools.inkblade_gen.config import ELEMENTS
 from tools.inkblade_gen import geometry
 from tools.inkblade_gen.geometry import build_parts
@@ -178,9 +179,9 @@ class PipelineCacheTests(unittest.TestCase):
     def test_unknown_stage_names_are_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             pipeline = Pipeline(self._cfg(tmp))
-            with self.assertRaises(Exception):
+            with self.assertRaises(PipelineError):
                 pipeline.run(only=["nope"])
-            with self.assertRaises(Exception):
+            with self.assertRaises(PipelineError):
                 pipeline.run(start="nope")
 
 
@@ -231,7 +232,7 @@ class KitOutputTests(unittest.TestCase):
     def test_textures_are_png_atlases_with_layout_json(self) -> None:
         for part_id, entry in self.manifest["parts"].items():
             layout = json.loads((self.kit / entry["uv_layout"]).read_text())
-            self.assertEqual(layout["schema"], "inkblade.physical-uv/2.0")
+            self.assertEqual(layout["schema"], "inkblade.physical-uv/2.0", part_id)
             self.assertEqual(layout["atlas_px"], entry["atlas_px"])
             with Image.open(self.kit / entry["texture"]) as atlas:
                 self.assertEqual(list(atlas.size), layout["atlas_px"])
@@ -687,7 +688,7 @@ class R7BladeSilhouetteTests(unittest.TestCase):
     def _span_at(pts, z: float) -> tuple[float, float]:
         """Left/right silhouette x at a given (stretched) z."""
         crossings: list[float] = []
-        for (x1, z1), (x2, z2) in zip(pts, pts[1:] + pts[:1]):
+        for (x1, z1), (x2, z2) in zip(pts, pts[1:] + pts[:1], strict=False):
             if (z1 <= z <= z2) or (z2 <= z <= z1):
                 if z1 != z2:
                     crossings.append(x1 + (z - z1) / (z2 - z1) * (x2 - x1))

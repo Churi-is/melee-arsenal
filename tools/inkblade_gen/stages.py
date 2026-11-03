@@ -533,7 +533,7 @@ def build_manifest(state: KitState) -> dict[str, Any]:
         "naming": {
             "unmatched_title": {maker: BLADES[maker]["archetype"] for maker in BLADES},
             "prefixes": {
-                maker: dict(zip(ACCESSORIES, words))
+                maker: dict(zip(ACCESSORIES, words, strict=False))
                 for maker, words in {
                     "Hyperion": ["Indexed", "Gyroscopic", "Telescopic", "Calibrated", "Panoramic", "Armored", "Overdriven"],
                     "Bandit": ["Bitey", "Quickn", "Longboi", "Eye Poker", "Wide Swing", "Bigboned", "Zappy"],

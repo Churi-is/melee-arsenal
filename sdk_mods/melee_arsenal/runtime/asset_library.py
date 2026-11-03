@@ -9,6 +9,8 @@ Follows the exact verified BL2 `AssLibMan` structure:
 from __future__ import annotations
 
 from typing import Any, Iterable
+import json
+from pathlib import Path
 
 try:
     import unrealsdk  # type: ignore[import-not-found]
@@ -20,6 +22,57 @@ from .state import KEEP_ALIVE_FLAGS, STATE
 
 
 _SUBLIBRARIES_BY_TYPE: dict[str, Any] = {}
+_ASSET_LIBRARY_MANIFEST_PATH = Path(__file__).resolve().parents[1] / "data" / "asset_library_manifest.json"
+_ASSET_ORDER_CACHE: dict[str, list[str]] | None = None
+_LAST_REGISTERED_PATHS: dict[str, list[str]] = {}
+
+
+def _load_asset_order() -> dict[str, list[str]]:
+    """Frozen registration order for bank/save compatibility.
+
+    New assets are appended after the frozen prefix; existing entries are never reordered.
+    Missing manifest falls back to deterministic path order (still stable, but not certified).
+    """
+    global _ASSET_ORDER_CACHE
+    if _ASSET_ORDER_CACHE is not None:
+        return _ASSET_ORDER_CACHE
+    try:
+        raw = json.loads(_ASSET_LIBRARY_MANIFEST_PATH.read_text(encoding="utf-8"))
+        if raw.get("schema") != "melee_arsenal.asset_library/1.0":
+            raise ValueError(f"unexpected schema {raw.get('schema')!r}")
+        libs = raw.get("libraries")
+        if not isinstance(libs, dict):
+            raise ValueError("missing libraries")
+        _ASSET_ORDER_CACHE = {
+            str(k): [str(p) for p in v]
+            for k, v in libs.items()
+            if isinstance(v, list)
+        }
+    except Exception as exc:
+        log_warn(f"Asset-library order manifest unavailable ({exc!r}); using path order.")
+        _ASSET_ORDER_CACHE = {}
+    return _ASSET_ORDER_CACHE
+
+
+def order_assets_for_registration(class_name: str, assets: Iterable[Any]) -> list[Any]:
+    by_path: dict[str, Any] = {}
+    for asset in assets:
+        if asset is None:
+            continue
+        by_path.setdefault(obj_path(asset), asset)
+    frozen = _load_asset_order().get(class_name, [])
+    ordered: list[Any] = []
+    seen: set[str] = set()
+    for path in frozen:
+        asset = by_path.get(path)
+        if asset is not None and path not in seen:
+            ordered.append(asset)
+            seen.add(path)
+    for path in sorted(by_path):
+        if path not in seen:
+            ordered.append(by_path[path])
+            seen.add(path)
+    return ordered
 
 
 def _make_name_based_object_path(full_obj_path: str, package_name: str) -> Any:
@@ -72,7 +125,8 @@ def register_assets_in_library(class_name: str, assets: Iterable[Any], set_id: i
     if unrealsdk is None or STATE.root_package is None:
         return 0
 
-    asset_list = [a for a in assets if a is not None]
+    asset_list = order_assets_for_registration(class_name, assets)
+    _LAST_REGISTERED_PATHS[class_name] = [obj_path(a) for a in asset_list]
     if not asset_list:
         return 0
 
@@ -155,3 +209,13 @@ def register_assets_in_library(class_name: str, assets: Iterable[Any], set_id: i
         log_warn(f"Non-fatal AssLibMan registration warning for {class_name}: {exc!r}")
 
     return placed_count
+
+
+def snapshot_asset_library_manifest() -> dict[str, Any]:
+    """Return the actual registration order observed in this process (for freezing a release)."""
+    pkg_name = str(STATE.root_package.Name) if STATE.root_package is not None else "MeleeArsenalDev"
+    return {
+        "schema": "melee_arsenal.asset_library/1.0",
+        "package": pkg_name,
+        "libraries": {k: list(dict.fromkeys(v)) for k, v in _LAST_REGISTERED_PATHS.items()},
+    }

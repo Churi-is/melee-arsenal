@@ -1,6 +1,7 @@
 {
   "schema": "melee_arsenal.compiled_inkblade/1.0",
-  "kit_revision": "bold_ink_visual_revision_of_r4",
+  "kit_revision": "r6_staged",
+  "kit_fingerprint": "003e4fff5a57e240de7d723d32f21566",
   "meshes_package": "MeleeArsenalMeshes",
   "mesh_export": "InkbladeGestaltMesh",
   "textures_package": "MeleeArsenalTextures",
@@ -38,8 +39,8 @@
     "blade_forward_pitch_deg": 24.0,
     "blade_yaw_deg": 90.0
   },
-  "total_gpu_vertices": 18692,
-  "total_triangles": 10020,
+  "total_gpu_vertices": 18806,
+  "total_triangles": 10092,
   "fragments": [
     {
       "part_id": "blade_hyperion",
@@ -60,14 +61,130 @@
       "num_triangles": 288,
       "num_vertices": 556,
       "bounds_min": [
-        -1.7,
-        -16.8137,
+        -1.36,
+        -27.9614,
         -1.5966
       ],
       "bounds_max": [
-        1.7,
+        1.36,
         10.4136,
-        47.9601
+        76.0513
+      ]
+    },
+    {
+      "part_id": "blade_bandit",
+      "variant_index": 0,
+      "fragment_name": "Ink_blade_bandit",
+      "slot": "BarrelPartDefinition",
+      "socket_name": "ROOT",
+      "offset_gltf_m": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "face_gap_m": 0.0,
+      "parent_part_ids": [
+        "blade_bandit"
+      ],
+      "start_index": 864,
+      "num_triangles": 456,
+      "num_vertices": 826,
+      "bounds_min": [
+        -1.36,
+        -31.167,
+        -2.4858
+      ],
+      "bounds_max": [
+        1.36,
+        10.1897,
+        66.0104
+      ]
+    },
+    {
+      "part_id": "blade_jakobs",
+      "variant_index": 0,
+      "fragment_name": "Ink_blade_jakobs",
+      "slot": "BarrelPartDefinition",
+      "socket_name": "ROOT",
+      "offset_gltf_m": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "face_gap_m": 0.0,
+      "parent_part_ids": [
+        "blade_jakobs"
+      ],
+      "start_index": 2232,
+      "num_triangles": 360,
+      "num_vertices": 668,
+      "bounds_min": [
+        -1.36,
+        -31.7694,
+        -1.4146
+      ],
+      "bounds_max": [
+        1.36,
+        13.0362,
+        71.2295
+      ]
+    },
+    {
+      "part_id": "blade_maliwan",
+      "variant_index": 0,
+      "fragment_name": "Ink_blade_maliwan",
+      "slot": "BarrelPartDefinition",
+      "socket_name": "ROOT",
+      "offset_gltf_m": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "face_gap_m": 0.0,
+      "parent_part_ids": [
+        "blade_maliwan"
+      ],
+      "start_index": 3312,
+      "num_triangles": 304,
+      "num_vertices": 570,
+      "bounds_min": [
+        -1.36,
+        -33.3237,
+        -1.3104
+      ],
+      "bounds_max": [
+        1.36,
+        9.4802,
+        69.287
+      ]
+    },
+    {
+      "part_id": "blade_torgue",
+      "variant_index": 0,
+      "fragment_name": "Ink_blade_torgue",
+      "slot": "BarrelPartDefinition",
+      "socket_name": "ROOT",
+      "offset_gltf_m": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "face_gap_m": 0.0,
+      "parent_part_ids": [
+        "blade_torgue"
+      ],
+      "start_index": 4224,
+      "num_triangles": 432,
+      "num_vertices": 812,
+      "bounds_min": [
+        -1.938,
+        -31.3943,
+        -3.2545
+      ],
+      "bounds_max": [
+        1.938,
+        12.5454,
+        64.3509
       ]
     },
     {
@@ -89,7 +206,7 @@
         "blade_maliwan",
         "blade_torgue"
       ],
-      "start_index": 864,
+      "start_index": 5520,
       "num_triangles": 204,
       "num_vertices": 384,
       "bounds_min": [
@@ -101,35 +218,6 @@
         3.485,
         12.91,
         3.5446
-      ]
-    },
-    {
-      "part_id": "blade_bandit",
-      "variant_index": 0,
-      "fragment_name": "Ink_blade_bandit",
-      "slot": "BarrelPartDefinition",
-      "socket_name": "ROOT",
-      "offset_gltf_m": [
-        0.0,
-        0.0,
-        0.0
-      ],
-      "face_gap_m": 0.0,
-      "parent_part_ids": [
-        "blade_bandit"
-      ],
-      "start_index": 1476,
-      "num_triangles": 456,
-      "num_vertices": 826,
-      "bounds_min": [
-        -1.7,
-        -21.9513,
-        -2.4858
-      ],
-      "bounds_max": [
-        1.7,
-        10.1897,
-        43.4108
       ]
     },
     {
@@ -151,7 +239,7 @@
         "blade_maliwan",
         "blade_torgue"
       ],
-      "start_index": 2844,
+      "start_index": 6132,
       "num_triangles": 204,
       "num_vertices": 360,
       "bounds_min": [
@@ -163,35 +251,6 @@
         3.06,
         12.91,
         3.5446
-      ]
-    },
-    {
-      "part_id": "blade_jakobs",
-      "variant_index": 0,
-      "fragment_name": "Ink_blade_jakobs",
-      "slot": "BarrelPartDefinition",
-      "socket_name": "ROOT",
-      "offset_gltf_m": [
-        0.0,
-        0.0,
-        0.0
-      ],
-      "face_gap_m": 0.0,
-      "parent_part_ids": [
-        "blade_jakobs"
-      ],
-      "start_index": 3456,
-      "num_triangles": 288,
-      "num_vertices": 554,
-      "bounds_min": [
-        -1.7,
-        -26.2724,
-        -1.4146
-      ],
-      "bounds_max": [
-        1.7,
-        13.0362,
-        40.9106
       ]
     },
     {
@@ -213,7 +272,7 @@
         "blade_maliwan",
         "blade_torgue"
       ],
-      "start_index": 4320,
+      "start_index": 6744,
       "num_triangles": 280,
       "num_vertices": 480,
       "bounds_min": [
@@ -225,35 +284,6 @@
         3.06,
         12.91,
         3.5446
-      ]
-    },
-    {
-      "part_id": "blade_maliwan",
-      "variant_index": 0,
-      "fragment_name": "Ink_blade_maliwan",
-      "slot": "BarrelPartDefinition",
-      "socket_name": "ROOT",
-      "offset_gltf_m": [
-        0.0,
-        0.0,
-        0.0
-      ],
-      "face_gap_m": 0.0,
-      "parent_part_ids": [
-        "blade_maliwan"
-      ],
-      "start_index": 5160,
-      "num_triangles": 304,
-      "num_vertices": 570,
-      "bounds_min": [
-        -1.7,
-        -21.9173,
-        -1.3104
-      ],
-      "bounds_max": [
-        1.7,
-        9.4802,
-        42.6743
       ]
     },
     {
@@ -275,7 +305,7 @@
         "blade_maliwan",
         "blade_torgue"
       ],
-      "start_index": 6072,
+      "start_index": 7584,
       "num_triangles": 144,
       "num_vertices": 262,
       "bounds_min": [
@@ -287,35 +317,6 @@
         3.264,
         12.91,
         3.5446
-      ]
-    },
-    {
-      "part_id": "blade_torgue",
-      "variant_index": 0,
-      "fragment_name": "Ink_blade_torgue",
-      "slot": "BarrelPartDefinition",
-      "socket_name": "ROOT",
-      "offset_gltf_m": [
-        0.0,
-        0.0,
-        0.0
-      ],
-      "face_gap_m": 0.0,
-      "parent_part_ids": [
-        "blade_torgue"
-      ],
-      "start_index": 6504,
-      "num_triangles": 432,
-      "num_vertices": 812,
-      "bounds_min": [
-        -2.4225,
-        -21.9491,
-        -3.2545
-      ],
-      "bounds_max": [
-        2.4225,
-        12.5454,
-        41.7513
       ]
     },
     {
@@ -337,7 +338,7 @@
         "blade_maliwan",
         "blade_torgue"
       ],
-      "start_index": 7800,
+      "start_index": 8016,
       "num_triangles": 296,
       "num_vertices": 564,
       "bounds_min": [
@@ -362,22 +363,22 @@
         0.16,
         0.0
       ],
-      "face_gap_m": 0.01725,
+      "face_gap_m": 0.0135,
       "parent_part_ids": [
         "blade_hyperion"
       ],
-      "start_index": 8688,
+      "start_index": 8904,
       "num_triangles": 264,
       "num_vertices": 488,
       "bounds_min": [
-        -1.9125,
-        -11.1712,
-        4.8518
+        -1.785,
+        -14.1445,
+        4.2306
       ],
       "bounds_max": [
-        1.9125,
-        4.1807,
-        22.7637
+        1.785,
+        4.4572,
+        30.9948
       ]
     },
     {
@@ -391,22 +392,22 @@
         0.16,
         0.0
       ],
-      "face_gap_m": 0.026,
+      "face_gap_m": 0.0205,
       "parent_part_ids": [
         "blade_bandit"
       ],
-      "start_index": 9480,
+      "start_index": 9696,
       "num_triangles": 264,
       "num_vertices": 488,
       "bounds_min": [
-        -2.21,
-        -11.1712,
-        4.8518
+        -2.023,
+        -14.1445,
+        4.2306
       ],
       "bounds_max": [
-        2.21,
-        4.1807,
-        22.7637
+        2.023,
+        4.4572,
+        30.9948
       ]
     },
     {
@@ -420,22 +421,22 @@
         0.16,
         0.0
       ],
-      "face_gap_m": 0.01475,
+      "face_gap_m": 0.0115,
       "parent_part_ids": [
         "blade_jakobs"
       ],
-      "start_index": 10272,
+      "start_index": 10488,
       "num_triangles": 264,
       "num_vertices": 488,
       "bounds_min": [
-        -1.8275,
-        -11.1712,
-        4.8518
+        -1.717,
+        -14.1445,
+        4.2306
       ],
       "bounds_max": [
-        1.8275,
-        4.1807,
-        22.7637
+        1.717,
+        4.4572,
+        30.9948
       ]
     },
     {
@@ -449,22 +450,22 @@
         0.16,
         0.0
       ],
-      "face_gap_m": 0.02225,
+      "face_gap_m": 0.0175,
       "parent_part_ids": [
         "blade_maliwan"
       ],
-      "start_index": 11064,
+      "start_index": 11280,
       "num_triangles": 264,
       "num_vertices": 488,
       "bounds_min": [
-        -2.0825,
-        -11.1712,
-        4.8518
+        -1.921,
+        -14.1445,
+        4.2306
       ],
       "bounds_max": [
-        2.0825,
-        4.1807,
-        22.7637
+        1.921,
+        4.4572,
+        30.9948
       ]
     },
     {
@@ -478,22 +479,22 @@
         0.16,
         0.0
       ],
-      "face_gap_m": 0.0385,
+      "face_gap_m": 0.0305,
       "parent_part_ids": [
         "blade_torgue"
       ],
-      "start_index": 11856,
+      "start_index": 12072,
       "num_triangles": 264,
       "num_vertices": 488,
       "bounds_min": [
-        -2.635,
-        -11.1712,
-        4.8518
+        -2.363,
+        -14.1445,
+        4.2306
       ],
       "bounds_max": [
-        2.635,
-        4.1807,
-        22.7637
+        2.363,
+        4.4572,
+        30.9948
       ]
     },
     {
@@ -535,7 +536,7 @@
         "blade_torgue+grip_maliwan",
         "blade_torgue+grip_torgue"
       ],
-      "start_index": 12648,
+      "start_index": 12864,
       "num_triangles": 72,
       "num_vertices": 132,
       "bounds_min": [
@@ -560,22 +561,22 @@
         0.16,
         0.0
       ],
-      "face_gap_m": 0.01725,
+      "face_gap_m": 0.0135,
       "parent_part_ids": [
         "blade_hyperion"
       ],
-      "start_index": 12864,
+      "start_index": 13080,
       "num_triangles": 144,
       "num_vertices": 284,
       "bounds_min": [
-        -2.5925,
-        -8.693,
-        4.8518
+        -2.465,
+        -13.5331,
+        4.2306
       ],
       "bounds_max": [
-        2.5925,
-        4.1807,
-        29.0121
+        2.465,
+        4.4572,
+        39.8833
       ]
     },
     {
@@ -589,22 +590,22 @@
         0.16,
         0.0
       ],
-      "face_gap_m": 0.026,
+      "face_gap_m": 0.0205,
       "parent_part_ids": [
         "blade_bandit"
       ],
-      "start_index": 13296,
+      "start_index": 13512,
       "num_triangles": 144,
       "num_vertices": 284,
       "bounds_min": [
-        -2.89,
-        -8.693,
-        4.8518
+        -2.703,
+        -13.5331,
+        4.2306
       ],
       "bounds_max": [
-        2.89,
-        4.1807,
-        29.0121
+        2.703,
+        4.4572,
+        39.8833
       ]
     },
     {
@@ -618,22 +619,22 @@
         0.16,
         0.0
       ],
-      "face_gap_m": 0.01475,
+      "face_gap_m": 0.0115,
       "parent_part_ids": [
         "blade_jakobs"
       ],
-      "start_index": 13728,
+      "start_index": 13944,
       "num_triangles": 144,
       "num_vertices": 284,
       "bounds_min": [
-        -2.5075,
-        -8.693,
-        4.8518
+        -2.397,
+        -13.5331,
+        4.2306
       ],
       "bounds_max": [
-        2.5075,
-        4.1807,
-        29.0121
+        2.397,
+        4.4572,
+        39.8833
       ]
     },
     {
@@ -647,22 +648,22 @@
         0.16,
         0.0
       ],
-      "face_gap_m": 0.02225,
+      "face_gap_m": 0.0175,
       "parent_part_ids": [
         "blade_maliwan"
       ],
-      "start_index": 14160,
+      "start_index": 14376,
       "num_triangles": 144,
       "num_vertices": 284,
       "bounds_min": [
-        -2.7625,
-        -8.693,
-        4.8518
+        -2.601,
+        -13.5331,
+        4.2306
       ],
       "bounds_max": [
-        2.7625,
-        4.1807,
-        29.0121
+        2.601,
+        4.4572,
+        39.8833
       ]
     },
     {
@@ -676,22 +677,22 @@
         0.16,
         0.0
       ],
-      "face_gap_m": 0.0385,
+      "face_gap_m": 0.0305,
       "parent_part_ids": [
         "blade_torgue"
       ],
-      "start_index": 14592,
+      "start_index": 14808,
       "num_triangles": 144,
       "num_vertices": 284,
       "bounds_min": [
-        -3.315,
-        -8.693,
-        4.8518
+        -3.043,
+        -13.5331,
+        4.2306
       ],
       "bounds_max": [
-        3.315,
-        4.1807,
-        29.0121
+        3.043,
+        4.4572,
+        39.8833
       ]
     },
     {
@@ -705,22 +706,22 @@
         0.16,
         0.0
       ],
-      "face_gap_m": 0.01725,
+      "face_gap_m": 0.0135,
       "parent_part_ids": [
         "blade_hyperion"
       ],
-      "start_index": 15024,
+      "start_index": 15240,
       "num_triangles": 200,
       "num_vertices": 384,
       "bounds_min": [
-        -2.3757,
-        -8.8239,
-        4.8518
+        -2.2482,
+        -12.6269,
+        4.2306
       ],
       "bounds_max": [
-        2.3757,
-        4.1807,
-        25.3349
+        2.2482,
+        4.4572,
+        33.8765
       ]
     },
     {
@@ -734,22 +735,22 @@
         0.16,
         0.0
       ],
-      "face_gap_m": 0.026,
+      "face_gap_m": 0.0205,
       "parent_part_ids": [
         "blade_bandit"
       ],
-      "start_index": 15624,
+      "start_index": 15840,
       "num_triangles": 200,
       "num_vertices": 384,
       "bounds_min": [
-        -2.6732,
-        -8.8239,
-        4.8518
+        -2.4862,
+        -12.6269,
+        4.2306
       ],
       "bounds_max": [
-        2.6732,
-        4.1807,
-        25.3349
+        2.4862,
+        4.4572,
+        33.8765
       ]
     },
     {
@@ -763,22 +764,22 @@
         0.16,
         0.0
       ],
-      "face_gap_m": 0.01475,
+      "face_gap_m": 0.0115,
       "parent_part_ids": [
         "blade_jakobs"
       ],
-      "start_index": 16224,
+      "start_index": 16440,
       "num_triangles": 200,
       "num_vertices": 384,
       "bounds_min": [
-        -2.2907,
-        -8.8239,
-        4.8518
+        -2.1802,
+        -12.6269,
+        4.2306
       ],
       "bounds_max": [
-        2.2907,
-        4.1807,
-        25.3349
+        2.1802,
+        4.4572,
+        33.8765
       ]
     },
     {
@@ -792,22 +793,22 @@
         0.16,
         0.0
       ],
-      "face_gap_m": 0.02225,
+      "face_gap_m": 0.0175,
       "parent_part_ids": [
         "blade_maliwan"
       ],
-      "start_index": 16824,
+      "start_index": 17040,
       "num_triangles": 200,
       "num_vertices": 384,
       "bounds_min": [
-        -2.5457,
-        -8.8239,
-        4.8518
+        -2.3842,
+        -12.6269,
+        4.2306
       ],
       "bounds_max": [
-        2.5457,
-        4.1807,
-        25.3349
+        2.3842,
+        4.4572,
+        33.8765
       ]
     },
     {
@@ -821,22 +822,22 @@
         0.16,
         0.0
       ],
-      "face_gap_m": 0.0385,
+      "face_gap_m": 0.0305,
       "parent_part_ids": [
         "blade_torgue"
       ],
-      "start_index": 17424,
+      "start_index": 17640,
       "num_triangles": 200,
       "num_vertices": 384,
       "bounds_min": [
-        -3.0982,
-        -8.8239,
-        4.8518
+        -2.8262,
+        -12.6269,
+        4.2306
       ],
       "bounds_max": [
-        3.0982,
-        4.1807,
-        25.3349
+        2.8262,
+        4.4572,
+        33.8765
       ]
     },
     {
@@ -858,16 +859,16 @@
         "blade_maliwan",
         "blade_torgue"
       ],
-      "start_index": 18024,
+      "start_index": 18240,
       "num_triangles": 172,
       "num_vertices": 332,
       "bounds_min": [
-        -3.655,
+        -2.635,
         -11.3008,
         0.9467
       ],
       "bounds_max": [
-        3.655,
+        2.635,
         11.2735,
         14.733
       ]
@@ -883,22 +884,22 @@
         0.16,
         0.0
       ],
-      "face_gap_m": 0.01725,
+      "face_gap_m": 0.0135,
       "parent_part_ids": [
         "blade_hyperion"
       ],
-      "start_index": 18540,
+      "start_index": 18756,
       "num_triangles": 328,
       "num_vertices": 624,
       "bounds_min": [
-        -2.3148,
-        -11.467,
-        4.8518
+        -2.1873,
+        -15.1317,
+        4.2306
       ],
       "bounds_max": [
-        2.3148,
-        4.1807,
-        23.7137
+        2.1873,
+        4.4572,
+        32.1777
       ]
     },
     {
@@ -912,22 +913,22 @@
         0.16,
         0.0
       ],
-      "face_gap_m": 0.026,
+      "face_gap_m": 0.0205,
       "parent_part_ids": [
         "blade_bandit"
       ],
-      "start_index": 19524,
+      "start_index": 19740,
       "num_triangles": 328,
       "num_vertices": 624,
       "bounds_min": [
-        -2.6123,
-        -11.467,
-        4.8518
+        -2.4253,
+        -15.1317,
+        4.2306
       ],
       "bounds_max": [
-        2.6123,
-        4.1807,
-        23.7137
+        2.4253,
+        4.4572,
+        32.1777
       ]
     },
     {
@@ -941,22 +942,22 @@
         0.16,
         0.0
       ],
-      "face_gap_m": 0.01475,
+      "face_gap_m": 0.0115,
       "parent_part_ids": [
         "blade_jakobs"
       ],
-      "start_index": 20508,
+      "start_index": 20724,
       "num_triangles": 328,
       "num_vertices": 624,
       "bounds_min": [
-        -2.2298,
-        -11.467,
-        4.8518
+        -2.1193,
+        -15.1317,
+        4.2306
       ],
       "bounds_max": [
-        2.2298,
-        4.1807,
-        23.7137
+        2.1193,
+        4.4572,
+        32.1777
       ]
     },
     {
@@ -970,22 +971,22 @@
         0.16,
         0.0
       ],
-      "face_gap_m": 0.02225,
+      "face_gap_m": 0.0175,
       "parent_part_ids": [
         "blade_maliwan"
       ],
-      "start_index": 21492,
+      "start_index": 21708,
       "num_triangles": 328,
       "num_vertices": 624,
       "bounds_min": [
-        -2.4848,
-        -11.467,
-        4.8518
+        -2.3233,
+        -15.1317,
+        4.2306
       ],
       "bounds_max": [
-        2.4848,
-        4.1807,
-        23.7137
+        2.3233,
+        4.4572,
+        32.1777
       ]
     },
     {
@@ -999,22 +1000,22 @@
         0.16,
         0.0
       ],
-      "face_gap_m": 0.0385,
+      "face_gap_m": 0.0305,
       "parent_part_ids": [
         "blade_torgue"
       ],
-      "start_index": 22476,
+      "start_index": 22692,
       "num_triangles": 328,
       "num_vertices": 624,
       "bounds_min": [
-        -3.0373,
-        -11.467,
-        4.8518
+        -2.7653,
+        -15.1317,
+        4.2306
       ],
       "bounds_max": [
-        3.0373,
-        4.1807,
-        23.7137
+        2.7653,
+        4.4572,
+        32.1777
       ]
     },
     {
@@ -1028,20 +1029,20 @@
         0.16,
         0.0
       ],
-      "face_gap_m": 0.01725,
+      "face_gap_m": 0.0135,
       "parent_part_ids": [
         "blade_hyperion"
       ],
-      "start_index": 23460,
+      "start_index": 23676,
       "num_triangles": 320,
       "num_vertices": 576,
       "bounds_min": [
-        -5.4145,
+        -5.287,
         -9.5118,
         4.8518
       ],
       "bounds_max": [
-        5.4145,
+        5.287,
         4.1807,
         16.3453
       ]
@@ -1057,20 +1058,20 @@
         0.16,
         0.0
       ],
-      "face_gap_m": 0.026,
+      "face_gap_m": 0.0205,
       "parent_part_ids": [
         "blade_bandit"
       ],
-      "start_index": 24420,
+      "start_index": 24636,
       "num_triangles": 320,
       "num_vertices": 576,
       "bounds_min": [
-        -5.712,
+        -5.525,
         -9.5118,
         4.8518
       ],
       "bounds_max": [
-        5.712,
+        5.525,
         4.1807,
         16.3453
       ]
@@ -1086,20 +1087,20 @@
         0.16,
         0.0
       ],
-      "face_gap_m": 0.01475,
+      "face_gap_m": 0.0115,
       "parent_part_ids": [
         "blade_jakobs"
       ],
-      "start_index": 25380,
+      "start_index": 25596,
       "num_triangles": 320,
       "num_vertices": 576,
       "bounds_min": [
-        -5.3295,
+        -5.219,
         -9.5118,
         4.8518
       ],
       "bounds_max": [
-        5.3295,
+        5.219,
         4.1807,
         16.3453
       ]
@@ -1115,20 +1116,20 @@
         0.16,
         0.0
       ],
-      "face_gap_m": 0.02225,
+      "face_gap_m": 0.0175,
       "parent_part_ids": [
         "blade_maliwan"
       ],
-      "start_index": 26340,
+      "start_index": 26556,
       "num_triangles": 320,
       "num_vertices": 576,
       "bounds_min": [
-        -5.5845,
+        -5.423,
         -9.5118,
         4.8518
       ],
       "bounds_max": [
-        5.5845,
+        5.423,
         4.1807,
         16.3453
       ]
@@ -1144,20 +1145,20 @@
         0.16,
         0.0
       ],
-      "face_gap_m": 0.0385,
+      "face_gap_m": 0.0305,
       "parent_part_ids": [
         "blade_torgue"
       ],
-      "start_index": 27300,
+      "start_index": 27516,
       "num_triangles": 320,
       "num_vertices": 576,
       "bounds_min": [
-        -6.137,
+        -5.865,
         -9.5118,
         4.8518
       ],
       "bounds_max": [
-        6.137,
+        5.865,
         4.1807,
         16.3453
       ]
@@ -1181,7 +1182,7 @@
         "blade_maliwan",
         "blade_torgue"
       ],
-      "start_index": 28260,
+      "start_index": 28476,
       "num_triangles": 120,
       "num_vertices": 216,
       "bounds_min": [
@@ -1214,7 +1215,7 @@
         "blade_maliwan",
         "blade_torgue"
       ],
-      "start_index": 28620,
+      "start_index": 28836,
       "num_triangles": 120,
       "num_vertices": 216,
       "bounds_min": [
@@ -1247,7 +1248,7 @@
         "blade_maliwan",
         "blade_torgue"
       ],
-      "start_index": 28980,
+      "start_index": 29196,
       "num_triangles": 120,
       "num_vertices": 216,
       "bounds_min": [
@@ -1280,7 +1281,7 @@
         "blade_maliwan",
         "blade_torgue"
       ],
-      "start_index": 29340,
+      "start_index": 29556,
       "num_triangles": 120,
       "num_vertices": 216,
       "bounds_min": [
@@ -1313,7 +1314,7 @@
         "blade_maliwan",
         "blade_torgue"
       ],
-      "start_index": 29700,
+      "start_index": 29916,
       "num_triangles": 120,
       "num_vertices": 216,
       "bounds_min": [

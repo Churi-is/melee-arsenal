@@ -107,8 +107,10 @@ class TestProbeV3AssetAndDonorSuite(unittest.TestCase):
             raw_skel_upk = sk.to_package_bytes("SG_TestMesh")
         compressed_startup = _wrap_lzo_startup_upk(raw_skel_upk)
 
-        vec = lambda x=0.0, y=0.0, z=0.0: types.SimpleNamespace(X=float(x), Y=float(y), Z=float(z))
-        rot = lambda p=0, y=0, r=0: types.SimpleNamespace(Pitch=int(p), Yaw=int(y), Roll=int(r))
+        def vec(x=0.0, y=0.0, z=0.0):
+            return types.SimpleNamespace(X=float(x), Y=float(y), Z=float(z))
+        def rot(p=0, y=0, r=0):
+            return types.SimpleNamespace(Pitch=int(p), Yaw=int(y), Roll=int(r))
 
         t_alb = types.SimpleNamespace(
             SizeX=64,

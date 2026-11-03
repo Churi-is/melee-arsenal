@@ -11,15 +11,18 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .catalog import ACCESSORIES, BLADES, ELEMENTS, GRIPS, MANUFACTURERS
+from .catalog import BLADES
 from .enums import Rarity
 from .loot_roller import validate_weapon_parts
 from .schemas import MeleeWeaponInstance, MeleeWeaponParts
 
 PACKAGE_ROOT: str = "MeleeArsenalDev"
+SAVE_SCHEMA: int = 1
 
 
 def sanitize_save_name(save_name: str | None) -> str:
@@ -51,9 +54,11 @@ def serialize_weapon(
         stage = int(weapon.game_stage)
         grade = int(weapon.grade_index)
 
+    if int(weapon.unique_id) <= 0:
+        raise ValueError("Cannot serialize a Melee weapon without a positive UniqueId")
     maker = BLADES[weapon.parts.blade_id].manufacturer.value
     return {
-        "schema": 1,
+        "schema": SAVE_SCHEMA,
         "unique_id": int(weapon.unique_id),
         "manufacturer": maker,
         "rarity": int(weapon.rarity),
@@ -73,6 +78,12 @@ def serialize_weapon(
 
 def deserialize_weapon(record: dict[str, Any]) -> MeleeWeaponInstance:
     """Reconstruct and validate a `MeleeWeaponInstance` from a sidecar JSON record."""
+    schema = int(record.get("schema", SAVE_SCHEMA))
+    if schema != SAVE_SCHEMA:
+        raise ValueError(f"Unsupported melee sidecar schema: {schema}")
+    unique_id = int(record["unique_id"])
+    if unique_id < 0:
+        raise ValueError(f"Invalid negative UniqueId: {unique_id}")
     parts_raw = record["parts"]
     parts = MeleeWeaponParts(
         blade_id=str(parts_raw["blade_id"]),
@@ -89,8 +100,17 @@ def deserialize_weapon(record: dict[str, Any]) -> MeleeWeaponInstance:
     grade = max(0, int(level_info.get("grade_index", stage)))
     rarity = Rarity.from_bl2_level(int(record.get("rarity", 2)))
 
+    maker = BLADES[parts.blade_id].manufacturer.value
+    recorded_maker = record.get("manufacturer")
+    if recorded_maker is not None and str(recorded_maker) != maker:
+        raise ValueError(f"Sidecar manufacturer {recorded_maker!r} does not match blade maker {maker!r}")
+    expected_balance = f"{PACKAGE_ROOT}.Balance_Melee_{maker}_{rarity.name}"
+    recorded_balance = record.get("balance")
+    if recorded_balance is not None and str(recorded_balance) != expected_balance:
+        raise ValueError(f"Sidecar balance {recorded_balance!r} does not match {expected_balance!r}")
+
     return MeleeWeaponInstance(
-        unique_id=int(record["unique_id"]),
+        unique_id=unique_id,
         game_stage=stage,
         rarity=rarity,
         parts=parts,
@@ -105,72 +125,48 @@ def read_save_records(target: Path) -> dict[str, dict[str, Any]]:
     raw = json.loads(target.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
         raise ValueError(f"Expected JSON object in {target}, got {type(raw).__name__}")
+    for key, rec in raw.items():
+        if str(key).startswith("_"):
+            continue
+        if not isinstance(rec, dict):
+            raise ValueError(f"Sidecar entry {key!r} is not an object")
+        schema = int(rec.get("schema", SAVE_SCHEMA))
+        if schema != SAVE_SCHEMA:
+            raise ValueError(f"Unsupported melee sidecar schema for {key!r}: {schema}")
     return raw
+
+
+def quarantine_corrupt_save(target: Path) -> Path | None:
+    """Move an unreadable sidecar aside so a fresh snapshot can proceed without deleting it."""
+    target = Path(target)
+    if not target.exists():
+        return None
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    quarantined = target.with_name(f"{target.stem}.corrupt-{stamp}{target.suffix}")
+    suffix = 0
+    while quarantined.exists():
+        suffix += 1
+        quarantined = target.with_name(f"{target.stem}.corrupt-{stamp}-{suffix}{target.suffix}")
+    target.replace(quarantined)
+    return quarantined
 
 
 def write_save_records_atomic(
     target: Path,
     updates: dict[str, dict[str, Any]],
 ) -> dict[str, dict[str, Any]]:
-    """Merge `updates` into `target` atomically via `.tmp` write + replace."""
+    """Merge `updates` into `target` atomically, keeping one last-known-good `.bak`.
+
+    The read-back validation happens before any rename.  If the existing file is corrupt,
+    this raises rather than silently replacing it; callers may quarantine it explicitly.
+    """
     target = Path(target)
     merged = read_save_records(target)
     merged.update(updates)
     target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        shutil.copy2(target, target.with_suffix(".bak"))
     tmp = target.with_suffix(".tmp")
     tmp.write_text(json.dumps(merged, indent=2, sort_keys=True), encoding="utf-8")
     tmp.replace(target)
     return merged
-
-
-def build_asset_sublibrary_manifest(package_name: str = PACKAGE_ROOT) -> dict[str, list[str]]:
-    """Deterministic append-only asset order for `AssetLibraryManager` (Bank & Shared Stash).
-
-    Bank and Claptrap's Stash encode items as serial numbers indexing `(sublibrary, asset_idx)`.
-    Keeping a deterministic ordered manifest per UClass ensures stored melee weapons survive
-    across sessions and mod updates.
-    """
-    balances: list[str] = []
-    types: list[str] = []
-    parts: list[str] = []
-    names: list[str] = []
-
-    for maker in MANUFACTURERS:
-        m_name = maker.value
-        types.append(f"{package_name}.WT_Melee_{m_name}")
-        parts.append(f"{package_name}.BodyHost_Melee_{m_name}")
-        for rarity in (Rarity.COMMON, Rarity.UNCOMMON, Rarity.RARE, Rarity.VERY_RARE):
-            balances.append(f"{package_name}.Balance_Melee_{m_name}_{rarity.name}")
-            parts.append(f"{package_name}.Material_Melee_{m_name}_{rarity.name}")
-
-    for blade_id, blade in BLADES.items():
-        parts.append(f"{package_name}.{blade_id}")
-        for grip_maker, title in blade.grip_titles.items():
-            safe_title = "".join(ch for ch in title if ch.isalnum())
-            names.append(f"{package_name}.Title_{blade.manufacturer.value}_{grip_maker.value}_{safe_title}")
-
-    for grip_id in GRIPS:
-        parts.append(f"{package_name}.{grip_id}")
-
-    for acc_id, acc in ACCESSORIES.items():
-        parts.append(f"{package_name}.{acc_id}")
-        if acc.part_id != "Acc_None":
-            for maker in MANUFACTURERS:
-                pref = acc.prefix_for(maker)
-                safe_pref = "".join(ch for ch in pref if ch.isalnum())
-                names.append(f"{package_name}.Prefix_{acc_id}_{maker.value}_{safe_pref}")
-
-    for elem_id, elem in ELEMENTS.items():
-        parts.append(f"{package_name}.{elem_id}")
-        if elem.default_prefix:
-            for maker in MANUFACTURERS:
-                pref = elem.prefix_for(maker)
-                safe_pref = "".join(ch for ch in pref if ch.isalnum())
-                names.append(f"{package_name}.Prefix_{elem_id}_{maker.value}_{safe_pref}")
-
-    return {
-        "WeaponBalanceDefinition": balances,
-        "WeaponTypeDefinition": types,
-        "WeaponPartDefinition": parts,
-        "WeaponNamePartDefinition": names,
-    }

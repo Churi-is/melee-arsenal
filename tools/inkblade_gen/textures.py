@@ -9,16 +9,15 @@ part id plus a stage salt, never from global state.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 import math
 from pathlib import Path
 import random
-from typing import Callable, Iterable, Sequence
+from typing import Callable, Sequence
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
-from .config import ATLAS_BACKGROUND, ELEMENTS, INK_RGB, PALETTE, hex_to_rgb
+from .config import ATLAS_BACKGROUND, ELEMENTS, PALETTE, hex_to_rgb
 from .geometry import Part
 from .uv import Island, PartLayout, Vec2
 
@@ -240,7 +239,7 @@ def paint_mottle(part: Part, layout: PartLayout, canvas: Image.Image) -> Image.I
             if len(poly) >= 3:
                 cx = sum(p[0] for p in poly) / len(poly)
                 cy = sum(p[1] for p in poly) / len(poly)
-                for a, b in zip(poly, poly[1:] + poly[:1]):
+                for a, b in zip(poly, poly[1:] + poly[:1], strict=False):
                     for _ in range(int(math.dist(a, b) / 45)):
                         t = local.uniform(0.08, 0.92)
                         x = a[0] + (b[0] - a[0]) * t
@@ -369,7 +368,7 @@ def paint_surface_detail(part: Part, layout: PartLayout, canvas: Image.Image) ->
                  rect=island.rect) -> None:
             local = random.Random(seed)
             ox, oy = rect[0], rect[1]
-            for a, b in zip(poly, poly[1:] + poly[:1]):
+            for a, b in zip(poly, poly[1:] + poly[:1], strict=False):
                 length = math.dist(a, b)
                 for _ in range(int(length / 14)):
                     t = local.uniform(0.02, 0.98)
@@ -399,7 +398,7 @@ def paint_surface_detail(part: Part, layout: PartLayout, canvas: Image.Image) ->
 # ---------------------------------------------------------------------------
 def _polygon_area(poly: Sequence[Vec2]) -> float:
     area = 0.0
-    for (x0, y0), (x1, y1) in zip(poly, list(poly[1:]) + [poly[0]]):
+    for (x0, y0), (x1, y1) in zip(poly, list(poly[1:]) + [poly[0]], strict=False):
         area += x0 * y1 - x1 * y0
     return abs(area) / 2.0
 

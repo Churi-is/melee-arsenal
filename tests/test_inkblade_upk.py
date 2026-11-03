@@ -4,7 +4,6 @@ from __future__ import annotations
 import ctypes
 import ctypes.util
 import io
-import json
 from pathlib import Path
 import struct
 import tempfile

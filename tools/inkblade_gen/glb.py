@@ -14,7 +14,7 @@ import json
 import struct
 from typing import Any, Iterable, Sequence
 
-from .geometry import Face, Part
+from .geometry import Part
 from .uv import PartLayout, Vec2, Vec3, newell_normal
 
 GLB_MAGIC = 0x46546C67
@@ -72,7 +72,7 @@ def triangulate(uv: Sequence[Vec2]) -> list[tuple[int, int, int]]:
     count = len(uv)
     ids = list(range(count))
     out: list[tuple[int, int, int]] = []
-    area = sum(a[0] * b[1] - b[0] * a[1] for a, b in zip(uv, uv[1:] + uv[:1]))
+    area = sum(a[0] * b[1] - b[0] * a[1] for a, b in zip(uv, uv[1:] + uv[:1], strict=False))
     sign = 1 if area >= 0 else -1
 
     def cross(a: Vec2, b: Vec2, c: Vec2) -> float:
@@ -127,7 +127,7 @@ def build_part_doc(
 ) -> tuple[dict[str, Any], bytearray]:
     """Build the glTF document + binary chunk for one part (no clipping, no merging)."""
     channels = {SURFACE_CHANNEL: [], ACCENT_CHANNEL: []}
-    for face, uvs in zip(part.faces, layout.face_uvs):
+    for face, uvs in zip(part.faces, layout.face_uvs, strict=False):
         channel = ACCENT_CHANNEL if face.tag == "accent" else SURFACE_CHANNEL
         channels[channel].append((face, uvs))
 
@@ -362,7 +362,7 @@ def merge_glbs(pieces: Iterable[tuple[dict[str, Any], bytes | bytearray, Sequenc
         for root_index in roots:
             node = source["nodes"][root_index]
             node["translation"] = [
-                a + b for a, b in zip(node.get("translation", [0, 0, 0]), offset)
+                a + b for a, b in zip(node.get("translation", [0, 0, 0]), offset, strict=False)
             ]
             node.setdefault("extras", {})["assembly_part"] = label
             doc["nodes"][0]["children"].append(root_index + base["nodes"])

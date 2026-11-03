@@ -22,7 +22,7 @@ except ImportError:  # pragma: no cover
 
 from ..core.catalog import BLADES, BLADE_BY_MANUFACTURER, ELEMENT_PART_BY_TYPE, MANUFACTURERS
 from ..core.enums import Manufacturer, Rarity
-from .log import log_debug, log_debug_once, log_error, log_info, log_warn, obj_path
+from .log import log_debug_once, log_error, log_info, log_warn, obj_path
 from .state import KEEP_ALIVE_FLAGS, STATE
 
 

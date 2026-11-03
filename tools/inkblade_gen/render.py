@@ -19,7 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 import math
 from pathlib import Path
-from typing import Callable, Iterable, Sequence
+from typing import Callable, Sequence
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -84,7 +84,7 @@ def part_triangles(
 ) -> list[Triangle]:
     """Triangulate one part in glTF space, optionally mirrored through glTF Z (bifacial halves)."""
     out: list[Triangle] = []
-    for face, uvs in zip(part.faces, layout.face_uvs):
+    for face, uvs in zip(part.faces, layout.face_uvs, strict=False):
         projected = project_face(face.verts, 1.0, 0)
         if len(projected.points) < 3:
             continue
@@ -307,19 +307,13 @@ def rasterise(
 
         # Barycentric weights and their per-pixel/per-row gradients.
         w0_dx = (pby - pcy) * inv_area
-        w0_dy = (pcx - pbx) * inv_area
         w1_dx = (pcy - pay) * inv_area
-        w1_dy = (pax - pcx) * inv_area
         w2_dx = -(w0_dx + w1_dx)
-        w2_dy = -(w0_dy + w1_dy)
 
         (u0, v0), (u1, v1), (u2, v2) = uvs
         du_dx = u0 * w0_dx + u1 * w1_dx + u2 * w2_dx
         dv_dx = v0 * w0_dx + v1 * w1_dx + v2 * w2_dx
-        du_dy = u0 * w0_dy + u1 * w1_dy + u2 * w2_dy
-        dv_dy = v0 * w0_dy + v1 * w1_dy + v2 * w2_dy
         dz_dx = depths[0] * w0_dx + depths[1] * w1_dx + depths[2] * w2_dx
-        dz_dy = depths[0] * w0_dy + depths[1] * w1_dy + depths[2] * w2_dy
 
         for py in range(ymin, ymax + 1):
             sy = py + 0.5

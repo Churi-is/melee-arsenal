@@ -35,6 +35,7 @@ class BuildOutputTests(unittest.TestCase):
                 self.assertEqual(len(names), len(set(names)))
                 self.assertEqual(archive.read("sdk_mods/melee_arsenal/data/inkblade_compiled_manifest.json"), b"generated")
                 self.assertEqual(archive.read("sdk_mods/melee_arsenal/upk/MeleeArsenalMeshes.upk"), b"mesh")
+                self.assertEqual(archive.read("sdk_mods/melee_arsenal/upk/MeleeArsenalTextures.upk"), b"textures")
             game = Path(tmp) / "game"
             (game / "WillowGame/CookedPCConsole").mkdir(parents=True)
             subprocess.run([str(repo / "melee"), "install"], cwd=repo, check=True,
@@ -42,6 +43,7 @@ class BuildOutputTests(unittest.TestCase):
             installed = game / "sdk_mods/melee_arsenal"
             self.assertEqual((installed / "data/inkblade_compiled_manifest.json").read_text(), "generated")
             self.assertEqual((installed / "upk/MeleeArsenalMeshes.upk").read_bytes(), b"mesh")
+            self.assertEqual((installed / "upk/MeleeArsenalTextures.upk").read_bytes(), b"textures")
             self.assertEqual((game / "WillowGame/CookedPCConsole/MeleeArsenalTextures.upk").read_bytes(), b"textures")
 
     def test_install_recompiles_the_upks_when_the_kit_changed(self):
@@ -105,6 +107,52 @@ class BuildOutputTests(unittest.TestCase):
                                     capture_output=True, text=True, env=env)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("do not match the kit", result.stdout + result.stderr)
+
+    def test_status_detects_partial_install_payload(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            shutil.copy2(ROOT / "melee", repo / "melee")
+            shutil.copytree(ROOT / "tools", repo / "tools", ignore=shutil.ignore_patterns("__pycache__"))
+            (repo / ".gitignore").write_text("build/\n")
+            mod = repo / "sdk_mods/melee_arsenal"
+            (mod / "data").mkdir(parents=True)
+            (mod / "__init__.py").write_text('__version__ = "1.0"\n')
+            (mod / "runtime.py").write_text("print('new')\n")
+            cooked = repo / "build/WillowGame/CookedPCConsole"
+            cooked.mkdir(parents=True)
+            (cooked / "MeleeArsenalMeshes.upk").write_bytes(b"mesh")
+            (cooked / "MeleeArsenalTextures.upk").write_bytes(b"textures")
+            (repo / "build/inkblade_compiled_manifest.json").write_text('{"kit_fingerprint":"fp"}')
+            game = Path(tmp) / "game"
+            installed = game / "sdk_mods/melee_arsenal"
+            installed.mkdir(parents=True)
+            (game / "WillowGame/CookedPCConsole").mkdir(parents=True)
+            # Old __init__ matches, but runtime.py / manifest / UPKs are missing.
+            (installed / "__init__.py").write_text('__version__ = "1.0"\n')
+            env = {**os.environ, "BL2_DIR": str(game), "PYTHON": sys.executable}
+            result = subprocess.run([str(repo / "melee"), "status"], cwd=repo,
+                                    capture_output=True, text=True, env=env)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("out of sync", result.stdout)
+            self.assertNotIn("installed & in sync", result.stdout)
+
+    def test_install_no_rebuild_requires_build_outputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            shutil.copy2(ROOT / "melee", repo / "melee")
+            (repo / ".gitignore").write_text("build/\n")
+            mod = repo / "sdk_mods/melee_arsenal"
+            mod.mkdir(parents=True)
+            (mod / "__init__.py").write_text('__version__ = "1.0"\n')
+            game = Path(tmp) / "game"
+            (game / "WillowGame/CookedPCConsole").mkdir(parents=True)
+            env = {**os.environ, "BL2_DIR": str(game), "PYTHON": sys.executable}
+            result = subprocess.run([str(repo / "melee"), "install", "--no-rebuild"], cwd=repo,
+                                    capture_output=True, text=True, env=env)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Missing cooked UPKs or manifest", result.stderr)
 
 
 if __name__ == "__main__":  # pragma: no cover

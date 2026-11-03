@@ -349,7 +349,7 @@ def _compute_fallback_tangents(
                 tan1[vi][2] += tz
 
     result: list[tuple[float, float, float, float]] = []
-    for (nx, ny, nz), (tx, ty, tz) in zip(normals, tan1):
+    for (nx, ny, nz), (tx, ty, tz) in zip(normals, tan1, strict=False):
         # Gram-Schmidt orthogonalize against normal
         ndott = nx * tx + ny * ty + nz * tz
         ox = tx - nx * ndott
@@ -626,7 +626,7 @@ def parse_glb_part_bytes(
 
                 tf_pos: list[tuple[float, float, float]] = []
                 tf_nrm: list[tuple[float, float, float]] = []
-                for p_xyz, n_xyz in zip(raw_pos, raw_nrm):
+                for p_xyz, n_xyz in zip(raw_pos, raw_nrm, strict=False):
                     sp = (float(p_xyz[0]) * w_sc[0], float(p_xyz[1]) * w_sc[1], float(p_xyz[2]) * w_sc[2])
                     rp = quat_rotate_vec(w_rot, sp)
                     tf_pos.append((w_tr[0] + rp[0], w_tr[1] + rp[1], w_tr[2] + rp[2]))
@@ -695,7 +695,7 @@ def parse_glb_part_bytes(
     w_uv: list[tuple[float, float]] = []
     w_sides: list[int] = []
     remap: list[int] = []
-    for p_v, n_v, t_v, u_v, s_v in zip(all_pos, all_nrm, all_tan, all_uv, all_face_sides):
+    for p_v, n_v, t_v, u_v, s_v in zip(all_pos, all_nrm, all_tan, all_uv, all_face_sides, strict=False):
         wkey = (
             round(p_v[0], 6),
             round(p_v[1], 6),
@@ -1101,7 +1101,7 @@ class InkbladeModularKit:
             remapped_uvs: list[tuple[float, float]] = []
 
             for p_xyz, n_xyz, t_xyzw, uv, fside in zip(
-                part.positions, part.normals, part.tangents, part.uvs, face_sides
+                part.positions, part.normals, part.tangents, part.uvs, face_sides, strict=False
             ):
                 world_gltf = (
                     p_xyz[0] + ox_m,

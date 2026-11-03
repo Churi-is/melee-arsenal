@@ -37,12 +37,10 @@ Maliwan gets neither attack — RMB stays inert on a Phaseblade.
 from __future__ import annotations
 
 import math
-import random
 import time
 from dataclasses import dataclass
 from typing import Any
 
-import unrealsdk  # type: ignore[import-not-found]
 from mods_base import hook  # type: ignore[import-not-found]
 from unrealsdk.hooks import Type, prevent_hooking_direct_calls  # type: ignore[import-not-found]
 
@@ -67,7 +65,8 @@ from ..core.secondary import (
 )
 from ..core.stats import ComputedCardStats, apply_guard_damage_reduction, compute_attack_damage
 from . import secondary_vfx
-from .log import log_debug, log_debug_once, log_error, log_info
+from .log import log_error, log_info
+from .object_identity import deref_weak, is_dead, same_uobject, wrap_weak
 from .resolver import get_local_player_controller, resolve_melee_weapon, unwrap_weapon_object
 from .state import STATE
 
@@ -83,49 +82,16 @@ def _combat() -> Any:
 # Small object helpers (kept local so this module never depends on combat at import time)
 # ---------------------------------------------------------------------------
 
-# UE3 `EObjectFlags` bits that mark an object as destroyed / pending kill.
-_DEAD_OBJECT_FLAGS = 0x0000200000000000 | 0x0000000200000000 | 0x8000 | 0x10000
-
-
-def _is_dead(obj: Any) -> bool:
-    if obj is None:
-        return True
-    try:
-        flags = getattr(obj, "ObjectFlags", 0)
-        return bool(int(flags) & _DEAD_OBJECT_FLAGS)
-    except Exception as exc:
-        log_debug_once("secondary._is_dead", f"_is_dead failed: {exc!r}")
-        return False
-
-
-def _wrap_weak(obj: Any) -> Any:
-    if obj is None:
-        return None
-    wp_cls = getattr(unrealsdk.unreal, "WeakPointer", None) if hasattr(unrealsdk, "unreal") else None
-    if wp_cls is not None:
-        try:
-            return wp_cls(obj)
-        except Exception:
-            return obj
-    return obj
-
-
-def _deref_weak(ref: Any) -> Any:
-    if ref is None:
-        return None
-    if callable(ref) and not hasattr(ref, "_path_name") and not hasattr(ref, "PlayCustomAnim"):
-        try:
-            obj = ref()
-            return None if _is_dead(obj) else obj
-        except Exception:
-            return None
-    return None if _is_dead(ref) else ref
+# Shared identity/weak-reference helpers.  Keep private aliases for diagnostics/tests.
+_is_dead = is_dead
+_wrap_weak = wrap_weak
+_deref_weak = deref_weak
 
 
 def _same_object(ref: Any, obj: Any) -> bool:
     if ref is None or obj is None:
         return False
-    return _deref_weak(ref) is obj
+    return same_uobject(_deref_weak(ref), obj)
 
 
 # ---------------------------------------------------------------------------
@@ -176,7 +142,6 @@ class GuardState:
 _THROW: ThrowState | None = None
 _GUARD: GuardState | None = None
 _GUARD_COOLDOWN_UNTIL: float = 0.0
-_OPTIONAL_HOOKS_ENABLED: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -387,35 +352,16 @@ def _finish_throw() -> None:
     )
 
 
-def _select_throw_damage_type(wpn: Any, card: ComputedCardStats) -> Any:
-    """Roll the thrown blade's elemental proc exactly like an LMB hit."""
-    combat = _combat()
-    roll = False
-    if card.element in (Element.FIRE, Element.SHOCK, Element.CORROSIVE, Element.SLAG):
-        chance = min(1.0, card.elemental_chance_pct / 100.0)
-        roll = random.random() < chance
-    if roll:
-        dt_def = combat._CACHED_DMG_TYPES_PROC.get(card.element)
-        _set_status_chance(wpn, 50.0)
-    else:
-        dt_def = combat._CACHED_DMG_TYPES_NODOT.get(card.element) or combat._CACHED_DMG_TYPES_PROC.get(
-            card.element
-        )
-        _set_status_chance(wpn, 0.0)
-    return dt_def
-
-
 def _set_status_chance(wpn: Any, value: float) -> None:
-    for attr_n in (
-        "BaseStatusEffectChanceModifierBaseValue",
-        "BaseStatusEffectChanceModifier",
-        "StatusEffectChanceModifierBaseValue",
-        "StatusEffectChanceModifier",
-    ):
-        try:
-            setattr(wpn, attr_n, float(value))
-        except Exception:
-            pass
+    _combat().set_weapon_status_chance(wpn, value)
+
+
+def _select_throw_damage_type(wpn: Any, card: ComputedCardStats, breakdown: Any) -> Any:
+    """Use the same player-scaled proc/DoT policy as a primary swing."""
+    combat = _combat()
+    combat.sync_weapon_status_damage(wpn, breakdown)
+    dt_def, _proc = combat.select_attack_damage_type(wpn, card, breakdown)
+    return dt_def
 
 
 def _apply_throw_impact(
@@ -449,7 +395,7 @@ def _apply_throw_impact(
 
     hit_point = hit_xyz or st.last_point
     if victim is not None:
-        dt_def = _select_throw_damage_type(wpn, st.card)
+        dt_def = _select_throw_damage_type(wpn, st.card, breakdown)
         try:
             with prevent_hooking_direct_calls():
                 shooter.Behavior_CauseDamage(
@@ -585,6 +531,17 @@ def _tick_return(st: ThrowState, now: float) -> None:
     secondary_vfx.update_thrown_blade(st.return_point)
 
 
+def _cancel_throw(reason: str) -> None:
+    """Abort a throw whose owner/weapon/world epoch changed (map travel, swap, disable)."""
+    global _THROW
+    if _THROW is None:
+        return
+    secondary_vfx.destroy_thrown_blade()
+    _THROW = None
+    _clear_pose("thrown")
+    log_info(f"Throw cancelled ({reason}).")
+
+
 def tick_throw() -> None:
     """Advance the airborne blade one frame (arc sweep, hit test, homing rebound)."""
     global _THROW
@@ -595,9 +552,16 @@ def tick_throw() -> None:
     wpn = _deref_weak(st.wpn_ref)
     shooter = _deref_weak(st.shooter_ref)
     if wpn is None or shooter is None or _is_dead(shooter):
-        secondary_vfx.destroy_thrown_blade()
-        _THROW = None
-        _clear_pose("thrown")
+        _cancel_throw("owner or weapon lost")
+        return
+    pc = get_local_player_controller() or _deref_weak(st.pc_ref)
+    current_pawn = getattr(pc, "Pawn", None) if pc is not None else None
+    if current_pawn is not None and not same_uobject(current_pawn, shooter):
+        _cancel_throw("pawn/map changed")
+        return
+    held = getattr(current_pawn, "Weapon", None) if current_pawn is not None else None
+    if held is not None and not same_uobject(unwrap_weapon_object(held) or held, wpn):
+        _cancel_throw("held weapon changed")
         return
 
     if st.phase == "return":
@@ -651,7 +615,7 @@ def tick_throw() -> None:
             + (hy - st.origin_xyz[1]) ** 2
             + (hz - st.origin_xyz[2]) ** 2
         ) < THROW_LAUNCH_GRACE_UU
-        if hit_actor == shooter or _is_ghost_hit(hit_actor) or close_to_hand:
+        if same_uobject(hit_actor, shooter) or _is_ghost_hit(hit_actor) or close_to_hand:
             # The thrower's own body / arms mesh, or a non-solid volume: keep flying.
             st.last_point = point
             return
@@ -826,7 +790,7 @@ def _melee_attacker(args: Any) -> Any:
 def _reflect_parry(pawn: Any, st: GuardState, args: Any, incoming_damage: float) -> int:
     """Bounce a parried melee blow back with a forced critical hit."""
     attacker = _melee_attacker(args)
-    if attacker is None or attacker is pawn or _is_dead(attacker):
+    if attacker is None or same_uobject(attacker, pawn) or _is_dead(attacker):
         return 0
     combat = _combat()
     # The reflect must read as a critical hit from the blade in your hands, not as a scaling of a
@@ -904,8 +868,10 @@ def handle_guard_incoming_damage(pawn: Any, args: Any, func: Any) -> bool:
     st = _GUARD
     if st is None or pawn is None or args is None:
         return False
+    if not getattr(STATE, "guard_damage_reduction_enabled", True):
+        return False
     pc = get_local_player_controller()
-    if pc is None or getattr(pc, "Pawn", None) is not pawn:
+    if pc is None or not same_uobject(getattr(pc, "Pawn", None), pawn):
         return False
 
     # Guard only exists while its own blade is still the held weapon.
@@ -918,7 +884,7 @@ def handle_guard_incoming_damage(pawn: Any, args: Any, func: Any) -> bool:
         wpn is None
         or resolved is None
         or resolved[1].secondary_attack != SecondaryAttack.GUARD
-        or guard_wpn is not held_wpn
+        or not same_uobject(guard_wpn, held_wpn)
     ):
         end_guard(start_cooldown=False)
         return False
@@ -991,7 +957,7 @@ def tick_guard() -> None:
     # A held-weapon change must drop the brace even when the new blade is also a guard weapon.
     guard_wpn = unwrap_weapon_object(_deref_weak(st.wpn_ref)) or _deref_weak(st.wpn_ref)
     held_wpn = unwrap_weapon_object(held) or held
-    if guard_wpn is not None and held_wpn is not None and guard_wpn is not held_wpn:
+    if guard_wpn is not None and held_wpn is not None and not same_uobject(guard_wpn, held_wpn):
         log_info("Guard dropped (held weapon changed).")
         end_guard(start_cooldown=False)
         return
@@ -1118,8 +1084,8 @@ def reset_secondary_state() -> None:
 # RMB release hooks (`StopZoom`)
 #
 # Zoom is suppressed on Melee Weapons, so these hooks exist purely to learn when the player
-# lets go of RMB. They are *not* part of `ALL_HOOKS`: `enable_optional_hooks()` turns them on
-# behind a try/except after load, because a build without the function must not break the mod.
+# lets go of RMB. They are registered with `ALL_HOOKS` at load; the frame tick only enforces
+# the maximum hold timeout as a fail-safe.
 # ---------------------------------------------------------------------------
 
 @hook("WillowGame.WillowWeapon:StopZoom", Type.PRE)
@@ -1142,36 +1108,3 @@ def on_melee_weapon_client_stop_zoom_pre(obj: Any, args: Any, ret: Any, func: An
     except Exception as exc:
         log_error(f"on_melee_weapon_client_stop_zoom_pre failed: {exc!r}")
     return None
-
-
-OPTIONAL_HOOKS = (on_melee_weapon_stop_zoom_pre, on_melee_weapon_client_stop_zoom_pre)
-
-
-def enable_optional_hooks() -> None:
-    """RMB-release hooks are registered with `ALL_HOOKS` at load; this only reports them.
-
-    Previously they were enabled lazily from the frame tick, which meant a build whose tick never
-    fired could hold a guard forever: the release was never wired up. Registering them at load
-    (unrealsdk accepts a hook name whether or not the UFunction exists) removes that dependency.
-    """
-    global _OPTIONAL_HOOKS_ENABLED
-    if _OPTIONAL_HOOKS_ENABLED:
-        return
-    _OPTIONAL_HOOKS_ENABLED = True
-    log_info(
-        "RMB-release hooks registered at load: WillowWeapon:StopZoom / ClientStopZoom "
-        "(guard release no longer depends on the frame tick)."
-    )
-
-
-def disable_optional_hooks() -> None:
-    global _OPTIONAL_HOOKS_ENABLED
-    for hook_fn in OPTIONAL_HOOKS:
-        disable = getattr(hook_fn, "disable", None)
-        if disable is None:
-            continue
-        try:
-            disable()
-        except Exception:
-            pass
-    _OPTIONAL_HOOKS_ENABLED = False
