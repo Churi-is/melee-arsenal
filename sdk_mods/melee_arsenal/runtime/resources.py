@@ -1,9 +1,14 @@
-"""Resolved and cached Unreal assets used by melee combat."""
+"""Every Unreal asset the mod looks up, cached in one place.
+
+`ensure_combat_resources_cached()` loads the packages and fills the caches. The definition
+builders read the damage types and swing sounds; combat, throw and guard read the rest.
+"""
 
 from __future__ import annotations
-from .sdk import unrealsdk
 
 from typing import Any
+
+from .sdk import unrealsdk
 
 
 from ..core.enums import Element
@@ -284,7 +289,7 @@ def _cache_torgue_explosion_assets() -> None:
         return
     _EXPLOSION_ASSETS_SCANNED = True
 
-    # 1. Prefer known Borderlands 2 startup/base explosion assets.
+    # Prefer known Borderlands 2 startup/base explosion assets.
     best_ps = _safe_find(
         "ParticleSystem", "FX_WEP_Explosions.Particles.Default.Part_ExplosiveExplosion_Medium"
     ) or _safe_find("ParticleSystem", "FX_WEP_Explosions.Particles.Default.Part_ExplosiveExplosion_Small")
@@ -294,7 +299,7 @@ def _cache_torgue_explosion_assets() -> None:
         or _safe_find("AkEvent", "Ake_Exp_Elemental.Exp_Explosive.Ak_Play_Exp_Elemental_Explosive_LG")
     )
 
-    # 2. Fallback heuristic scan across already-loaded objects if needed
+    # Fallback heuristic scan across already-loaded objects if needed
     if best_ps is None:
         best_ps_score = -1
         try:

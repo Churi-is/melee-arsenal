@@ -170,8 +170,8 @@ def set_part_rarity(part: Any, rarity: Rarity | int | float) -> None:
         data.InitializationDefinition = None
         data.BaseValueScaleConstant = 1.0
         part.Rarity = data
-    except Exception:
-        pass
+    except Exception as exc:  # pragma: no cover - engine call shape varies
+        log_debug_once("set_part_rarity", f"set_part_rarity failed: {exc!r}")
 
 
 def get_part_rarity(part: Any) -> float:
@@ -656,15 +656,15 @@ def setup_custom_inkblade_assets(
         for lst in frags_by_kit_id.values():
             lst.sort(key=lambda d: int(d.get("variant_index", 0)))
 
-        # 1. Assign Gestalt_Inkblade onto all 5 custom WeaponTypeDefinitions
+        # Assign Gestalt_Inkblade onto all 5 custom WeaponTypeDefinitions
         for wt_obj in STATE.maker_to_wt.values():
             wt_obj.GestaltMesh = gestalt
 
-        # 2. Suppress donor pistol Body geometry (`Body` is invisible structural glue on melee weapons)
+        # Suppress donor pistol Body geometry (`Body` is invisible structural glue on melee weapons)
         for body_part in STATE.body_parts.values():
             set_part_gestalt_fragment(body_part, "None")
 
-        # 3. Bind Blades, Grips, Accessories (including blade-fitted `__s1..__s4` twins), and Elements
+        # Bind Blades, Grips, Accessories (including blade-fitted `__s1..__s4` twins), and Elements
         STATE.grip_variant_parts.clear()
         STATE.accessory_variant_parts.clear()
         STATE.element_variant_parts.clear()

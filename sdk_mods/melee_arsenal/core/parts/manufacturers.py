@@ -57,7 +57,7 @@ class ManufacturerSpec:
     matching_grip_speed_bonus: float = 0.10
     intrinsic_modifiers: tuple[StatModifier, ...] = ()
     donor_manufacturer_path: str = ""
-    # RMB / Left Trigger secondary attack identity (Maliwan deliberately gets none).
+    # RMB / Left Trigger secondary attack identity (Maliwan has none).
     secondary_attack: SecondaryAttack = SecondaryAttack.NONE
     # Mass of this manufacturer's blade & grip hardware in kilograms. Bandit/Torgue thrown
     # blades take their flight arc (speed, loft, range) from the mass of the actual parts.
@@ -66,9 +66,7 @@ class ManufacturerSpec:
     guard_cooldown_sec: float = GUARD_COOLDOWN_DEFAULT_SEC
 
 
-# ---------------------------------------------------------------------------
 # Registry: one entry per manufacturer / blade archetype
-# ---------------------------------------------------------------------------
 
 MANUFACTURERS: dict[Manufacturer, ManufacturerSpec] = {
     Manufacturer.HYPERION: ManufacturerSpec(

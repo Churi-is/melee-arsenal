@@ -11,7 +11,7 @@ from typing import Any
 
 from ...core.parts import ACCESSORIES, BLADES, ELEMENTS, MANUFACTURERS
 from ..custom_assets import apply_gestalt_bounds_framing
-from ..log import obj_path
+from ..log import log_debug_once, obj_path
 from ..state import KEEP_ALIVE_FLAGS, STATE
 from .context import BuildContext
 from .helpers import _clear_array_prop, _deg_to_rot_units, _ensure_subpackage, _find, _sanitize_token
@@ -134,8 +134,8 @@ def _apply_crit_bonus_if_supported(part: Any, crit_bonus: float, crit_template: 
         bmv.BaseValueScaleConstant = 1.0
         row.BaseModifierValue = bmv
         setattr(part, field_name, [row])
-    except Exception:
-        pass
+    except Exception as exc:  # pragma: no cover - engine call shape varies
+        log_debug_once("_apply_crit_bonus_if_supported", f"_apply_crit_bonus_if_supported failed: {exc!r}")
 
 
 def get_or_create_title_part(title_text: str) -> Any:
@@ -180,7 +180,7 @@ def build_name_parts(ctx: BuildContext) -> None:
     """Build the Title and Prefix name parts used by every Blade / Grip / Element combination."""
     donors = ctx.donors
     names_pkg = ctx.names_pkg
-    # 1. Build Title & Prefix WeaponNamePartDefinitions
+    # Build Title & Prefix WeaponNamePartDefinitions
     title_tpl = donors["title_template"]
     prefix_tpl = donors["prefix_template"] or title_tpl
     STATE.empty_name_part = _build_name_part(names_pkg, "Prefix_Empty", "", prefix_tpl, is_title=False)

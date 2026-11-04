@@ -182,7 +182,7 @@ def build_item_card_payload(
         f"<font color='#7fd4ff'>Damage Reduction {card.damage_reduction_pct}% (Equipped)</font>"
     ]
 
-    # RMB / Left Trigger secondary attack (Maliwan deliberately prints nothing).
+    # RMB / Left Trigger secondary attack (Maliwan has none).
     if card.secondary_attack == SecondaryAttack.THROW:
         lines.append(
             f"<font color='#ffc266'>RMB Throw: {THROW_DAMAGE_MULTIPLIER:.0%} Damage, "

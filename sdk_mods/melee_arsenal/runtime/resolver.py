@@ -329,8 +329,8 @@ def sync_live_weapon_properties(
             changed = True
         if changed:
             wpn.DefinitionData = dd
-    except Exception:
-        pass
+    except Exception as exc:  # pragma: no cover - engine call shape varies
+        log_debug_once("sync_live_weapon_properties", f"sync_live_weapon_properties failed: {exc!r}")
 
     fire_iv = round(1.0 / max(0.25, card.swing_speed), 4)
     elem_dps = float(max(0.0, card.elemental_dps))
@@ -727,9 +727,7 @@ def on_place_spawned_items_post(obj: Any, args: Any, ret: Any, func: Any) -> Any
     return None
 
 
-# ---------------------------------------------------------------------------
 # Engine Hook Callbacks for Initialization, Naming & 1st-Person Animations
-# ---------------------------------------------------------------------------
 
 def _try_stamp_pending_grant(dd: Any) -> bool:
     if dd is None or not is_melee_definition_data(dd):

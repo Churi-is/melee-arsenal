@@ -26,7 +26,7 @@ from ..custom_assets import (
     resolve_fitted_grip_part,
     resolve_fitted_material_part,
 )
-from ..log import log_warn, obj_path
+from ..log import log_debug_once, log_warn, obj_path
 from ..state import KEEP_ALIVE_FLAGS, STATE
 from .context import BuildContext
 from .helpers import _ensure_subpackage, _find, _inherited_manufacturers, _inherited_plc
@@ -218,7 +218,7 @@ def build_balances(ctx: BuildContext) -> None:
     donors = ctx.donors
     root_pkg = ctx.root_pkg
     bal_pkg = ctx.bal_pkg
-    # 9. Build 20 WeaponBalanceDefinitions, WeaponPartListCollections & Drop ItemPools
+    # Build 20 WeaponBalanceDefinitions, WeaponPartListCollections & Drop ItemPools
     pools_pkg = _ensure_subpackage(root_pkg, "Pools")
     drop_pool_donor = (
         _find("ItemPoolDefinition", "GD_Itempools.Runnables.Pool_MadameVonBartlesby")
@@ -373,8 +373,8 @@ def build_balances(ctx: BuildContext) -> None:
                         q.InitializationDefinition = None
                         q.BaseValueScaleConstant = 1.0
                         dpool.Quantity = q
-                    except Exception:
-                        pass
+                    except Exception as exc:  # pragma: no cover - engine call shape varies
+                        log_debug_once("build_balances", f"build_balances failed: {exc!r}")
                 donor_items = list(getattr(drop_pool_donor, "BalancedItems", []) or [])
                 if donor_items:
                     entry = copy.copy(donor_items[0])

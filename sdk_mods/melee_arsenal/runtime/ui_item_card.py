@@ -200,9 +200,7 @@ def _apply_melee_card_override(gfx_obj: Any, ov: ActiveCardOverride) -> None:
         log_error(f"SetFunStats error on melee card: {exc!r}")
 
 
-# ---------------------------------------------------------------------------
 # Engine Hook Callbacks
-# ---------------------------------------------------------------------------
 
 def on_set_item_card_ex_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
     """Begin Melee Item Card override (`SetItemCard` or `SetItemCardEx`)."""

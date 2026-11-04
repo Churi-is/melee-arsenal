@@ -48,7 +48,6 @@ SWING_SPEED_DAMAGE_EXPONENT: float = 0.55
 #   * Lv 1 (no OP levels)  -> 30% floor, ~30-34% with parts
 #   * Lv 80 + OP10         -> 61% floor, up to the 70% cap with good parts
 #   * Unique rarities (Legendary / Seraph / Pearlescent / Effervescent) may pass the 70% cap.
-DAMAGE_REDUCTION_MIN_PCT: int = 30
 DAMAGE_REDUCTION_MAX_PCT: int = 70
 DAMAGE_REDUCTION_MIN_STAGE: int = 1
 DAMAGE_REDUCTION_MAX_STAGE: int = 90        # Lv 80 + OP1..OP10

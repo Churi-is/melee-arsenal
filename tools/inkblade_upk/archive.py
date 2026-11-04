@@ -419,7 +419,7 @@ class UE3PackageArchive:
         table_end = min(table_end, self.uncompressed_size)
         tbuf = memoryview(self.read_range(0, table_end))
 
-        # 1. NameTable
+        # NameTable
         p = s.name_offset
         names: list[NameEntry] = []
         for _ in range(s.name_count):
@@ -432,7 +432,7 @@ class UE3PackageArchive:
         def fname_str(idx: int) -> str:
             return names[idx].name if 0 <= idx < len(names) else f"<bad_name_{idx}>"
 
-        # 2. ImportTable
+        # ImportTable
         p = s.import_offset
         imports: list[ImportEntry] = []
         for _ in range(s.import_count):
@@ -451,7 +451,7 @@ class UE3PackageArchive:
             )
         self.imports = imports
 
-        # 3. ExportTable
+        # ExportTable
         p = s.export_offset
         exports: list[ExportEntry] = []
         for i in range(s.export_count):

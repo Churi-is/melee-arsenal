@@ -28,9 +28,7 @@ class GripPartSpec:
     kit_id: str | None = None
 
 
-# ---------------------------------------------------------------------------
 # Registry: one entry per Grip
-# ---------------------------------------------------------------------------
 
 GRIPS: dict[str, GripPartSpec] = {
     "Grip_Hyperion": GripPartSpec(

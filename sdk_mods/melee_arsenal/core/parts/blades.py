@@ -34,9 +34,7 @@ class BladePartSpec:
         return self.grip_titles.get(grip_manufacturer, self.base_title)
 
 
-# ---------------------------------------------------------------------------
 # Registry: one entry per Blade (one per Manufacturer archetype)
-# ---------------------------------------------------------------------------
 
 BLADES: dict[str, BladePartSpec] = {
     "Blade_Hyperion_Katana": BladePartSpec(

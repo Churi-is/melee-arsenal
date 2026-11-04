@@ -70,7 +70,7 @@ _NON_WEAPON_POOL_TOKENS: tuple[str, ...] = (
 
 # (category, target_pool_path, custom_melee_pool_key)
 TARGET_POOL_MATRIX: tuple[tuple[str, str, str], ...] = (
-    # 1. Global World-Drop Rarity Tier Pools (StandardEnemyGunsAndGear, Badasses, Bosses, Skag/Stalker Piles)
+    # Global World-Drop Rarity Tier Pools (StandardEnemyGunsAndGear, Badasses, Bosses, Skag/Stalker Piles)
     ("world", "GD_Itempools.WeaponPools.Pool_Weapons_All_01_Common", "01_Common"),
     ("world", "GD_Itempools.WeaponPools.Pool_Weapons_All_02_Uncommon", "02_Uncommon"),
     ("world", "GD_Itempools.WeaponPools.Pool_Weapons_All_04_Rare", "04_Rare"),
@@ -87,15 +87,15 @@ TARGET_POOL_MATRIX: tuple[tuple[str, str, str], ...] = (
     ("enemy", "GD_Itempools.EnemyDropPools.Pool_GunsAndGear_WeightedSMGs", "All"),
     ("enemy", "GD_Itempools.EnemyDropPools.Pool_GunsAndGear_WeightedShotguns", "All"),
     ("enemy", "GD_Itempools.EnemyDropPools.Pool_GunsAndGear_WeightedSniper", "All"),
-    # 3. Regular Weapon Chests & Red Epic Chests
+    # Regular Weapon Chests & Red Epic Chests
     ("chest", "GD_Itempools.Treasure_ChestPools.Pool_WeaponChest_Weapons_LongGuns", "All"),
     ("chest", "GD_Itempools.Treasure_ChestPools.Pool_WeaponChest_Weapons_Pistols", "All"),
     ("chest", "GD_Itempools.Treasure_ChestPools.Pool_EpicChest_Weapons_LongGuns", "Epic"),
     ("chest", "GD_Itempools.Treasure_ChestPools.Pool_EpicChest_Weapons_Pistols", "Epic"),
-    # 4. Lockers & Dumpsters
+    # Lockers & Dumpsters
     ("container", "GD_Itempools.LootablePools.Pool_Locker_Items_SMGsAndPistols", "All"),
     ("container", "GD_Itempools.LootablePools.Pool_Dumpster_Guns", "All"),
-    # 5. Marcus Weapon Vending Machines & Item of the Day
+    # Marcus Weapon Vending Machines & Item of the Day
     ("shop", "GD_ItemPools_Shop.WeaponPools.ShopPool_Weapons_Pistols", "Shop"),
     ("shop", "GD_ItemPools_Shop.WeaponPools.ShopPool_Weapons_SMG", "Shop"),
     ("shop", "GD_ItemPools_Shop.WeaponPools.ShopPool_Weapons_AssaultRifles", "Shop"),
@@ -213,8 +213,8 @@ def _sanitize_pool_object(pool_obj: Any) -> None:
             q.InitializationDefinition = None
             q.BaseValueScaleConstant = 1.0
             pool_obj.Quantity = q
-        except Exception:
-            pass
+        except Exception as exc:  # pragma: no cover - engine call shape varies
+            log_debug_once("_sanitize_pool_object", f"_sanitize_pool_object failed: {exc!r}")
 
 
 def _set_constant_prob(entry: Any, weight: float) -> None:
@@ -332,7 +332,7 @@ def _build_or_refresh_melee_subpools(pkg_pools: Any) -> dict[str, Any]:
     donor_pool_any: Any = None
     donor_entry_tpl: Any = None
 
-    # 1. Build the 4 per-rarity sub-pools (`01_Common`, `02_Uncommon`, `04_Rare`, `05_VeryRare`)
+    # Build the 4 per-rarity sub-pools (`01_Common`, `02_Uncommon`, `04_Rare`, `05_VeryRare`)
     for rarity, tier_key, donor_sub_path in _TIER_SPECS:
         donor_sub = _find_pool(donor_sub_path)
         if donor_sub is None:
@@ -374,7 +374,7 @@ def _build_or_refresh_melee_subpools(pkg_pools: Any) -> dict[str, Any]:
     tier_order = ("01_Common", "02_Uncommon", "04_Rare", "05_VeryRare")
     available_tiers = [t for t in tier_order if t in subpools]
 
-    # 2. Composite `Pool_Weapons_Melee_All`: mirror live `Pool_Weapons_All` Probability structs if present
+    # Composite `Pool_Weapons_Melee_All`: mirror live `Pool_Weapons_All` Probability structs if present
     melee_all = _get_or_create_custom_pool(pkg_pools, "Pool_Weapons_Melee_All", donor_pool_any)
     live_all = _find_pool("GD_Itempools.WeaponPools.Pool_Weapons_All")
     live_all_items = list(getattr(live_all, "BalancedItems", []) or []) if live_all is not None else []
@@ -406,7 +406,7 @@ def _build_or_refresh_melee_subpools(pkg_pools: Any) -> dict[str, Any]:
     assign_struct_array(melee_all, "BalancedItems", all_entries)
     subpools["All"] = melee_all
 
-    # 3. Composite `Pool_Weapons_Melee_Epic`: Uncommon + Rare + VeryRare (NO White Commons for Red Chests / IOTD!)
+    # Composite `Pool_Weapons_Melee_Epic`: Uncommon + Rare + VeryRare (NO White Commons for Red Chests / IOTD!)
     melee_epic = _get_or_create_custom_pool(pkg_pools, "Pool_Weapons_Melee_Epic", donor_pool_any)
     default_epic_weights = (
         ("02_Uncommon", 10.0),
@@ -426,7 +426,7 @@ def _build_or_refresh_melee_subpools(pkg_pools: Any) -> dict[str, Any]:
     assign_struct_array(melee_epic, "BalancedItems", epic_entries)
     subpools["Epic"] = melee_epic
 
-    # 4. Composite `Pool_Weapons_Melee_Shop`: mirror `ShopPool_Weapons_Pistols` rarity curve if loaded
+    # Composite `Pool_Weapons_Melee_Shop`: mirror `ShopPool_Weapons_Pistols` rarity curve if loaded
     melee_shop = _get_or_create_custom_pool(pkg_pools, "Pool_Weapons_Melee_Shop", donor_pool_any)
     shop_pistols = _find_pool("GD_ItemPools_Shop.WeaponPools.ShopPool_Weapons_Pistols")
     shop_items = [

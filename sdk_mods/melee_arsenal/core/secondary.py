@@ -34,9 +34,7 @@ from .parts.weapon import MeleeWeaponInstance
 UU_PER_METER: float = 100.0
 
 
-# ---------------------------------------------------------------------------
 # Throw: weapon mass, ballistic arc & hit budget
-# ---------------------------------------------------------------------------
 
 # A thrown blade deals exactly the same damage as the normal LMB melee hit. (It started at 200%
 # as a "thrown hits harder" pitch, but in play that made a single RMB the strongest attack in the
@@ -252,9 +250,7 @@ def point_segment_distance_uu(
     return math.sqrt((px - cx) ** 2 + (py - cy) ** 2 + (pz - cz) ** 2)
 
 
-# ---------------------------------------------------------------------------
 # Guard: braced damage reduction, parry window & part-driven cooldown
-# ---------------------------------------------------------------------------
 
 # A hit inside this window after raising the guard is a perfect parry: zero damage taken and the
 # melee damage is returned to the attacker as a forced critical hit.
@@ -264,10 +260,6 @@ GUARD_PARRY_WINDOW_SEC: float = 0.33
 # this window is treated as engine noise instead of a real release (the cooldown is >= 1.0 s, so a
 # player can never legitimately re-guard this fast).
 GUARD_RELEASE_DEBOUNCE_SEC: float = 0.05
-
-# The guard applies the blade's rolled card Damage Reduction this many times
-# (`(damage * card DR) * card DR`).
-GUARD_DAMAGE_REDUCTION_APPLICATIONS: int = 2
 
 # A parried blow is reflected as a forced critical: BL2's base 2.0x crit multiplier amplified by
 # the blade's own card crit bonus (a Jakobs Sabre's +100% turns a parried hit into 4x reflected).

@@ -319,9 +319,7 @@ def restore_player_melee_inventory(pc: Any = None, explicit_save_name: str | Non
     return restored
 
 
-# ---------------------------------------------------------------------------
 # Engine Hook Callbacks
-# ---------------------------------------------------------------------------
 
 def on_validate_weapon_definition_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
     """Allow Melee Arsenal weapons to pass BL2's built-in weapon sanity check on load."""

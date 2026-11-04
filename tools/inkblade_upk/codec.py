@@ -118,9 +118,7 @@ def quat_rotate_vec(
     return (rx, ry, rz)
 
 
-# ---------------------------------------------------------------------------
 # Tagged UProperty Reader & FName Remapper
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -456,9 +454,7 @@ def make_box_sphere_bounds_prop(
     )
 
 
-# ---------------------------------------------------------------------------
 # Cooked UPK PackageBuilder (`ArVer=832 / LicenseeVer=46`)
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -675,9 +671,7 @@ class PackageBuilder:
         return bytes(buf)
 
 
-# ---------------------------------------------------------------------------
 # USkeletalMesh Binary Parser, Fragment Bounds & Custom Geometry Builder
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -1546,9 +1540,7 @@ def replace_with_custom_fragments(
     return ranges
 
 
-# ---------------------------------------------------------------------------
 # Cooked BL2 `Texture2D` UPK Builder (`PF_DXT1` / `PF_DXT5` + `TC_Normalmap`)
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)

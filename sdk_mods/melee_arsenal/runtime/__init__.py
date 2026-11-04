@@ -105,9 +105,7 @@ def _notify_hud(title: str, message: str) -> None:
         pass
 
 
-# ---------------------------------------------------------------------------
 # Mod Menu Options
-# ---------------------------------------------------------------------------
 
 def _on_world_drops_changed(_opt: Any, new_val: bool) -> None:
     STATE.world_drops_enabled = bool(new_val)
@@ -251,9 +249,7 @@ btn_spawn_all = ButtonOption(
 )
 
 
-# ---------------------------------------------------------------------------
 # Engine Hooks
-# ---------------------------------------------------------------------------
 
 def _run_frame_tick() -> None:
     """One frame of runtime work, driven by whichever engine tick actually fires.
@@ -270,7 +266,7 @@ def _run_frame_tick() -> None:
     _last_frame_tick_at = now
     _tick_counter += 1
 
-    # 1. Drain staggered multi-weapon grants & restore reward mission template
+    # Drain staggered multi-weapon grants & restore reward mission template
     tick_spawner_restore()
     acknowledge_restored_inventory()
 
@@ -286,18 +282,18 @@ def _run_frame_tick() -> None:
     #     any first-person pose whose state has ended. The RMB-release hooks live in `HOOKS`.
     tick_secondary_attacks()
 
-    # 3. Drive smooth 1st-person slash motion ONLY during active ~150ms swing window
+    # Drive smooth 1st-person slash motion ONLY during active ~150ms swing window
     if STATE.swing_motion.active:
         pc = get_local_player_controller()
         if pc is not None:
             update_first_person_slash_motion(pc)
 
-    # 4. Build definitions & inject loot pools once base packages finish loading
+    # Build definitions & inject loot pools once base packages finish loading
     if not STATE.initialized and _tick_counter >= 90 and (_tick_counter % 60 == 0):
         if ensure_definitions_built():
             sync_loot_pools()
 
-    # 5. Check once per second for new pawn spawn in a gameplay map to restore sidecar inventory
+    # Check once per second for new pawn spawn in a gameplay map to restore sidecar inventory
     if STATE.initialized and (_tick_counter % 60 == 0):
         pc = get_local_player_controller()
         pawn = getattr(pc, "Pawn", None) if pc is not None else None
@@ -387,12 +383,8 @@ HOOKS = [
     hook("WillowGame.WillowSaveGameManager:SaveGame", Type.PRE)(on_save_game_pre),
 ]
 
-# ---------------------------------------------------------------------------
 # Console Commands
-# ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
 # Console Commands
-# ---------------------------------------------------------------------------
 
 @command(
     "melee_spawn",

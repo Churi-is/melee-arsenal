@@ -52,9 +52,7 @@ class ElementPartSpec:
         return self.element is Element.EXPLOSIVE
 
 
-# ---------------------------------------------------------------------------
 # Registry: one entry per Element (including physical / no element)
-# ---------------------------------------------------------------------------
 
 ELEMENTS: dict[str, ElementPartSpec] = {
     "Elem_None": ElementPartSpec(
@@ -180,9 +178,7 @@ ELEMENT_PART_BY_TYPE: dict[Element, ElementPartSpec] = {
     ep.element: ep for ep in ELEMENTS.values()
 }
 
-# ---------------------------------------------------------------------------
 # Element data-side logic
-# ---------------------------------------------------------------------------
 
 def eligible_elements_for_blade(blade_id: str) -> list[ElementPartSpec]:
     """Return valid ElementPartSpecs for a given Blade according to its Manufacturer's ElementPolicy."""

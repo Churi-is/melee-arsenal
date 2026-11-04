@@ -29,7 +29,7 @@ class TargetingMode(str, Enum):
 class SecondaryAttack(str, Enum):
     """Manufacturer-locked Right Mouse Button / Left Trigger secondary attack.
 
-    Melee Weapons deliberately suppress the donor pistol's ADS zoom, freeing RMB for a
+    Melee Weapons suppress the donor pistol's ADS zoom, freeing RMB for a
     manufacturer signature move:
 
     - `THROW` (Bandit, Torgue): hurl the blade along a weight-driven arc. It strikes with

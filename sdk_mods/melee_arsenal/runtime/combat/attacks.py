@@ -13,7 +13,7 @@ from ...core.enums import Element, Manufacturer, TargetingMode
 from ...core.parts.weapon import MeleeWeaponInstance
 from ...core.stats import ComputedCardStats, compute_attack_damage
 from ...core.targeting import TargetCandidate, Vec3
-from ..log import log_error, log_info
+from ..log import log_debug_once, log_error, log_info
 from ..object_identity import cache_key, is_dead
 from ..state import STATE
 from .. import resources
@@ -153,8 +153,8 @@ def snapshot_cleave_candidates(shooter: Any) -> tuple[list[TargetCandidate], dic
                             )
                         )
                         pawn_map[tid] = cur
-                    except Exception:
-                        pass
+                    except Exception as exc:  # pragma: no cover - engine call shape varies
+                        log_debug_once("snapshot_cleave_candidates", f"snapshot_cleave_candidates failed: {exc!r}")
         cur = nxt
 
     return candidates, pawn_map
@@ -264,12 +264,12 @@ def execute_melee_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCard
     resources.ensure_combat_resources_cached()
     ctx = read_player_melee_context(shooter, pc)
 
-    # 1. Trigger 1st-person `Bladed_Melee` slash + CameraAnim + melee whoosh audio
+    # Trigger 1st-person `Bladed_Melee` slash + CameraAnim + melee whoosh audio
     combat_breadcrumb("before swing animation")
     _trigger_first_person_blade_swing(pc, shooter, card, ctx.swing_speed_scale)
     combat_breadcrumb("after swing animation")
 
-    # 2. Compute camera/eye ray origin and aim vector
+    # Compute camera/eye ray origin and aim vector
     vec_tpl = getattr(shooter, "Location", None)
     if vec_tpl is not None:
         eye_x = float(vec_tpl.X)
@@ -302,13 +302,13 @@ def execute_melee_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCard
         eye_z + aim_dir[2] * reach_uu,
     )
 
-    # 3. Compute normal & weakspot-crit damage breakdowns + sync weapon DoT DPS
+    # Compute normal & weakspot-crit damage breakdowns + sync weapon DoT DPS
     dmg_normal = compute_attack_damage(card, ctx, is_crit=False)
     dmg_crit = compute_attack_damage(card, ctx, is_crit=True)
 
     sync_weapon_status_damage(wpn, dmg_normal)
 
-    # 4. Primary 0-width crosshair trace (detects headshots, Target Dummies, barrels, or ground/walls)
+    # Primary 0-width crosshair trace (detects headshots, Target Dummies, barrels, or ground/walls)
     combat_breadcrumb("before center trace")
     center_actor, center_hit_xyz, center_bone = run_weapon_trace(wpn, vec_tpl, start_xyz, center_end_xyz)
 
@@ -322,7 +322,7 @@ def execute_melee_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCard
         seen_ids.add(cache_key(center_actor))
         targets_to_strike.append((center_actor, center_hit_xyz or center_end_xyz, center_bone))
 
-    # 5. Cone acquisition (`SINGLE_TARGET` 22.5° assist vs `FRONTAL_CLEAVE` full arc)
+    # Cone acquisition (`SINGLE_TARGET` 22.5° assist vs `FRONTAL_CLEAVE` full arc)
     need_cone = card.targeting_mode == TargetingMode.FRONTAL_CLEAVE or len(targets_to_strike) == 0
     if need_cone:
         combat_breadcrumb("before candidate snapshot")
@@ -376,7 +376,7 @@ def execute_melee_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCard
                 seen_ids.add(cache_key(cpawn))
                 targets_to_strike.append((cpawn, hit_pt, bone))
 
-    # 6. Apply `Behavior_CauseDamage` to each struck target + hit FX & audio
+    # Apply `Behavior_CauseDamage` to each struck target + hit FX & audio
     dmg_cls = resources._CACHED_BULLET_DMG_CLS
     imp_def = None
     try:
@@ -446,7 +446,7 @@ def execute_melee_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCard
     # Restore clean rest status chance modifiers on weapon after hit loop
     set_weapon_status_chance(wpn, 1.0)
 
-    # 7. Torgue Blast-Cleaver Explosive Area Slam (`Behavior_CauseRadiusDamage` + Explosion VFX & Boom SFX)
+    # Torgue Blast-Cleaver Explosive Area Slam (`Behavior_CauseRadiusDamage` + Explosion VFX & Boom SFX)
     splash_triggered = False
     if card.splash_radius_uu > 0.0 and dmg_normal.splash_hit_damage > 0:
         if primary_blast_xyz is None and center_actor is not None and center_hit_xyz is not None:
@@ -494,7 +494,7 @@ def execute_melee_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCard
                 )
                 combat_breadcrumb("after explosion effects")
 
-    # 8. Meaty blade-hit audio when connecting with at least one enemy / prop
+    # Meaty blade-hit audio when connecting with at least one enemy / prop
     if hits_dealt > 0 or splash_triggered:
         ak_hit = resources._CACHED_AKEVENTS.get(
             resources.AK_HEAVY_IMPACT if card.manufacturer == Manufacturer.TORGUE else resources.AK_BLADE_HIT_FLESH
