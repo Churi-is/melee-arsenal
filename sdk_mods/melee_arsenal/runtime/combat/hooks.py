@@ -95,9 +95,6 @@ def on_weapon_consume_ammo_post(obj: Any, args: Any, ret: Any, func: Any) -> Any
     return None
 
 
-on_weapon_consume_ammo_pre = on_weapon_consume_ammo_post
-
-
 def on_weapon_instant_fire_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
     """Primary `LMB` melee attack intercept (`WillowWeapon:InstantFire` PRE -> `Block`)."""
     global _HANDLED_SHOT_SEQ
