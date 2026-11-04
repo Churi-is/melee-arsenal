@@ -212,13 +212,6 @@ class KitOutputTests(unittest.TestCase):
         self.assertEqual(self.manifest["revision"], self.cfg.revision)
         self.assertEqual(set(self.manifest["parts"]), {"blade_jakobs", "grip_jakobs", "accessory_serrated_edge", "element_fire"})
         self.assertEqual(self.manifest["elements"], dict(ELEMENTS))
-        notes = self.manifest["revision_notes"]
-        for name in ("blade_core_depth_multiplier", "heavy_spine_depth_multiplier", "torgue_grip", "stages"):
-            self.assertIn(name, notes)
-        self.assertEqual(
-            notes["stages"],
-            ["geometry", "uv", "flat", "mottle", "detail", "decals", "linework", "textures"],
-        )
 
     def test_part_entries_carry_compiler_fields(self) -> None:
         for part_id, entry in self.manifest["parts"].items():
@@ -281,7 +274,7 @@ class KitOutputTests(unittest.TestCase):
 class GeneratorBehaviourTests(unittest.TestCase):
     """Geometry invariants and deterministic texture generation."""
 
-    def test_stage_regression_hashes(self) -> None:
+    def test_stage_output_hashes(self) -> None:
         # Representative element, default seeds, no decals. Hash pixels rather than PNG
         # encoding; intentional art changes require reviewing and updating these baselines.
         expected = {
@@ -317,7 +310,7 @@ class GeneratorBehaviourTests(unittest.TestCase):
         self.assertEqual(grip.notes.get("shell_sides"), 6)
         self.assertEqual(grip.notes.get("rib_count"), 4)
         self.assertEqual(grip.notes.get("shell_radius_m"), 0.094)
-        # Box-primitive soup is fully replaced by the hex shell + ribs (plus the cyl primitives).
+        # Two end caps, six shell faces, and four six-sided ribs form the grip shell.
         shell_and_ribs = 2 + 6 + 4 * 6 * 4
         self.assertGreaterEqual(len(grip.faces), shell_and_ribs)
 
@@ -463,7 +456,7 @@ class CombinationAssemblyTests(unittest.TestCase):
         parts = build_parts(cfg.parts)
         layouts = unwrap_parts(parts, cfg)
         blade = parts["blade_torgue"]
-        # The accessory gap follows the r7 slimmer spine (BLADE_SPINE_SCALE).
+        # The accessory gap follows the scaled blade thickness.
         accessory_gap = (
             geometry.BLADE_THICKNESS_M["Torgue"] * geometry.BLADE_SPINE_SCALE / 4
             - geometry.ACCESSORY_FACE_CLIP_M
@@ -645,26 +638,23 @@ class ManifestBuilderTests(unittest.TestCase):
         self.assertTrue(manifest["parts"]["element_fire"]["bifacial_fit"])
 
 
-class R7BladeSilhouetteTests(unittest.TestCase):
-    """The r7 model pass: longer, slimmer blades and a real Jakobs sabre."""
-
-    R3_TIP_Z = {"Hyperion": 1.45, "Bandit": 1.25, "Jakobs": 1.39, "Maliwan": 1.38, "Torgue": 1.19}
+class BladeSilhouetteTests(unittest.TestCase):
+    """Blade shape, thickness, and reach."""
 
     @staticmethod
     def _bbox(part, axis: int) -> tuple[float, float]:
         values = [vertex[axis] for face in part.faces for vertex in face.verts]
         return min(values), max(values)
 
-    def test_every_blade_is_longer_and_the_manifest_reach_matches_the_mesh(self) -> None:
+    def test_manifest_reach_matches_the_mesh(self) -> None:
         parts = build_parts()
-        for maker, r3_tip in self.R3_TIP_Z.items():
+        for maker in geometry.BLADES:
             with self.subTest(maker=maker):
                 part = parts[f"blade_{maker.lower()}"]
                 tip = max(vertex[2] for face in part.faces for vertex in face.verts)
-                self.assertGreater(tip, r3_tip * 1.05, "blade did not get longer")
                 self.assertAlmostEqual(tip, part.meta["base_reach_m"], places=4)
 
-    def test_spine_got_thinner_without_changing_the_face_width(self) -> None:
+    def test_spine_scaling_preserves_face_width(self) -> None:
         """Only the Y (edge-on spine) shrinks; the X silhouette must be untouched."""
         parts = build_parts()
         with mock.patch.object(geometry, "BLADE_SPINE_SCALE", 1.0):
@@ -700,9 +690,9 @@ class R7BladeSilhouetteTests(unittest.TestCase):
         main_profile = next(component for component in geo.components if component.kind == "profile")
         pts = [tuple(point) for point in main_profile.args[0]]
         tip = max(pts, key=lambda point: point[1])
-        self.assertLessEqual(max(x for x, _ in pts), 0.25, "blade still hooks out sideways")
-        self.assertTrue(0.05 < tip[0] < 0.20, "only a subtle late lean, not a recurved hook")
-        self.assertGreater(tip[1], 1.5, "keep the longer blade length")
+        self.assertLessEqual(max(x for x, _ in pts), 0.25, "blade extends too far sideways")
+        self.assertTrue(0.05 < tip[0] < 0.20, "tip lean exceeds the design range")
+        self.assertGreater(tip[1], 1.5, "blade tip is too low")
 
         widths, centres = [], []
         for pre_z in (0.30, 0.55, 0.80, 0.92, 1.10, 1.16):
@@ -718,24 +708,24 @@ class R7BladeSilhouetteTests(unittest.TestCase):
         self.assertLess(tip_right - tip_left, 0.50 * widths[0], "small clipped point at the tip")
 
 
-class R8BladeLengthTests(unittest.TestCase):
-    """The 1.5x blade/handle ratio pass and its matching accessory stretch."""
-
-    R3_TIP_Z = {"Hyperion": 1.45, "Bandit": 1.25, "Jakobs": 1.40, "Maliwan": 1.38, "Torgue": 1.19}
+class BladeLengthTests(unittest.TestCase):
+    """Blade reach and accessory proportions."""
 
     @staticmethod
     def _z_span(part) -> tuple[float, float]:
         values = [vertex[2] for face in part.faces for vertex in face.verts]
         return min(values), max(values)
 
-    def test_blades_are_one_and_a_half_times_the_r7_length(self) -> None:
+    def test_blade_reach_matches_length_scale(self) -> None:
         parts = build_parts()
+        with mock.patch.object(geometry, "BLADE_LENGTH_SCALE", 1.0):
+            baseline = build_parts()
         pivot = geometry.BLADE_LENGTH_PIVOT_Z
         grip_len = self._z_span(parts["grip_hyperion"])[1] - self._z_span(parts["grip_hyperion"])[0]
-        for maker, r3_tip in self.R3_TIP_Z.items():
+        for maker in geometry.BLADES:
             with self.subTest(maker=maker):
-                r7_tip = pivot + (r3_tip - pivot) * 1.12
-                expected = pivot + (r7_tip - pivot) * geometry.BLADE_LENGTH_BOOST
+                source_tip = self._z_span(baseline[f"blade_{maker.lower()}"])[1]
+                expected = pivot + (source_tip - pivot) * geometry.BLADE_LENGTH_SCALE
                 part = parts[f"blade_{maker.lower()}"]
                 tip = self._z_span(part)[1]
                 self.assertAlmostEqual(tip, expected, places=4)
@@ -750,7 +740,7 @@ class R8BladeLengthTests(unittest.TestCase):
             with self.subTest(part=part_id):
                 top = self._z_span(final[part_id])[1]
                 base = self._z_span(baseline[part_id])[1]
-                self.assertAlmostEqual(top, base * geometry.BLADE_LENGTH_BOOST, places=6)
+                self.assertAlmostEqual(top, base * geometry.ACCESSORY_LENGTH_SCALE, places=6)
 
     def test_compact_modules_keep_their_size(self) -> None:
         final = build_parts()

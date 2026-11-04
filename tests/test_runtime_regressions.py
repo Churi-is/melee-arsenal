@@ -78,7 +78,7 @@ class RuntimeRegressionTests(unittest.TestCase):
             self.assertEqual(persistence_bridge.restore_player_melee_inventory(pc=world.pc), 0)
             self.assertEqual(len(world.backpack), 2)
 
-    def test_legacy_zero_sidecar_migrates_without_dropping_other_records(self):
+    def test_zero_id_sidecar_migrates_without_dropping_other_records(self):
         with runtime_env() as world:
             from melee_arsenal.core.persistence import read_save_records, save_record_path, serialize_weapon
             from melee_arsenal.core.loot_roller import roll_melee_weapon
@@ -86,10 +86,10 @@ class RuntimeRegressionTests(unittest.TestCase):
             from melee_arsenal.core.persistence import write_save_records_atomic
             from melee_arsenal.runtime import persistence_bridge, resolver
 
-            legacy = roll_melee_weapon(game_stage=30, rarity=Rarity.RARE, manufacturer=Manufacturer.HYPERION, seed="legacy", unique_id=1)
+            zero_id_weapon = roll_melee_weapon(game_stage=30, rarity=Rarity.RARE, manufacturer=Manufacturer.HYPERION, seed="zero-id", unique_id=1)
             other = roll_melee_weapon(game_stage=30, rarity=Rarity.RARE, manufacturer=Manufacturer.JAKOBS, seed="other", unique_id=424242)
             target = save_record_path(persistence_bridge.SAVES_DIR, "Save0002")
-            rec0 = serialize_weapon(legacy)
+            rec0 = serialize_weapon(zero_id_weapon)
             rec0["unique_id"] = 0
             rec0["carried_slot"] = "backpack"
             rec1 = serialize_weapon(other)
@@ -170,7 +170,7 @@ class RuntimeRegressionTests(unittest.TestCase):
         with runtime_env():
             from melee_arsenal.core.enums import Element
             from melee_arsenal.core.stats import compute_attack_damage, compute_card_stats
-            from melee_arsenal.core.schemas import PlayerMeleeContext
+            from melee_arsenal.core.parts.weapon import PlayerMeleeContext
             from melee_arsenal.runtime import combat
 
             # Force an elemental Maliwan card for the proc test.
@@ -178,8 +178,8 @@ class RuntimeRegressionTests(unittest.TestCase):
             from melee_arsenal.core.enums import Manufacturer, Rarity
             inst = roll_melee_weapon(game_stage=30, rarity=Rarity.VERY_RARE, manufacturer=Manufacturer.MALIWAN, seed="status-fire")
             # Pick a fire variant deterministically by rebuilding parts if needed.
-            from melee_arsenal.core.catalog import ELEMENT_PART_BY_TYPE
-            from melee_arsenal.core.schemas import MeleeWeaponParts
+            from melee_arsenal.core.parts.elements import ELEMENT_PART_BY_TYPE
+            from melee_arsenal.core.parts.weapon import MeleeWeaponParts
             inst = replace(inst, parts=MeleeWeaponParts(
                 blade_id=inst.parts.blade_id, grip_id=inst.parts.grip_id,
                 accessory_id=inst.parts.accessory_id, element_id=ELEMENT_PART_BY_TYPE[Element.FIRE].part_id,
@@ -237,7 +237,7 @@ class RuntimeRegressionTests(unittest.TestCase):
                 captured.setdefault(class_name, []).extend(asset_library.obj_path(a) for a in assets if a is not None)
                 return real(class_name, assets, set_id)
             # Definitions are already built; re-register through the same path to capture order.
-            definitions.register_assets_in_library = cap
+            asset_library.register_assets_in_library = cap
             state.STATE.initialized = False
             self.assertTrue(definitions.ensure_definitions_built())
             manifest = json.loads((SDK_MODS_DIR / "melee_arsenal" / "data" / "asset_library_manifest.json").read_text(encoding="utf-8"))

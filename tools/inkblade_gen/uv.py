@@ -1,15 +1,7 @@
-"""UV stage: shared-density face projection, padded island packing, and template reuse.
+"""UV projection and atlas packing for InkBlade parts.
 
-This is the R3 `physical_uv.py` projection/packing code (orthonormal per-face projection at one
-global pixels-per-metre density, variable-size padded packing, no island normalisation) with the
-R4 UV rules folded in:
-
-* rear/mirrored detail faces copy their template island's UVs verbatim (`uv_flip` reverses them,
-  exactly like `r4_builder`'s `list(reversed(uv[j]))`),
-* the new hexagonal Torgue faces reuse a painted template island scaled to their bounding box
-  (`uv_mode="fit"`), preserving the approved look without a second unwrap pass.
-
-Pure Python + Pillow: no Blender, `mathutils` or numpy.
+Faces are projected at a shared physical texel density, then packed with padding.
+Mirrored faces reuse their source UVs; related faces can scale a template island.
 """
 from __future__ import annotations
 
@@ -25,7 +17,7 @@ Vec3 = tuple[float, float, float]
 
 
 # ---------------------------------------------------------------------------
-# Small vector helpers (replacing `mathutils.Vector`)
+# Vector helpers
 # ---------------------------------------------------------------------------
 def _sub(a: Vec3, b: Vec3) -> Vec3:
     return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
@@ -163,7 +155,7 @@ class PartLayout:
 
 
 def _fit_uv_from_template(verts: Sequence[Vec3], template_uv: Sequence[Vec2]) -> list[Vec2]:
-    """Scale a template's UV rectangle onto a differently-shaped face (R4's hex-face reuse)."""
+    """Scale a template UV rectangle onto a differently shaped face."""
     u0 = min(u for u, _ in template_uv)
     u1 = max(u for u, _ in template_uv)
     v0 = min(v for _, v in template_uv)

@@ -9,8 +9,7 @@ from pathlib import Path
 from typing import Any
 
 # ---------------------------------------------------------------------------
-# Manufacturer / element palettes (unchanged since R3; the R4 revision and the R5 Bold paint passes
-# both consumed these same tables, so they are shared rather than duplicated per revision).
+# Manufacturer and element palettes
 # ---------------------------------------------------------------------------
 PALETTE: dict[str, dict[str, str]] = {
     "Hyperion": {"paint": "#dfb831", "metal": "#b5c3c7", "dark": "#303743", "trim": "#eee5bf", "accent": "#a6dcf1"},
@@ -59,15 +58,11 @@ def rgb_unit(value: str) -> tuple[float, float, float]:
 # ---------------------------------------------------------------------------
 @dataclass
 class RunConfig:
-    """Everything a stage may need to know about *how* this run should look.
-
-    The stage stack itself is intentionally config-driven: new art passes (decals, stencils,
-    grime, ...) only need their own key here rather than edits to older stages.
-    """
+    """Settings shared by the kit-generation stages."""
 
     out_dir: Path = field(default_factory=lambda: Path("build/inkblade_kit"))
     work_dir: Path = field(default_factory=lambda: Path("build/inkblade_stages"))
-    # Physical texel density of the unwrap (pixels per metre), exactly like R3's `DENSITY`.
+    # Physical texel density of the unwrap (pixels per metre).
     density: float = 768.0
     # Ink stroke width in texture pixels (`INK_PX`) and island padding (`PADDING`).
     ink_px: int = 6
@@ -86,7 +81,7 @@ class RunConfig:
     # markings run.
     decal_dir: Path | None = None
     decal_fit: float = 0.62
-    # Bake per-element accent recolours into the example combinations (R3 behaviour).
+    # Bake per-element accent recolours into the example combinations.
     bake_combinations: bool = True
     # Restrict generation to a subset of parts (None = every part in the catalogue).
     parts: tuple[str, ...] | None = None

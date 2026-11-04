@@ -1,12 +1,4 @@
-"""Atomic sidecar save persistence & AssetLibrary manifest builder.
-
-Follows the battle-tested `Ribs Arsenal` persistence rules:
-1. Never store transient UObjects in `.sav` files without sidecar restoration + AssetLibrary registration.
-2. Key every weapon record by `str(int(UniqueId))` in `<sdk_mods>/_melee_arsenal_saves/<SaveName>.json`.
-3. Write updates via atomic `.tmp` rename so crashes mid-save never corrupt character sidecars.
-4. Preserve the original `game_stage` / `grade_index` on first sight so if BL2 resets level to 1
-   before restoration runs, `repair_instance_level` restores the true level automatically.
-"""
+"""Atomic JSON sidecar persistence for Melee Arsenal weapons."""
 from __future__ import annotations
 
 import json
@@ -43,11 +35,7 @@ def serialize_weapon(
     weapon: MeleeWeaponInstance,
     previous_record: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Serialize a `MeleeWeaponInstance` into a JSON-compatible sidecar record.
-
-    Preserves previously recorded `game_stage` / `grade_index` if present (a weapon's level
-    never changes in BL2, guarding against engine level-reset bugs).
-    """
+    """Serialize a weapon into a sidecar record, retaining its stored level when available."""
     prev_level = (previous_record or {}).get("level")
     if isinstance(prev_level, dict) and prev_level.get("game_stage", 0) >= 1:
         stage = int(prev_level["game_stage"])

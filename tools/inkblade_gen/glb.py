@@ -275,7 +275,7 @@ def build_part_glb(
 
 
 # ---------------------------------------------------------------------------
-# Combination assembly (port of the R3/R4 portable merger)
+# Combination assembly
 # ---------------------------------------------------------------------------
 MERGED_KEYS = (
     "nodes",

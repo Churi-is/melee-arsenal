@@ -1,35 +1,7 @@
-"""Final-part geometry: the R3 parametric meshes **with the R4 revisions baked in**.
+"""Build InkBlade part meshes, sockets, and final geometry transforms.
 
-The old pipeline built an R3 kit, zipped it, and then ran a second `r4_builder.py` pass that
-re-parsed `generate_blender.py` with `ast` to re-create the same meshes and apply its revision on
-top. That two-revision split is gone: `build_parts()` emits *final* geometry directly, so there is
-exactly one place that defines a part and no revision stage that has to re-derive R3.
-It matched the shipped kit as of r6; later changes are by design.
-
-The R4 revision rules that used to live in `tools/r4_builder.py` are applied here, in
-`apply_final_revisions()`:
-
-* blade-slot geometry depth halved (including its decorative overlays),
-* the element receiver moved from `x = -0.12` to `x = -0.065`,
-* front-only grip/blade detail components mirrored onto the rear face with reversed winding,
-* the Reinforced Heavy Spine reduced to one third of its depth,
-* the Flared Cleave Guard centred as a single plate,
-* Torgue's grip rebuilt as a hexagonal shell with four continuous wraparound ribs.
-
-The R7 silhouette pass lives here too: `BLADE_SPINE_SCALE` slims every blade's
-spine (edge-on Y thickness, not its face width), `BLADE_LENGTH_SCALE` lengthens
-the blade above the hilt without moving sockets, Jakobs is rebuilt as a proper
-frontier sabre (straight and full-width out of the hilt, subtle late curve,
-small clipped point), and the Flared Cleave Guard's end caps are seated into
-the plate.
-
-R8 is the blade/handle ratio pass: `BLADE_LENGTH_BOOST` makes the blades 1.5x
-longer than R7, and `ACCESSORY_LENGTH_SCALE` stretches the four blade-mounted
-accessory strips by the same factor so they keep covering the blade. Grips,
-compact accessory modules, element emitters, guards and sockets are untouched.
-
-Coordinates here are Blender working space (metres, `+Z` blade tip, `-Y` display/front face);
-`glb.py` performs the glTF conversion (`x, z, -y`) at export time.
+Coordinates use Blender space in metres (`+Z` toward the blade tip, `-Y` toward
+its display face). `glb.py` converts them to glTF coordinates during export.
 """
 from __future__ import annotations
 
@@ -40,9 +12,9 @@ from typing import Any, Iterable, Sequence
 Vec = tuple[float, float, float]
 
 # ---------------------------------------------------------------------------
-# Final-revision geometry constants
+# Geometry constants
 # ---------------------------------------------------------------------------
-BLADE_CORE_DEPTH_MULTIPLIER: float = 0.5      # blade slot depth (was 1.0 in R3)
+BLADE_CORE_DEPTH_MULTIPLIER: float = 0.5
 BLADE_THICKNESS_M: dict[str, float] = {
     "Hyperion": 0.075,
     "Bandit": 0.11,
@@ -51,30 +23,12 @@ BLADE_THICKNESS_M: dict[str, float] = {
     "Torgue": 0.16,
 }
 
-# ---------------------------------------------------------------------------
-# R7 silhouette pass: slimmer spines and a longer reach on *every* blade.
-#
-# BLADE_SPINE_SCALE is applied on top of the R4 depth halving to the whole
-# blade part (core, front rail, receiver and face overlays together), so
-# thinning the spine never peels those details off the blade skin.  It is the
-# spine width (Y / edge-on thickness) that changes, not the face width (X).
-#
-# BLADE_LENGTH_SCALE only stretches geometry above the hilt line; guards,
-# sockets and the element receiver keep their original positions so kit
-# consumers and socketed accessories stay where they expect them.
-# ---------------------------------------------------------------------------
+# Blade thickness scales along Y; the face width along X is unchanged. Length scaling starts
+# above the hilt pivot so guards, sockets, and the element receiver keep their positions.
 BLADE_SPINE_SCALE: float = 0.80
-#: R8 blade/handle ratio pass: 1.5x the blade length as it stood in R7.
-BLADE_LENGTH_BOOST: float = 1.5
-#: Applied to R3 tip heights on top of the R7 1.12 stretch. Only the part above
-#: BLADE_LENGTH_PIVOT_Z counts as "blade", so the hilt, guards and sockets stay
-#: put and the grip does not grow with it.
-BLADE_LENGTH_SCALE: float = round(1.12 * BLADE_LENGTH_BOOST, 6)
+BLADE_LENGTH_SCALE: float = 1.68
 BLADE_LENGTH_PIVOT_Z: float = 0.12
-#: Accessories that are strips running up the blade must grow with it, or they
-#: become stubs near the guard. Compact modules (pommel, coil, crossguard) and
-#: all element emitters are deliberately left at their original size.
-ACCESSORY_LENGTH_SCALE: float = BLADE_LENGTH_BOOST
+ACCESSORY_LENGTH_SCALE: float = 1.5
 BLADE_MOUNTED_ACCESSORIES: frozenset[str] = frozenset({
     "accessory_serrated_edge",
     "accessory_extended_blade_fuller",
@@ -84,7 +38,7 @@ BLADE_MOUNTED_ACCESSORIES: frozenset[str] = frozenset({
 
 HEAVY_SPINE_DEPTH_DIVISOR: float = 3.0
 CLEAVE_GUARD_PLATE_SHIFT: float = 0.025       # centres the guard's continuous plate
-ELEMENT_RECEIVER_X_SHIFT: float = 0.055       # -0.12 -> -0.065
+ELEMENT_RECEIVER_X_SHIFT: float = 0.055
 ELEMENT_RECEIVER_X: float = -0.12
 ELEMENT_FACE_GAP_M: float = 0.04375 - 0.001
 ACCESSORY_FACE_CLIP_M: float = 0.0015
@@ -116,7 +70,7 @@ def is_bifacial(part_id: str) -> bool:
 # ---------------------------------------------------------------------------
 @dataclass
 class Component:
-    """One primitive call, so revision rules can target e.g. 'the Torgue grip's box body'."""
+    """Range of vertices and faces emitted by one primitive builder."""
 
     kind: str
     start: int
@@ -135,7 +89,7 @@ class Face:
     uv_mode: str = "exact"               # "exact" copies the template's UVs verbatim
 
     def mirrored(self) -> "Face":
-        """Mirror across the `Y` (depth) axis, matching R4's rear-face duplication."""
+        """Mirror across the `Y` (depth) axis for a rear-facing surface."""
         flipped = tuple((x, -y, z) for x, y, z in reversed(self.verts))
         return Face(flipped, self.tag, self.uv_template, not self.uv_flip, self.uv_mode)
 
@@ -169,7 +123,7 @@ def _mean(values: Iterable[float]) -> float:
 
 
 class Geo:
-    """Minimal polygon soup builder (the R3 `Geo` class, minus its Blender dependency)."""
+    """Polygon mesh builder for vertices, faces, and primitive components."""
 
     def __init__(self) -> None:
         self.v: list[Vec] = []
@@ -277,7 +231,7 @@ class Geo:
 
 
 # ---------------------------------------------------------------------------
-# R3 part shapes (verbatim silhouettes / dimensions) + the R7/R8 blade passes
+# Part shape builders
 # ---------------------------------------------------------------------------
 def _blade_z(z: float) -> float:
     """Lengthen the blade above the hilt line, leaving every socket where it was."""
@@ -327,11 +281,8 @@ def _blade(maker: str) -> Geo:
             g.cyl((x, -0.09, _blade_z(z)), 0.036, 0.013, "dark", axis="y")
         g.box((0.02, 0, 0.0), (0.45, 0.2, 0.09), "paint")
     elif maker == "Jakobs":
-        # Frontier sabre.  Reference silhouette: essentially straight and
-        # full-width out of the hilt, a very subtle curve, then a *small* taper
-        # only at the very end where the cutting edge sweeps back into a
-        # clipped point on the spine line.  Earlier passes tapered from the
-        # ricasso and started curving immediately, which read as a recurve.
+        # Keep the sabre full-width and straight through most of its length,
+        # with a slight curve and clipped point near the tip.
         pts = [
             (-0.085, 0.13), (0.085, 0.13),          # ricasso, centred on the hilt
             (0.088, 0.55), (0.092, 0.92), (0.098, 1.16), (0.108, 1.34),  # straight spine, tiny late drift
@@ -346,7 +297,7 @@ def _blade(maker: str) -> Geo:
                         (0.040, 1.06), (-0.010, 1.06), (-0.014, 0.85), (-0.018, 0.55)]),
             0.012, -0.041, "trim", 0.003,
         )
-        # Swept quillons are hilt geometry: they stay at their original height.
+        # Swept quillons are hilt geometry.
         g.profile([(-0.30, 0.06), (-0.31, -0.015), (-0.15, -0.075), (0.19, -0.035), (0.29, 0.05), (0.14, 0.015), (-0.1, 0.01)], 0.12, 0, "trim")
     elif maker == "Maliwan":
         pts = [(-0.11, 0.14), (0.11, 0.14), (0.17, 0.44), (0.23, 0.64), (0.31, 1.12), (0.18, 1.38), (0.17, 1.08), (-0.03, 0.87), (-0.15, 0.56)]
@@ -428,10 +379,7 @@ def _accessory(acc_id: str) -> Geo:
              (0.36, 0.08), (0.23, 0.035), (0.10, -0.035), (-0.1, -0.035), (-0.23, 0.035)],
             0.1, -0.025, "metal",
         )
-        # The R4 plate shift (CLEAVE_GUARD_PLATE_SHIFT) moved the continuous
-        # plate back to y=-0.05..0.05 but left these caps at y=-0.09, where
-        # they floated clear of the wing skin.  Seat them into the plate so
-        # both the front cap and its mirrored rear copy actually touch it.
+        # Seat the end caps against the guard plate.
         for x in (-0.27, 0.27):
             g.box((x, -0.060, 0.0), (0.065, 0.035, 0.045), "trim")
     elif acc_id == "reinforced_heavy_spine":
@@ -458,9 +406,7 @@ def _element() -> Geo:
 # ---------------------------------------------------------------------------
 # Catalogue metadata (shipped in `socket_manifest.json`)
 #
-# `base_reach_m` is the physical tip height of the finished mesh, i.e. the R3
-# tip after the R7 length pass (`_blade_z`).  Keep it in step with the profile
-# so the manifest never advertises a blade shorter than the exported geometry.
+# `base_reach_m` records the finished mesh tip height for the manifest.
 # ---------------------------------------------------------------------------
 BLADES: dict[str, dict[str, Any]] = {
     "Hyperion": {
@@ -529,10 +475,10 @@ PART_ORDER: tuple[str, ...] = (
 
 
 # ---------------------------------------------------------------------------
-# Final-revision assembly
+# Final geometry assembly
 # ---------------------------------------------------------------------------
 def _torque_hex_faces(geo: Geo, comps: list[Component]) -> list[Face]:
-    """Torgue's hexagonal grip shell + four continuous wraparound ribs (R4 geometry rule)."""
+    """Build Torgue's hexagonal grip shell and four wraparound ribs."""
     bars = [c for c in comps if c.kind == "box" and abs(c.args[0][1] - TORGUE_BAR_SOURCE_Y) < 0.00001]
 
     def ring(radius: float, z: float) -> list[Vec]:
@@ -565,19 +511,15 @@ def _torque_hex_faces(geo: Geo, comps: list[Component]) -> list[Face]:
     return faces
 
 
-def apply_final_revisions(part_id: str, geo: Geo, bifacial: bool) -> tuple[list[Face], float]:
-    """Turn an R3 primitive soup into final-part faces, applying every R4 rule in one pass.
-
-    Returns `(faces, fit_inner_shift_m)`; the shift is only meaningful for bifacial parts, where it
-    moves the decorative face so it sits `ACCESSORY_FACE_CLIP_M` inside the blade skin.
-    """
+def finalize_geometry(part_id: str, geo: Geo, bifacial: bool) -> tuple[list[Face], float]:
+    """Convert primitive geometry to faces and compute the bifacial fit offset."""
     is_blade = part_id.startswith("blade_")
     faces: list[Face] = []
-    #: original R3 face id -> index in the final face list (mirrored copies insert extra faces)
+    #: Source face index mapped to its output face index.
     owner_index: dict[int, int] = {}
 
     for component in geo.components:
-        # Torgue's box primitive soup is fully superseded by the hexagonal shell + ribs below.
+        # The Torgue grip is emitted as a hexagonal shell and ribs below.
         if part_id == "grip_torgue" and component.kind == "box":
             continue
         face_ids = range(component.start, component.end)
@@ -613,7 +555,7 @@ def apply_final_revisions(part_id: str, geo: Geo, bifacial: bool) -> tuple[list[
             owner_index[face_id] = len(faces)
             faces.append(face)
             if not bifacial and front_only and not special_guard:
-                # Rear copy reuses the front island's texels (reversed), exactly like R4 did.
+                # Reuse the front island's texels for the mirrored rear face.
                 faces.append(Face(face.mirrored().verts, face.tag, owner_index[face_id], True, "exact"))
 
     if part_id == "grip_torgue":
@@ -645,8 +587,7 @@ def _sockets(part_id: str, slot: str) -> dict[str, Vec]:
         sockets.update(
             {
                 "SOCKET_GRIP": (0.0, 0.0, 0.0),
-                # R4 re-centred these on the thin blade core; they are no longer offset in Y.
-                "SOCKET_ACCESSORY": (0.0, 0.0, 0.16),
+                                "SOCKET_ACCESSORY": (0.0, 0.0, 0.16),
                 "SOCKET_ELEMENT": (ELEMENT_RECEIVER_X + ELEMENT_RECEIVER_X_SHIFT, 0.0, 0.12),
             }
         )
@@ -664,11 +605,10 @@ def build_parts(part_ids: Iterable[str] | None = None) -> dict[str, Part]:
         if part_id not in wanted:
             return
         bifacial = is_bifacial(part_id)
-        faces, shift = apply_final_revisions(part_id, geo, bifacial)
+        faces, shift = finalize_geometry(part_id, geo, bifacial)
         notes: dict[str, Any] = {}
         if part_id.startswith("blade_"):
-            # Effective thickness after the R4 halving and the R7 spine pass;
-            # the socket gaps below must follow it or accessories float.
+            # Socket offsets follow the final blade thickness.
             thickness = BLADE_THICKNESS_M[maker] * BLADE_SPINE_SCALE
             notes["core_thickness_m"] = thickness / 2.0
             notes["accessory_face_gap_m"] = thickness / 4.0 - ACCESSORY_FACE_CLIP_M

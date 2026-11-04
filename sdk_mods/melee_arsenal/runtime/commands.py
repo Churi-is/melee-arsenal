@@ -18,9 +18,10 @@ from ..core.parts import (
 )
 from ..core.parts.weapon import MeleeWeaponInstance
 from ..core.stats import compute_attack_damage
-from .combat import read_live_player_melee_context
+from .combat import read_player_melee_context
 from .custom_assets import resolve_fitted_accessory_part
-from .definitions import apply_ui_preview_settings_to_all_wts, ensure_definitions_built
+from .definitions import ensure_definitions_built
+from .definitions.name_parts import apply_ui_preview_settings_to_all_wts
 from .log import log_info, log_warn, obj_path
 from .loot_pools import sync_loot_pools
 from .resolver import (
@@ -294,7 +295,7 @@ def dump_held_melee_weapon() -> dict[str, Any] | None:
         return None
 
     inst, card = resolved
-    ctx = read_live_player_melee_context(pc, pawn)
+    ctx = read_player_melee_context(pawn, pc)
     dmg = compute_attack_damage(card, ctx, is_crit=False)
     dmg_crit = compute_attack_damage(card, ctx, is_crit=True)
 

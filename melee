@@ -156,11 +156,7 @@ cmd_setup() {
     "$sys_py" -m venv "$REPO_ROOT/.venv"
   fi
   "$REPO_ROOT/.venv/bin/python" -m pip install --upgrade pip
-  if [ -f "$REPO_ROOT/requirements.txt" ]; then
-    "$REPO_ROOT/.venv/bin/python" -m pip install -r "$REPO_ROOT/requirements.txt"
-  else
-    "$REPO_ROOT/.venv/bin/python" -m pip install "Pillow>=10.1,<14"
-  fi
+  "$REPO_ROOT/.venv/bin/python" -m pip install -r "$REPO_ROOT/requirements.txt"
   ensure_gitignored ".venv/"
   ok "Environment ready at .venv (Pillow installed from requirements.txt)."
 }
@@ -173,7 +169,7 @@ kit_fingerprint() {
 }
 
 compiled_kit_fingerprint() {
-  # The fingerprint the current UPKs were built from (empty for packages built before it existed).
+  # Fingerprint recorded when the UPKs were compiled.
   local py
   py="$(pick_python)"
   "$py" -c 'import json, sys
@@ -427,9 +423,7 @@ cmd_install() {
 
   local meshes_upk="$REPO_ROOT/$COOKED_REL/MeleeArsenalMeshes.upk"
   local tex_upk="$REPO_ROOT/$COOKED_REL/MeleeArsenalTextures.upk"
-  # A regenerated kit leaves perfectly valid, perfectly stale UPKs behind: same file names, same
-  # texture names, old pixels.  Compare the kit fingerprint the packages were built from against a
-  # fresh one, so `./melee dev` after `./melee generate` actually ships the new art.
+  # Rebuild the packages when their recorded kit fingerprint differs from the current kit.
   if [ ! -f "$meshes_upk" ] || [ ! -f "$tex_upk" ] || [ ! -f "$BUILD_MANIFEST" ]; then
     die "Missing cooked UPKs or manifest in $COOKED_REL. Run './melee build' first (or drop --no-rebuild)."
   fi

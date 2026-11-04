@@ -6,8 +6,7 @@ that owns its spec dataclass, its complete registry, derived indexes, and all th
 SDK-independent logic for that part type. This module holds only the pieces that are
 genuinely shared between them.
 
-See `parts/__init__.py` for the public API and `docs/DEVELOPER.md` for the
-"add a new part" checklist. Nothing in this package imports `unrealsdk`.
+Nothing in this package imports `unrealsdk`.
 """
 from __future__ import annotations
 

@@ -1,6 +1,6 @@
 # Melee Arsenal — Borderlands 2 PythonSDK Mod
 
-**Melee Arsenal (`v0.4.5`)** adds a standalone **Melee Weapon** class to *Borderlands 2* — Willow2 Mod Manager v3.8+ (mods_base 1.12+ / unrealsdk 3.2 / pyunrealsdk 1.10) — powered by a custom 22-part modular 3D **InkBlade (`r6`)** Gestalt mesh and six 2048×2048 elemental texture atlases compiled via a pure-Python Unreal Engine 3 `.upk` pipeline.
+**Melee Arsenal (`v0.4.5`)** adds a standalone **Melee Weapon** class to *Borderlands 2* — Willow2 Mod Manager v3.8+ (mods_base 1.12+ / unrealsdk 3.2 / pyunrealsdk 1.10) — powered by a custom 22-part modular 3D **InkBlade** Gestalt mesh and six 2048×2048 elemental texture atlases compiled via a pure-Python Unreal Engine 3 `.upk` pipeline.
 
 Primary Fire swings your equipped Melee Weapon (precision single-target strikes or frontal cleave arcs) scaling with gun-level base damage, elemental DoT/splash, **player Melee Damage bonuses**, and **Roid shield buffs**, while `[V]` remains your vanilla character melee. **Right Mouse Button / Left Trigger fires each manufacturer's secondary attack** (ADS zoom stays suppressed): **Bandit and Torgue throw their blade**, **Hyperion and Jakobs hold to guard**, and **Maliwan gets nothing**.
 
@@ -22,21 +22,9 @@ Every Melee Weapon also rolls **level-scaled Damage Reduction** (~30% at Lv 1 �
 1. Download `melee_arsenal.zip` (or `melee_arsenal-v0.4.5.zip`) from the Releases page.
 2. Extract it to your Borderlands 2 install — `WillowGame/CookedPCConsole/MeleeArsenal*.upk` and `sdk_mods/melee_arsenal/` should appear.
 3. Launch the game, open **MODS → Melee Arsenal → Enabled**.
-4. Load any map — Melee Weapons now drop in-world. Check **MODS → Melee Arsenal** for tuning dials.
+4. Load any map to find Melee Weapons in-world. Check **MODS → Melee Arsenal** for tuning dials.
 
 To uninstall, run `./melee uninstall` or delete `sdk_mods/melee_arsenal/` and `WillowGame/CookedPCConsole/MeleeArsenal*.upk`. Save files at `sdk_mods/_melee_arsenal_saves/` are kept by default.
-
-### Quick CLI Install (Developers)
-
-```bash
-./melee setup                         # create .venv and install Pillow
-./melee dev --bl2-dir "/path/to/Borderlands 2"  # test + install
-./melee status                        # verify kit, UPK, and BL2 sync
-```
-
-For the full CLI reference and the UPK staleness guard, see [Developer Guide](docs/DEVELOPER.md).
-
----
 
 ## Weapon Archetypes
 
@@ -109,7 +97,7 @@ Open the SDK console (`~`):
 - `melee_spawn [maker] [rarity] [element] [accessory]` — Drop a tuned blade (e.g. `melee_spawn hyperion purple shock serrated`).
 - `melee_spawn_all [white|green|blue|purple]` — Drop all five archetypes.
 - `melee_check_pools` — Re-sync pools, re-roll vendor shelves, and report Melee share.
-- `melee_dump_held` / `melee_debug_swing` — Inspect held blade's parts, stats, and live bonuses.
+- `melee_dump_held` — Inspect the held blade's parts, stats, and live bonuses.
 - `melee_secondary` — Print throw arc / guard state.
 - `melee_save_now` — Snapshot carried blades to sidecar storage.
 - `melee_preview [roll_deg] [scale] [focus_radius] [pitch_deg] [yaw_deg] [bounds_z]` — Tune inventory 3D framing.
@@ -131,34 +119,10 @@ Open the SDK console (`~`):
 **Vendors don't show Melee Weapons**
 - Vendor shelves are built at map load before pools exist. Moving to a new map after enabling the mod, or running `melee_check_pools`, re-rolls shelves.
 
-**Crashes or missing textures after `./melee generate`**
-- Generated kits must be recompiled: run `./melee build` or `./melee dev` — `install` auto-recompiles stale UPKs, while `--no-rebuild` installs them as-is with a warning.
-
 For deeper diagnostics, enable **Log Swing Damage Breakdown** and tail the log:
 
 ```bash
 ./melee logs -f
-```
-
----
-
-## For Developers
-
-- **Architecture, part catalog / adding new parts, combat engine, secondary attacks, loot pools, persistence:** [docs/DEVELOPER.md](docs/DEVELOPER.md)
-- **InkBlade art pipeline (10-stage generator, caching, decals):** [tools/inkblade_gen/README.md](tools/inkblade_gen/README.md)
-- **UPK codec & kit fingerprint:** [tools/inkblade_upk/](tools/inkblade_upk/)
-
-Repository layout:
-
-```text
-.
-├── melee                           # Build, test, package & BL2 deployment CLI
-├── build/                          # Generated kit, cooked UPKs, manifest (gitignored)
-├── sdk_mods/melee_arsenal/         # Main mod — core/parts/ (one file per part type), core/ math,
-│                                   # runtime/definitions/ (UE3 builders) + runtime/ hooks & combat
-├── sdk_mods/melee_arsenal_probe/   # Optional in-game UE3 diagnostics
-├── tools/                          # Kit generator, UPK compiler, preview tooling
-└── tests/                          # Unit tests (core math, mock SDK, UPK codec)
 ```
 
 ---
@@ -184,4 +148,4 @@ Install with:
 
 ## Version
 
-`v0.4.5` — SDK: Willow2 Mod Manager v3.8+ (mods_base 1.12+ / unrealsdk 3.2 / pyunrealsdk 1.10) · Kit: InkBlade r6 · Python: 3.11+
+`v0.4.5` — Willow2 Mod Manager v3.8+ (mods_base 1.12+ / unrealsdk 3.2 / pyunrealsdk 1.10)

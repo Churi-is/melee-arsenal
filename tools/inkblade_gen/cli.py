@@ -16,7 +16,7 @@ Swap in decal art without touching geometry/UV work::
 
 Produce a zip the UE3 compiler can consume directly::
 
-    python tools/generate_inkblade_kit.py --out build/dist/Inkblade_Modular_Kit_r6.zip
+    python tools/generate_inkblade_kit.py --out build/dist/Inkblade_Modular_Kit.zip
 """
 from __future__ import annotations
 

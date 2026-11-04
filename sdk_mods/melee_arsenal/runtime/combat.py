@@ -1,60 +1,4 @@
-"""Live BL2 Melee Weapon Combat, Wall-Occluded Cleave & First-Person `Bladed_Melee` Engine.
-
-Built 100% on empirical results from `melee_combat_probe_report.json` (Sanctuary live capture):
-
-1. **Synchronous Wall-Occluded Hit Detection & Weakspot Headshot Crits (`CalcWeaponFire`)**:
-   - `WillowWeapon.CalcWeaponFire(StartTrace, EndTrace, ImpactList=[], Extent=(0,0,0), bTestTrace=False)`
-     returns `(ImpactInfo, ImpactList)` synchronously on frame 0 with:
-       * `ImpactInfo.HitActor` (enemy `WillowAIPawn`, `Pawn_TargetDummy`, destructible barrel/pile, or world wall)
-       * `ImpactInfo.HitLocation` (exact 3D impact point)
-       * `ImpactInfo.HitInfo.BoneName` (`Head`, `Eye`, `Crit`, `Hips`, `Torso`, `Neck`, ...)
-   - Zero reliance on `WillowLightProjectileManager` (which BL2 only spawns lazily after a vanilla gun shot).
-   - `SINGLE_TARGET` (Hyperion Katana, Jakobs Sabre): checks exact crosshair ray first (with `+75%` / `+100%`
-     weakspot headshot crit multiplier when hitting a crit bone!), plus a `22.5°` half-angle (`45°` total,
-     matching Gearbox's `BehaviorData_PlayerMeleeAttackWithBladedWeapon`) wall-checked blade-slash assist so
-     close-quarters slashes never whiff between an enemy's limbs.
-   - `FRONTAL_CLEAVE` (Bandit Machete `95°`, Maliwan Phaseblade `110°`, Torgue Blast-Cleaver `85°`):
-     strikes every living hostile + Target Dummy inside `card.range_uu` and `card.cleave_arc_degrees`
-     whose `CalcWeaponFire` check confirms no wall/cover blocks line-of-sight!
-
-2. **Instant Native Damage, Elemental Multipliers, Status DoTs & Torgue Splash**:
-   - `WillowPawn.Behavior_CauseDamage(...)` with `WillowDmgSource_Bullet` (never `WillowDmgSource_Melee`,
-     avoiding BL2 Gotcha #3 freeze) applies immediate shield/health damage, floating numbers, native
-     flesh/armor/shield multipliers (`1.5x` Fire on Flesh verified to 4 decimal places), kill skills, and XP.
-   - Rolls `card.elemental_chance_pct` per target between `DmgType_<Elem>_Impact` (procs Burn / Shock /
-     Corrode / Slag DoT) and `DmgType_<Elem>_Impact_NoDoT` (full elemental hit damage without guaranteed DoT).
-   - `WillowPawn.Behavior_CauseRadiusDamage(...)` with `WillowDmgSource_Grenade` +
-     `DmgType_Explosive_Impact_ForceFlinch` triggers Torgue Blast-Cleaver's `1.8m` (`180 UU`) 50% splash!
-
-3. **Authentic First-Person Blade Swing Animation (`Bladed_Melee` on `Pawn.Arms` `WeaponAction` Slot)**:
-   - Plays Gearbox's shared `Anim_1st_Person.1st_Person_Pistol: Bladed_Melee` (`0.6333s`, present on ALL 6
-     Vault Hunters; measured `65.2 UU` 3D hand-and-blade sweep in `melee_combat_probe_report.json`) directly
-     on `Pawn.Arms`'s `WeaponAction` `AnimNodeSlot` scaled to your weapon's exact `Swing Speed`!
-   - Suppresses gun recoil (`WeaponRecoil.StopCustomAnim`, `PlayFireEffects` `Block`, `WeaponFired` `Block`),
-     layers manufacturer-tuned `CameraAnim` shakes + blade whoosh/impact `AkEvent`s, and falls back to
-     `Arms.SkeletalMesh.RotOrigin` + `Arms.ForceUpdate(False)` if a modded rig ever lacks `Bladed_Melee`.
-   - Regular melee (`[V]`) is completely untouched so Maya Scorn, Zer0 Execute, Krieg Buzz Axe, etc. work natively.
-
-4. **Manufacturer Secondary Attacks (RMB / Left Trigger, `runtime/secondary.py`)**:
-   - Bandit Machetes and Torgue Blast-Cleavers are **thrown** along a ballistic arc whose speed,
-     loft, flight time and reach come from the weapon's real part mass (blade + grip manufacturer
-     hardware + accessory). A thrown blade strikes for exactly a normal LMB hit, then
-     rebounds to your hand after an impact — or after its arc expires — and Primary Fire is locked
-     out for the whole flight.
-   - Hyperion Katanas and Jakobs Sabres **guard** while RMB is held: the next incoming hit has the
-     blade's rolled card Damage Reduction applied twice, and any hit inside the first `0.33 s`
-     deals zero damage and is reflected back at a melee attacker as a forced critical hit.
-   - Maliwan Phaseblades have no secondary attack; RMB stays inert.
-
-5. **Defensive Blade Guard: Level- & Part-Scaled Damage Reduction While Equipped**:
-   - Every Melee Weapon rolls an incoming-damage reduction (printed on its item card) that protects you
-     while it is the held `Pawn.Weapon`. The floor climbs from `30%` at Lv 1 to `61%` at Lv 80 + OP10,
-     with parts deciding the rest up to a `70%` cap (`76%` for unique rarities).
-   - `WillowPlayerPawn:TakeDamage` PRE blocks the incoming hit and re-calls the same function with
-     `Damage * (1 - reduction)` inside `prevent_hooking_direct_calls()`, so BL2 still handles the
-     shield/health split, flinch, hit reactions, and FFYL exactly as normal. Only the local player's own
-     pawn is ever modified, and any unexpected state falls through to untouched vanilla damage.
-"""
+"""Runtime hooks for melee damage, targeting, animation, poses, and combat feedback."""
 from __future__ import annotations
 
 import copy
@@ -132,11 +76,7 @@ AK_HEAVY_IMPACT = "Ake_Wep_Melee.Ak_Play_wep_melee_Merc_impact"
 BLADED_MELEE_SEQ_LENGTH = 0.6333
 SINGLE_TARGET_ASSIST_HALF_DEG = 22.5  # Matches Gearbox `BehaviorData_PlayerMeleeAttackWithBladedWeapon` (45° cone)
 
-# CameraAnim tuning. The old values (scale 0.45-0.90 at rate 0.95-1.35, 40-120ms blends) made fast
-# blades read as a hard camera "flick" every swing: a ~100ms ramp read as an instant jump while the
-# 240ms fade-out looked smooth, i.e. it eased out but not in. Playback is now slowed well below 1.0x
-# (the whole motion, including its opening spike, is stretched), the blend-in window is long enough to
-# actually ease (~0.30s == a visible ramp at 60fps), and the fade-out matches it.
+# Slow playback and balanced blend windows soften repeated camera shakes.
 CAMERA_SHAKE_BLEND_IN_SEC = 0.30
 CAMERA_SHAKE_BLEND_OUT_SEC = 0.32
 CAMERA_SHAKE_RATE_HEAVY = 0.65
@@ -145,9 +85,7 @@ CAMERA_SHAKE_RATE_SINGLE = 0.70
 CAMERA_SHAKE_CADENCE_REFERENCE = 1.45  # swings/sec at which a shake plays at full strength
 CAMERA_SHAKE_CADENCE_FLOOR = 0.45      # never damp a shake below this fraction of its scale
 
-# `MODS -> Swing Camera Shake (%)` is a feel dial, not a raw multiplier: the amplitudes authored below
-# are the *loud* reference, and the slider is rescaled by this gain so the setting players preferred
-# under the old curve (10%) is exactly what 50% means now — 100% is 2x that, 150% is 3x.
+# Convert the 0-150 menu setting to animation scale; 50% is the authored amplitude.
 CAMERA_SHAKE_SLIDER_GAIN = 0.20
 
 # `FPlayerRecentDamageEventData.DamageEventFlags` bits (see `WillowDamageTypeDefinition`):
@@ -161,9 +99,7 @@ DAMAGE_EVENT_FLAG_CRIT = 1
 CRIT_FEEDBACK_WINDOW_SEC = 0.75
 _PENDING_CRIT_FEEDBACK: dict[str, float] = {}
 
-# ADS zoom stays suppressed on Melee Weapons (see `on_melee_weapon_start_zoom_pre`) because RMB /
-# Left Trigger now drives each manufacturer's secondary attack: Bandit & Torgue throw their blade,
-# Hyperion & Jakobs guard with it, and Maliwan keeps RMB inert.
+# ADS is suppressed so RMB / Left Trigger can dispatch manufacturer secondary attacks.
 MELEE_SECONDARY_ATTACK_ENABLED = True
 
 WEAKSPOT_BONE_KEYWORDS = (
@@ -205,15 +141,9 @@ _ARMS_REST_BASELINE: dict[str, dict[str, Any]] = {}
 # relative to the untouched rest transform and can always be restored exactly.
 _POSE_KIND: str = ""
 _POSE_STARTED_AT: float = 0.0
-# Exact `RotOrigin`/`Origin` the hands had *the instant the current pose was applied*. Every pose is
-# written as an absolute offset from this snapshot and undone by writing it straight back, so a
-# guard can never leave a residue behind (repeated guards used to creep further and further up and
-# to the left because the restore target had been captured while a pose was already live).
+# Exact hand transforms captured when the current pose is applied and restored when it ends.
 _POSE_REST: dict[str, Any] | None = None
-# The held blade itself: `WillowWeapon.Mesh` pivots at the hand, so tilting *it* angles the weapon
-# across the screen without sliding the hands around. (Rotating `Arms.SkeletalMesh` instead swings
-# the whole hand sideways, because that mesh pivots far behind the hands — which read in play as
-# "the hand moves toward the centre and left" rather than "the blade tilts".)
+# The held weapon mesh pivots at the hand, allowing blade tilt without moving the hands.
 _POSE_BLADE_REST: dict[str, Any] | None = None
 
 POSE_GUARD = "guard"
@@ -222,24 +152,14 @@ POSE_THROWN = "thrown"
 # A pose must never outlive its own state; this is the last-resort ceiling for the breathing guard.
 POSE_MAX_HOLD_SEC: float = 12.0
 
-# Offsets in UE3 rotator units (65536/360 per degree) / UU, added to the captured rest transform.
-#
-# These are deliberately small: the first-person arms mesh pivots well behind the hands, so a
-# large `RotOrigin` delta swings the hands straight out of frame (that is exactly what a 25 degree
-# guard rotation did in playtesting). The guard therefore tilts the blade only ~8-10 degrees with
-# no translation, and the thrown pose is pure downward translation (no rotation at all), which can
-# always be restored exactly.
+# Offsets use UE3 rotator units (65536/360 per degree) and Unreal Units.
 _POSE_OFFSETS: dict[str, dict[str, float]] = {
-    # The hands only *lift* a little (pitch, no yaw): the visible brace comes from the blade tilt
-    # below, so the guard no longer slides the hand sideways across the screen.
+    # The hand lift is small; the held weapon supplies the visible brace angle.
     POSE_GUARD: {"pitch": 1500.0, "yaw": 0.0, "roll": 0.0, "x": 0.0, "y": 0.0, "z": 0.0},
     POSE_THROWN: {"pitch": 0.0, "yaw": 0.0, "roll": 0.0, "x": 0.0, "y": 4.0, "z": -75.0},
 }
 
-# Blade tilt applied to the *held weapon mesh* while guarding, in UE3 rotator units:
-#   pitch lifts the tip, yaw swings the point toward the middle of the screen, roll angles the
-#   blade's flat. ~14.3 / 8.2 / 6.6 degrees. `Guard Blade Tilt (%)` scales (and can mirror) all
-#   three, so a build where a sign reads backwards is one slider away from looking right.
+# Guard blade tilt in UE3 rotator units. `Guard Blade Tilt (%)` scales and can mirror each axis.
 GUARD_BLADE_PITCH: float = 2600.0
 GUARD_BLADE_YAW: float = -1500.0
 GUARD_BLADE_ROLL: float = -1200.0
@@ -253,13 +173,6 @@ _FIRST_SWING_LOGGED: bool = False
 # ---------------------------------------------------------------------------
 # Safe Object, WeakPointer & Struct Helpers
 # ---------------------------------------------------------------------------
-
-# Shared identity/weak-reference helpers (see runtime.object_identity).  Keep the historical
-# private names as aliases because diagnostics and tests patch them at the combat boundary.
-_is_dead = is_dead
-_wrap_weak = wrap_weak
-_deref_weak = deref_weak
-
 
 def _safe_find(cls_name: str, path: str) -> Any:
     try:
@@ -550,7 +463,7 @@ def _cache_torgue_explosion_assets() -> None:
         best_ps_score = -1
         try:
             for ps in list(unrealsdk.find_all("ParticleSystem", exact=False)):
-                if _is_dead(ps):
+                if is_dead(ps):
                     continue
                 try:
                     p = str(ps._path_name())
@@ -567,7 +480,7 @@ def _cache_torgue_explosion_assets() -> None:
         best_ak_score = -1
         try:
             for ak in list(unrealsdk.find_all("AkEvent", exact=False)):
-                if _is_dead(ak):
+                if is_dead(ak):
                     continue
                 try:
                     p = str(ak._path_name())
@@ -632,11 +545,6 @@ def read_player_melee_context(pawn: Any, pc: Any = None) -> PlayerMeleeContext:
         status_chance_scale=status_chance_mult,
         is_uvhm=is_uvhm,
     )
-
-
-def read_live_player_melee_context(pc: Any, pawn: Any) -> PlayerMeleeContext:
-    """Compatibility wrapper `(pc, pawn)` used by `commands.dump_held_melee_weapon`."""
-    return read_player_melee_context(pawn, pc)
 
 
 # BL2 names the incoming-damage parameter `Damage` on `WillowPawn`/`WillowPlayerPawn:TakeDamage`,
@@ -835,7 +743,7 @@ def _try_melee_secondary_attack(wpn: Any, inst: MeleeWeaponInstance, card: Compu
             # Give the throw a real arm motion + whoosh + camera bump (the blade itself leaves the
             # hand logically: state is authoritative, the 1st-person swing sells the release).
             shooter, pc = _resolve_shooter_and_pc(wpn)
-            if shooter is not None and not _is_dead(shooter):
+            if shooter is not None and not is_dead(shooter):
                 ctx = read_player_melee_context(shooter, pc)
                 _trigger_first_person_blade_swing(pc, shooter, card, ctx.swing_speed_scale)
         return started
@@ -868,14 +776,14 @@ def on_melee_weapon_start_zoom_pre(obj: Any, args: Any, ret: Any, func: Any) -> 
 
 def _get_arms_anim_slots(arms: Any) -> dict[str, Any]:
     """Locate & cache `WeaponAction`, `CustomAnimSlot`, and `WeaponRecoil` on `Pawn.Arms`."""
-    if arms is None or _is_dead(arms):
+    if arms is None or is_dead(arms):
         return {}
     aid = cache_key(arms)
     cached = _ARMS_SLOT_CACHE.get(aid)
     if cached is not None:
-        act = _deref_weak(cached.get("action"))
-        cus = _deref_weak(cached.get("custom"))
-        rec = _deref_weak(cached.get("recoil"))
+        act = deref_weak(cached.get("action"))
+        cus = deref_weak(cached.get("custom"))
+        rec = deref_weak(cached.get("recoil"))
         if act is not None or cus is not None:
             return {"action": act, "custom": cus, "recoil": rec}
 
@@ -884,7 +792,7 @@ def _get_arms_anim_slots(arms: Any) -> dict[str, Any]:
     found_rec = None
     try:
         for slot in list(unrealsdk.find_all("AnimNodeSlot", exact=False)):
-            if _is_dead(slot):
+            if is_dead(slot):
                 continue
             if not same_uobject(getattr(slot, "SkelComponent", None), arms):
                 continue
@@ -900,16 +808,13 @@ def _get_arms_anim_slots(arms: Any) -> dict[str, Any]:
 
     if found_act is not None or found_cus is not None or found_rec is not None:
         _ARMS_SLOT_CACHE[aid] = {
-            "arms_ref": _wrap_weak(arms),
-            "action": _wrap_weak(found_act),
-            "custom": _wrap_weak(found_cus),
-            "recoil": _wrap_weak(found_rec),
+            "arms_ref": wrap_weak(arms),
+            "action": wrap_weak(found_act),
+            "custom": wrap_weak(found_cus),
+            "recoil": wrap_weak(found_rec),
         }
     return {"action": found_act, "custom": found_cus, "recoil": found_rec}
 
-
-_uobject_key = uobject_key
-_same_uobject = same_uobject
 
 
 def _snapshot_hands(sm: Any, arms: Any) -> dict[str, Any] | None:
@@ -918,9 +823,9 @@ def _snapshot_hands(sm: Any, arms: Any) -> dict[str, Any] | None:
         ro = sm.RotOrigin
         origin = getattr(sm, "Origin", None)
         return {
-            "arms_ref": _wrap_weak(arms),
-            "sm_ref": _wrap_weak(sm),
-            "sm_key": _uobject_key(sm),
+            "arms_ref": wrap_weak(arms),
+            "sm_ref": wrap_weak(sm),
+            "sm_key": uobject_key(sm),
             "rot": (int(ro.Pitch), int(ro.Yaw), int(ro.Roll)),
             "loc": (
                 (float(origin.X), float(origin.Y), float(origin.Z))
@@ -937,22 +842,20 @@ def _capture_arms_rest_transform(arms: Any, sm: Any) -> dict[str, Any] | None:
     if arms is None or sm is None:
         return None
     if _POSE_KIND:
-        # The hands are currently displaced by a pose: whatever is on the mesh right now is NOT the
-        # rest transform, so capturing it would bake the offset in for good.
+        # A posed transform is not a valid idle baseline.
         return None
     entry = _ARMS_REST_BASELINE.get(cache_key(sm))
     if entry is not None:
-        # A recycled `id()` (map change / pawn respawn) must never be mistaken for the same mesh,
-        # or the pose would be restored onto a dead object and the live hands would stay offset.
-        if same_uobject(_deref_weak(entry.get("sm_ref")), sm):
+        # Discard cache entries when their weak reference points to a different mesh.
+        if same_uobject(deref_weak(entry.get("sm_ref")), sm):
             return entry
         _ARMS_REST_BASELINE.pop(cache_key(sm), None)
     try:
         ro0 = sm.RotOrigin
         origin0 = getattr(sm, "Origin", None)
         entry = {
-            "arms_ref": _wrap_weak(arms),
-            "sm_ref": _wrap_weak(sm),
+            "arms_ref": wrap_weak(arms),
+            "sm_ref": wrap_weak(sm),
             "rot": (int(ro0.Pitch), int(ro0.Yaw), int(ro0.Roll)),
             "loc": (
                 (float(origin0.X), float(origin0.Y), float(origin0.Z))
@@ -979,7 +882,7 @@ def _held_weapon_mesh(pawn: Any) -> Any:
     except Exception:
         return None
     mesh = getattr(wpn, "Mesh", None) if wpn is not None else None
-    if mesh is None or _is_dead(mesh) or not hasattr(mesh, "RotOrigin"):
+    if mesh is None or is_dead(mesh) or not hasattr(mesh, "RotOrigin"):
         return None
     return mesh
 
@@ -989,7 +892,7 @@ def _snapshot_blade(mesh: Any) -> dict[str, Any] | None:
     try:
         ro = mesh.RotOrigin
         return {
-            "mesh_ref": _wrap_weak(mesh),
+            "mesh_ref": wrap_weak(mesh),
             "rot": (int(ro.Pitch), int(ro.Yaw), int(ro.Roll)),
         }
     except Exception:
@@ -1001,7 +904,7 @@ def _write_blade_tilt(mesh: Any, tilt: float, bob: float) -> None:
     rest = _POSE_BLADE_REST
     if mesh is None or rest is None:
         return
-    if not _same_uobject(_deref_weak(rest.get("mesh_ref")), mesh):
+    if not same_uobject(deref_weak(rest.get("mesh_ref")), mesh):
         return
     try:
         bp, by, br = rest["rot"]
@@ -1019,7 +922,7 @@ def _restore_blade() -> None:
     rest = _POSE_BLADE_REST
     if rest is None:
         return
-    mesh = _deref_weak(rest.get("mesh_ref"))
+    mesh = deref_weak(rest.get("mesh_ref"))
     if mesh is None:
         return
     try:
@@ -1034,13 +937,13 @@ def _restore_blade() -> None:
 def _resolve_hands(pc: Any) -> tuple[Any, Any, Any] | None:
     """Resolve `(pawn, arms, skeletal_mesh)` for the local first-person hands."""
     pawn = getattr(pc, "Pawn", None) if pc is not None else None
-    if pawn is None or _is_dead(pawn):
+    if pawn is None or is_dead(pawn):
         return None
     arms = getattr(pawn, "Arms", None)
-    if arms is None or _is_dead(arms):
+    if arms is None or is_dead(arms):
         return None
     sm = getattr(arms, "SkeletalMesh", None)
-    if sm is None or _is_dead(sm) or not hasattr(sm, "RotOrigin"):
+    if sm is None or is_dead(sm) or not hasattr(sm, "RotOrigin"):
         return None
     return pawn, arms, sm
 
@@ -1052,7 +955,7 @@ def _pose_target(pc: Any) -> tuple[Any, Any, Any, dict[str, Any]] | None:
         return None
     pawn, arms, sm = hands
     entry = _POSE_REST
-    if entry is None or not _same_uobject(_deref_weak(entry.get("sm_ref")), sm):
+    if entry is None or not same_uobject(deref_weak(entry.get("sm_ref")), sm):
         entry = _snapshot_hands(sm, arms)
     if entry is None:
         return None
@@ -1170,12 +1073,7 @@ def reset_first_person_pose(reason: str = "") -> None:
 
 
 def capture_first_person_rest_transform() -> bool:
-    """Refresh the idle arms transform while nothing is posed.
-
-    Called on a slow timer from the frame tick. Re-reading (rather than capturing once) means the
-    stored rest can never hold a stale offset: if the hands are idle right now, that *is* the rest
-    transform, whatever happened earlier in the session.
-    """
+    """Refresh the cached hands transform while no pose or swing is active."""
     if _POSE_KIND or STATE.swing_motion.active:
         return False
     try:
@@ -1232,8 +1130,8 @@ def _write_rest_transforms() -> None:
     if _POSE_REST is not None:
         entries.append(("__pose__", _POSE_REST))
     for sm_id, entry in entries:
-        sm = _deref_weak(entry.get("sm_ref"))
-        arms = _deref_weak(entry.get("arms_ref"))
+        sm = deref_weak(entry.get("sm_ref"))
+        arms = deref_weak(entry.get("arms_ref"))
         if sm is None:
             _ARMS_REST_BASELINE.pop(sm_id, None)
             continue
@@ -1275,7 +1173,7 @@ def _trigger_first_person_blade_swing(
     played_real_anim = False
     pending_wpn = getattr(pawn, "PendingWeapon", None) if pawn is not None else None
     arms = getattr(pawn, "Arms", None) if (pawn is not None and pending_wpn is None) else None
-    if arms is not None and not _is_dead(arms):
+    if arms is not None and not is_dead(arms):
         slots = _get_arms_anim_slots(arms)
         recoil_slot = slots.get("recoil")
         target_slot = slots.get("custom") or slots.get("action")
@@ -1310,7 +1208,7 @@ def _trigger_first_person_blade_swing(
                         continue
 
     # 2. Procedural `RotOrigin` + `ForceUpdate(False)` fallback ONLY if no AnimNodeSlot existed
-    if not played_real_anim and arms is not None and not _is_dead(arms):
+    if not played_real_anim and arms is not None and not is_dead(arms):
         sm = getattr(arms, "SkeletalMesh", None)
         if sm is not None and hasattr(sm, "RotOrigin"):
             _capture_arms_rest_transform(arms, sm)
@@ -1384,7 +1282,7 @@ def _update_first_person_slash_motion(pc: Any) -> None:
         return
 
     pawn = getattr(pc, "Pawn", None) if pc is not None else None
-    if pawn is None or _is_dead(pawn):
+    if pawn is None or is_dead(pawn):
         restore_all_arms_rest_transforms()
         return
 
@@ -1446,7 +1344,7 @@ def _is_target_dummy(actor: Any) -> bool:
 
 def _is_valid_melee_victim(shooter: Any, actor: Any) -> bool:
     """Return True for hostile `WillowAIPawn`s, Sanctuary Target Dummies, and destructible props."""
-    if actor is None or actor == shooter or _is_dead(actor):
+    if actor is None or actor == shooter or is_dead(actor):
         return False
     cls_name = getattr(getattr(actor, "Class", None), "Name", "")
     if cls_name in ("WorldInfo", "StaticMeshActor", "InterpActor", "Terrain", "WillowPlayerPawn"):
@@ -1481,7 +1379,7 @@ def _snapshot_cleave_candidates(shooter: Any) -> tuple[list[TargetCandidate], di
     """Snapshot living hostile pawns + Target Dummies (seen-set + 800-step cap, Gotcha #13)."""
     candidates: list[TargetCandidate] = []
     pawn_map: dict[str, Any] = {}
-    if shooter is None or _is_dead(shooter):
+    if shooter is None or is_dead(shooter):
         return candidates, pawn_map
     world_info = getattr(shooter, "WorldInfo", None)
     if world_info is None:
@@ -1498,7 +1396,7 @@ def _snapshot_cleave_candidates(shooter: Any) -> tuple[list[TargetCandidate], di
         seen.add(cid)
         nxt = getattr(cur, "NextPawn", None)
 
-        if cur != shooter and not _is_dead(cur):
+        if cur != shooter and not is_dead(cur):
             is_dummy = _is_target_dummy(cur)
             hostile = False
             try:
@@ -1620,7 +1518,7 @@ def _resolve_shooter_and_pc(wpn: Any) -> tuple[Any, Any]:
         pc = None
 
     shooter = getattr(wpn, "Instigator", None) or getattr(wpn, "Owner", None)
-    if (shooter is None or _is_dead(shooter)) and pc is not None:
+    if (shooter is None or is_dead(shooter)) and pc is not None:
         shooter = getattr(pc, "Pawn", None)
     if pc is None and shooter is not None:
         pc = getattr(shooter, "Controller", None)
@@ -1638,7 +1536,7 @@ def _execute_melee_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCar
     global _FIRST_SWING_LOGGED
     _combat_breadcrumb(f"swing start: {card.manufacturer.value} {card.archetype_name}")
     shooter, pc = _resolve_shooter_and_pc(wpn)
-    if shooter is None or _is_dead(shooter):
+    if shooter is None or is_dead(shooter):
         return 0
 
     ensure_combat_resources_cached()
@@ -1934,7 +1832,7 @@ def _spawn_torgue_explosion_vfx_sfx(
     if _CACHED_EXPLOSION_PS is not None and vec_tpl is not None:
         world_info = getattr(shooter, "WorldInfo", None)
         emitter_pool = getattr(world_info, "MyEmitterPool", None) if world_info is not None else None
-        if emitter_pool is not None and not _is_dead(emitter_pool):
+        if emitter_pool is not None and not is_dead(emitter_pool):
             loc_v = _make_vec_from(vec_tpl, *fx_xyz)
             rot_tpl = getattr(shooter, "Rotation", None)
             zero_rot = None

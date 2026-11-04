@@ -371,17 +371,11 @@ def rasterise(
 # Sheets
 # ---------------------------------------------------------------------------
 def _font(size: int) -> ImageFont.ImageFont:
-    try:
-        return ImageFont.load_default(size=size)
-    except TypeError:  # pragma: no cover - Pillow < 10.1
-        return ImageFont.load_default()
+    return ImageFont.load_default(size=size)
 
 
 def _text_width(draw: ImageDraw.ImageDraw, text: str, font) -> int:  # noqa: ANN001
-    try:
-        return int(draw.textlength(text, font=font))
-    except AttributeError:  # pragma: no cover - very old Pillow
-        return int(font.getlength(text)) if hasattr(font, "getlength") else 8 * len(text)
+    return int(draw.textlength(text, font=font))
 
 
 def contact_sheet(

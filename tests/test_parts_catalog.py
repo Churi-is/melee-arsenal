@@ -1,9 +1,4 @@
-"""Unit tests for the `core/parts/` data layer (one module per part type).
-
-Covers the layout itself, the single-source-of-truth derived tables, the new
-`validate_catalog()` invariants, backward-compatible facades, and the fact that
-the per-part roll helpers reproduce the orchestrator's seeded rolls exactly.
-"""
+"""Tests for the SDK-independent part registries and roll logic."""
 from __future__ import annotations
 
 import ast
@@ -17,8 +12,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR / "sdk_mods") not in sys.path:
     sys.path.insert(0, str(ROOT_DIR / "sdk_mods"))
 
-from melee_arsenal.core import catalog as legacy_catalog  # noqa: E402
-from melee_arsenal.core import loot_roller, schemas as legacy_schemas  # noqa: E402
+from melee_arsenal.core import loot_roller  # noqa: E402
 from melee_arsenal.core import secondary  # noqa: E402
 from melee_arsenal.core.enums import (  # noqa: E402
     Element,
@@ -32,11 +26,9 @@ from melee_arsenal.core.parts import (  # noqa: E402
     ACCESSORY_GUARD_COOLDOWN_DELTA,
     ACCESSORY_TO_KIT_ID,
     ACCESSORY_WEIGHT_KG,
-    BLADE_BY_MANUFACTURER,
     BLADE_TO_KIT_ID,
     BLADES,
     ELEMENT_ID_TO_ATLAS_KEY,
-    ELEMENT_PART_BY_TYPE,
     ELEMENT_TO_KIT_ID,
     ELEMENTS,
     GRIP_TO_KIT_ID,
@@ -47,10 +39,6 @@ from melee_arsenal.core.parts import (  # noqa: E402
     NO_ELEMENT_ID,
     PART_REGISTRIES,
     AccessoryPartSpec,
-    BladePartSpec,
-    ElementPartSpec,
-    GripPartSpec,
-    ManufacturerSpec,
     MeleeWeaponParts,
     blade_for_manufacturer,
     eligible_accessories_for_roll,
@@ -105,33 +93,6 @@ class TestPartsPackageLayout(unittest.TestCase):
                 self.assertEqual(key, spec.part_id)
                 self.assertNotIn(key, seen, f"duplicate part id {key!r}")
                 seen.add(key)
-
-    def test_legacy_facades_point_at_the_parts_modules(self) -> None:
-        """Old import paths still work and resolve to the exact same objects."""
-        for name, expected in (
-            ("BLADES", BLADES),
-            ("GRIPS", GRIPS),
-            ("ACCESSORIES", ACCESSORIES),
-            ("ELEMENTS", ELEMENTS),
-            ("MANUFACTURERS", MANUFACTURERS),
-            ("BLADE_BY_MANUFACTURER", BLADE_BY_MANUFACTURER),
-            ("ELEMENT_PART_BY_TYPE", ELEMENT_PART_BY_TYPE),
-        ):
-            with self.subTest(name=name):
-                self.assertIs(getattr(legacy_catalog, name), expected)
-        self.assertIs(legacy_catalog.resolve_weapon_name, resolve_weapon_name)
-        for name, expected in (
-            ("BladePartSpec", BladePartSpec),
-            ("GripPartSpec", GripPartSpec),
-            ("AccessoryPartSpec", AccessoryPartSpec),
-            ("ElementPartSpec", ElementPartSpec),
-            ("ManufacturerSpec", ManufacturerSpec),
-        ):
-            with self.subTest(schema=name):
-                self.assertIs(getattr(legacy_schemas, name), expected)
-        self.assertIs(secondary.secondary_attack_for, secondary_attack_for)
-        self.assertIs(loot_roller.eligible_elements_for_blade, eligible_elements_for_blade)
-        self.assertIs(loot_roller.eligible_accessories_for_roll, eligible_accessories_for_roll)
 
 
 class TestDerivedPartData(unittest.TestCase):
@@ -309,7 +270,7 @@ class TestPartDataLogic(unittest.TestCase):
         self.assertNotIn("Acc_RazorFuller", {a.part_id for a in pool})
 
     def test_part_roll_helpers_reproduce_the_orchestrator(self) -> None:
-        """Per-part helpers must consume RNG in exactly the old order."""
+        """Per-part helpers preserve the orchestrator's seeded random sequence."""
         for i in range(60):
             maker = tuple(Manufacturer)[i % 5]
             rarity = (Rarity.COMMON, Rarity.UNCOMMON, Rarity.RARE, Rarity.VERY_RARE)[i % 4]

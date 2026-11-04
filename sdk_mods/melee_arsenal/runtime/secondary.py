@@ -1,39 +1,4 @@
-"""Live secondary attacks for Melee Weapons: **Throw** (Bandit/Torgue) and **Guard** (Hyperion/Jakobs).
-
-RMB / Left Trigger is free on a Melee Weapon because this mod suppresses the donor pistol's ADS
-zoom. This module spends that input on the manufacturer's signature move:
-
-**Throw (Bandit Machete, Torgue Blast-Cleaver)**
-   - The blade is launched along the ballistic arc solved by `core.secondary.build_throw_flight_plan`
-     from the weapon's real part mass (a Torgue slab lobs short and high, a Bandit blade flies
-     flatter and further).
-   - Each tick sweeps the arc segment with the weapon's own `CalcWeaponFire` trace, plus a pure
-     Python swept-segment check against live hostiles, so a fast blade cannot tunnel past an enemy.
-   - A hit deals exactly the normal LMB breakdown and detonates Torgue splash.
-   - After an impact — or once the arc expires without touching anything — the blade rebounds to
-     your hand (`THROW_RETURN_SEC`). Primary Fire is locked out for the whole flight.
-
-**Guard (Hyperion Katana, Jakobs Sabre)**
-   - Holding RMB braces the blade. The next incoming hit has the blade's rolled card Damage
-     Reduction applied twice (`(damage * card DR) * card DR`), then the guard consumes itself and
-     starts its part-driven cooldown.
-   - A hit inside the first `0.33 s` is a perfect parry: zero damage taken, and melee damage is
-     reflected back at the attacker as a forced critical hit (with the vanilla CRITICAL popup).
-   - `StopZoom` ends the hold. The hook is enabled defensively and a held guard is force-dropped
-     after `GUARD_MAX_HOLD_SEC`, so a missing engine function can never leave you stuck bracing.
-
-Maliwan gets neither attack — RMB stays inert on a Phaseblade.
-
-**Visuals** (`runtime/secondary_vfx.py` + `runtime/combat.py` first-person posing)
-
-   - Throw: the release slash plays, then the first-person hands drop out of frame while a real
-     actor carrying the weapon's `SkeletalMesh` + materials flies the solved arc (a Tediore-style
-     thrown-weapon actor without Tediore's fuse explosion on Bandit blades), tumbles, and travels
-     back from the strike point to your hand on the rebound before it is caught.
-   - Guard: the hands rotate into a raised brace with a slow bob for as long as RMB is held.
-   - Parry: `PERFECT PARRY!` HUD callout, blade-on-blade clang and a camera jolt, on top of the
-     vanilla CRITICAL popup of the reflected hit.
-"""
+"""Handle the runtime throw and guard attacks bound to RMB / Left Trigger."""
 from __future__ import annotations
 
 import math
@@ -82,16 +47,10 @@ def _combat() -> Any:
 # Small object helpers (kept local so this module never depends on combat at import time)
 # ---------------------------------------------------------------------------
 
-# Shared identity/weak-reference helpers.  Keep private aliases for diagnostics/tests.
-_is_dead = is_dead
-_wrap_weak = wrap_weak
-_deref_weak = deref_weak
-
-
 def _same_object(ref: Any, obj: Any) -> bool:
     if ref is None or obj is None:
         return False
-    return same_uobject(_deref_weak(ref), obj)
+    return same_uobject(deref_weak(ref), obj)
 
 
 # ---------------------------------------------------------------------------
@@ -183,7 +142,7 @@ def begin_throw(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCardStats) ->
         return False
     combat = _combat()
     shooter, pc = combat._resolve_shooter_and_pc(wpn)
-    if shooter is None or _is_dead(shooter):
+    if shooter is None or is_dead(shooter):
         return False
 
     weight = float(card.throw_weight_kg) or compute_throw_weight_kg(inst)
@@ -214,9 +173,9 @@ def begin_throw(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCardStats) ->
     # Launch a few UU forward so the swept trace never starts inside the thrower's own capsule.
     origin = (eye[0] + dir_xy[0] * 8.0, eye[1] + dir_xy[1] * 8.0, eye[2])
     _THROW = ThrowState(
-        wpn_ref=_wrap_weak(wpn),
-        shooter_ref=_wrap_weak(shooter),
-        pc_ref=_wrap_weak(pc),
+        wpn_ref=wrap_weak(wpn),
+        shooter_ref=wrap_weak(shooter),
+        pc_ref=wrap_weak(pc),
         card=card,
         inst=inst,
         plan=plan,
@@ -251,7 +210,7 @@ def is_any_weapon_thrown() -> bool:
 
 
 def thrown_weapon() -> Any:
-    return _deref_weak(_THROW.wpn_ref) if _THROW is not None else None
+    return deref_weak(_THROW.wpn_ref) if _THROW is not None else None
 
 
 def _throw_point(st: ThrowState, elapsed: float) -> tuple[float, float, float]:
@@ -296,8 +255,8 @@ def _nearest_victim_on_segment(
 
 def _player_grab_point(st: ThrowState) -> tuple[float, float, float] | None:
     """Where the returning blade should be caught: the player's *live* position, right now."""
-    shooter = _deref_weak(st.shooter_ref)
-    if shooter is None or _is_dead(shooter):
+    shooter = deref_weak(st.shooter_ref)
+    if shooter is None or is_dead(shooter):
         return None
     loc = getattr(shooter, "Location", None)
     if loc is None:
@@ -315,7 +274,7 @@ def _begin_return(st: ThrowState, reason: str) -> None:
     st.return_started_at = time.monotonic()
     st.last_return_at = st.return_started_at
     st.return_point = st.last_point
-    _play_throw_sfx(_deref_weak(st.shooter_ref), "rebound")
+    _play_throw_sfx(deref_weak(st.shooter_ref), "rebound")
     grab = _player_grab_point(st)
     if grab is not None:
         dist = math.sqrt(sum((grab[i] - st.last_point[i]) ** 2 for i in range(3)))
@@ -335,7 +294,7 @@ def _finish_throw() -> None:
     global _THROW
     if _THROW is None:
         return
-    _play_throw_sfx(_deref_weak(_THROW.shooter_ref), "whoosh")
+    _play_throw_sfx(deref_weak(_THROW.shooter_ref), "whoosh")
     debug = secondary_vfx.thrown_blade_debug_info()
     secondary_vfx.destroy_thrown_blade()
     combat = _combat()
@@ -371,9 +330,9 @@ def _apply_throw_impact(
 ) -> None:
     """Deal the thrown blade's normal-strength LMB hit (and Torgue splash), then rebound."""
     combat = _combat()
-    wpn = _deref_weak(st.wpn_ref)
-    shooter = _deref_weak(st.shooter_ref)
-    pc = _deref_weak(st.pc_ref)
+    wpn = deref_weak(st.wpn_ref)
+    shooter = deref_weak(st.shooter_ref)
+    pc = deref_weak(st.pc_ref)
     if wpn is None or shooter is None:
         _begin_return(st, "weapon lost")
         return
@@ -482,8 +441,7 @@ def _apply_throw_impact(
 # the thrower themselves (arms mesh, held weapon, camera-space collision) — not a real impact.
 THROW_LAUNCH_GRACE_UU: float = 150.0
 
-# Actor classes that are never a real obstacle for a thrown blade. BL2's weapon traces can still
-# report them (volume brushes, triggers, emitters), which used to stop the blade dead in mid-air.
+# Ignore non-solid actors such as volume brushes, triggers, and emitters during throw traces.
 _THROW_GHOST_CLASS_TOKENS = (
     "PhysicsVolume",
     "Trigger",
@@ -549,12 +507,12 @@ def tick_throw() -> None:
     if st is None:
         return
     now = time.monotonic()
-    wpn = _deref_weak(st.wpn_ref)
-    shooter = _deref_weak(st.shooter_ref)
-    if wpn is None or shooter is None or _is_dead(shooter):
+    wpn = deref_weak(st.wpn_ref)
+    shooter = deref_weak(st.shooter_ref)
+    if wpn is None or shooter is None or is_dead(shooter):
         _cancel_throw("owner or weapon lost")
         return
-    pc = get_local_player_controller() or _deref_weak(st.pc_ref)
+    pc = get_local_player_controller() or deref_weak(st.pc_ref)
     current_pawn = getattr(pc, "Pawn", None) if pc is not None else None
     if current_pawn is not None and not same_uobject(current_pawn, shooter):
         _cancel_throw("pawn/map changed")
@@ -580,7 +538,7 @@ def tick_throw() -> None:
     # visibly gone from them until it is caught.
     if elapsed >= THROW_HAND_EMPTY_DELAY_SEC:
         if combat.active_first_person_pose() != combat.POSE_THROWN:
-            combat.apply_first_person_pose(_deref_weak(st.pc_ref), combat.POSE_THROWN)
+            combat.apply_first_person_pose(deref_weak(st.pc_ref), combat.POSE_THROWN)
         secondary_vfx.hide_held_blade()
     secondary_vfx.update_thrown_blade(point)
     st.visual_updates += 1
@@ -669,7 +627,7 @@ def try_begin_guard(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCardStats
 
     cooldown = float(card.guard_cooldown_sec) or 2.0
     _GUARD = GuardState(
-        wpn_ref=_wrap_weak(wpn),
+        wpn_ref=wrap_weak(wpn),
         card=card,
         started_at=time.monotonic(),
         cooldown_sec=cooldown,
@@ -720,8 +678,7 @@ def end_guard(
     if start_cooldown:
         _GUARD_COOLDOWN_UNTIL = time.monotonic() + st.cooldown_sec
     try:
-        # Unconditional: a brace consumed by a hit must restore the hands even if the engine never
-        # reports the RMB release (this was the "hand stays stuck after blocking" report).
+        # A hit can consume the brace without an RMB release event; always restore the hands.
         _combat().reset_first_person_pose("guard ended")
     except Exception:
         pass
@@ -790,11 +747,10 @@ def _melee_attacker(args: Any) -> Any:
 def _reflect_parry(pawn: Any, st: GuardState, args: Any, incoming_damage: float) -> int:
     """Bounce a parried melee blow back with a forced critical hit."""
     attacker = _melee_attacker(args)
-    if attacker is None or same_uobject(attacker, pawn) or _is_dead(attacker):
+    if attacker is None or same_uobject(attacker, pawn) or is_dead(attacker):
         return 0
     combat = _combat()
-    # The reflect must read as a critical hit from the blade in your hands, not as a scaling of a
-    # weak enemy poke (a 112-card blade used to reflect ~50 damage).
+    # Include the blade's critical damage so the reflected hit matches the equipped weapon.
     pc = get_local_player_controller()
     try:
         ctx = combat.read_player_melee_context(pawn, pc)
@@ -806,7 +762,7 @@ def _reflect_parry(pawn: Any, st: GuardState, args: Any, incoming_damage: float)
     )
     if reflected <= 0:
         return 0
-    wpn = _deref_weak(st.wpn_ref)
+    wpn = deref_weak(st.wpn_ref)
     try:
         combat.ensure_combat_resources_cached()
         # Tag first: the reflected hit is a crit, so BL2's floating number must say CRITICAL.
@@ -875,7 +831,7 @@ def handle_guard_incoming_damage(pawn: Any, args: Any, func: Any) -> bool:
         return False
 
     # Guard only exists while its own blade is still the held weapon.
-    wpn = _deref_weak(st.wpn_ref)
+    wpn = deref_weak(st.wpn_ref)
     held = getattr(pawn, "Weapon", None)
     resolved = resolve_melee_weapon(held, sync_weapon_props=False)
     guard_wpn = unwrap_weapon_object(wpn) or wpn
@@ -955,7 +911,7 @@ def tick_guard() -> None:
         end_guard(start_cooldown=False)
         return
     # A held-weapon change must drop the brace even when the new blade is also a guard weapon.
-    guard_wpn = unwrap_weapon_object(_deref_weak(st.wpn_ref)) or _deref_weak(st.wpn_ref)
+    guard_wpn = unwrap_weapon_object(deref_weak(st.wpn_ref)) or deref_weak(st.wpn_ref)
     held_wpn = unwrap_weapon_object(held) or held
     if guard_wpn is not None and held_wpn is not None and not same_uobject(guard_wpn, held_wpn):
         log_info("Guard dropped (held weapon changed).")

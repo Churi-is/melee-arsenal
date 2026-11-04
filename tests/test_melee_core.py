@@ -247,8 +247,7 @@ class TestMeleeArsenalCore(unittest.TestCase):
         visible_j = [r.label for r in card_j.top_stats if r.visible]
         self.assertEqual(visible_j, ["Damage", "Range", "Swing Speed"])
 
-        # The old green "Stacks with Player Melee & Roid Bonuses" line clipped into the manufacturer
-        # logo and repeated what every card already implies — it must be gone from every card.
+        # Cards show the rolled Damage Reduction instead of the redundant melee/roid bonus line.
         for payload in (card_j, build_item_card_payload(maliwan)):
             self.assertNotIn("Stacks with Player Melee", payload.fun_stats_html)
             self.assertNotIn("Roid Bonuses", payload.fun_stats_html)
@@ -275,7 +274,7 @@ class TestMeleeArsenalCore(unittest.TestCase):
 
         rarities = (Rarity.COMMON, Rarity.UNCOMMON, Rarity.RARE, Rarity.VERY_RARE)
 
-        # Lv 1: hard 30% floor, only a sliver of part headroom (never the old 50-70%)
+        # Lv 1 has a hard 30% floor and limited headroom from parts.
         low_values: set[int] = set()
         for i in range(150):
             wpn = roll_melee_weapon(
@@ -391,7 +390,7 @@ class TestMeleeArsenalCore(unittest.TestCase):
                 f"Lv{stage} DPS spread {min(dps):,.0f}-{max(dps):,.0f} is too wide",
             )
 
-        # Fastest cadence in the kit must not also be the runaway DPS leader (the old Jakobs problem)
+        # Fastest cadence should not make a blade the runaway DPS leader.
         fastest = max(
             (
                 compute_card_stats(
@@ -422,8 +421,7 @@ class TestMeleeArsenalCore(unittest.TestCase):
         self.assertEqual(MANUFACTURERS[Manufacturer.JAKOBS].secondary_attack, SecondaryAttack.GUARD)
         self.assertEqual(MANUFACTURERS[Manufacturer.MALIWAN].secondary_attack, SecondaryAttack.NONE)
 
-        # Thrown blades strike for exactly the same damage as a normal LMB hit (not 200%: a
-        # single RMB used to out-damage everything else in the kit).
+        # Thrown blades deal the same direct damage as a normal LMB hit.
         self.assertEqual(THROW_DAMAGE_MULTIPLIER, 1.0)
         parts = MeleeWeaponParts("Blade_Bandit_Machete", "Grip_Bandit", "Acc_None", "Elem_None")
         weapon = MeleeWeaponInstance(11, 50, Rarity.RARE, parts)

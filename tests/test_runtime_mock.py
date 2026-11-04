@@ -1,4 +1,4 @@
-"""Strict C++-typed mock-SDK integration tests for `sdk_mods/melee_arsenal/runtime` (v0.2.2).
+"""Strict C++-typed mock-SDK integration tests for `sdk_mods/melee_arsenal/runtime`.
 
 Verifies:
 - Strict `WrappedStruct` & `UObject` schema enforcement (`pyunrealsdk` 1.10 rules).
@@ -1606,10 +1606,10 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
 
             with mock.patch.dict(sys.modules, sdk_mods):
                 import melee_arsenal  # type: ignore[import-not-found]
-                from melee_arsenal.core.catalog import ACCESSORIES
+                from melee_arsenal.core.parts.accessories import ACCESSORIES
                 from melee_arsenal.core.enums import Rarity
                 from melee_arsenal.core.item_card import build_item_card_payload
-                from melee_arsenal.core.schemas import (
+                from melee_arsenal.core.parts.weapon import (
                     MeleeWeaponInstance,
                     MeleeWeaponParts,
                     PlayerMeleeContext,
@@ -1658,7 +1658,7 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                     state.STATE.blade_parts["Blade_Torgue_BlastCleaver"].CustomFiringModeDefinition
                 )
 
-                # Verify v0.2.5 FiringMode & WeaponType recoil stripping + zero TraceExtent
+                # Verify firing-mode trace and weapon recoil settings.
                 for efm in state.STATE.element_to_firing_mode.values():
                     self.assertEqual(efm.TraceExtent.X, 0.0)
                     self.assertEqual(efm.TraceExtent.Y, 0.0)
@@ -1702,7 +1702,7 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 cleaver = world.ground_pickups[-1].Inventory
                 world.backpack.extend([sabre, phaseblade, cleaver])
 
-                # 4. Combat v0.2.6: `InstantFire` PRE + `Bladed_Melee` on `WeaponAction` + `CalcWeaponFire` + `Behavior_CauseDamage`
+                # 4. Primary melee: `InstantFire`, `Bladed_Melee`, `CalcWeaponFire`, and `Behavior_CauseDamage`.
                 world.set_enemies(
                     [
                         (210.0, 0.0, 64.0, False, "Pawn_TargetDummy_0"),    # Sanctuary Target Dummy!
@@ -2032,7 +2032,7 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                         vanilla_wpn, None, None, lambda *a: zoom_func_calls.append(a)
                     )
                 )
-                # RMB is now spent on the manufacturer secondary attack: a Jakobs Sabre guards.
+                # RMB dispatches the manufacturer secondary attack: a Jakobs Sabre guards.
                 self.assertTrue(combat.MELEE_SECONDARY_ATTACK_ENABLED)
                 secondary_attacks.reset_secondary_state()
                 self.assertTrue(
@@ -2070,17 +2070,15 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 for path, cam_args in calls:
                     self.assertIn("Melee", path)
                     scale, rate, blend_in, blend_out = cam_args[0], cam_args[1], cam_args[2], cam_args[3]
-                    # The opening motion must actually ramp in. 0.10s read as an instant flick while the
-                    # 0.24s fade-out looked smooth, i.e. it eased out but never in.
+                    # The blend-in is long enough to smooth the opening motion.
                     self.assertGreaterEqual(blend_in, 0.25, f"blend-in {blend_in}s is too abrupt")
                     self.assertGreaterEqual(blend_out, blend_in * 0.9, "fade-out must match the ease-in")
-                    # Playback below 1.0x stretches the anim's own opening spike so it cannot flick
+                    # Slow playback softens the camera animation's opening impulse.
                     self.assertLessEqual(rate, 0.70, f"camera shake rate {rate} is too fast")
                     self.assertLessEqual(scale, 0.05, f"camera shake scale {scale} too strong")
                 default_scale = calls[0][1][0]
 
-                # The slider is rescaled: the 50% default is exactly what the old curve's 10% felt like,
-                # 100% is twice that, and 150% is three times it.
+                # 50%, 100%, and 150% produce 1x, 2x, and 3x the authored amplitude.
                 self.assertAlmostEqual(combat.CAMERA_SHAKE_SLIDER_GAIN, 0.2)
                 self.assertAlmostEqual(state.STATE.camera_shake_scale, 0.5)
                 state.STATE.camera_shake_scale = 1.0
@@ -2223,8 +2221,7 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 self.assertFalse(secondary_attacks.is_guarding())
                 self.assertGreater(secondary_attacks.guard_cooldown_remaining(), 0.0)
 
-                # A weak incoming poke is still parried back at the BLADE's critical scale, not as
-                # 2x of the poke (the old 112-card / "50 something" bug).
+                # Reflected damage uses the equipped blade's critical damage.
                 secondary_attacks._GUARD_COOLDOWN_UNTIL = 0.0
                 self.assertTrue(secondary_attacks.try_begin_guard(sabre, sabre_inst_g, sabre_card_g))
                 weak_args = FakeWrappedStruct(
@@ -2400,8 +2397,7 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 self.assertAlmostEqual(
                     world.caused_damages[0]["DamageAmount"], float(expected_throw.final_hit_damage)
                 )
-                # v0.4.4: a throw is a normal-strength hit (it used to be 200% and out-damage the
-                # whole kit), so its damage must equal the plain LMB hit exactly.
+                # The thrown blade deals the same direct damage as a primary hit.
                 self.assertEqual(
                     expected_throw.final_hit_damage,
                     compute_attack_damage(bl_card, throw_ctx).final_hit_damage,
@@ -2412,7 +2408,7 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                     world.caused_radius_damages[0]["DamageAmount"],
                     float(expected_throw.splash_hit_damage),
                 )
-                # ...and the blade is now rebounding, still locking LMB until it is caught
+                # The blade rebounds on impact and locks LMB until it is caught.
                 self.assertEqual(secondary_attacks._THROW.phase, "return")
                 self.assertTrue(secondary_attacks.is_weapon_thrown(cleaver))
                 self.assertTrue(secondary_vfx.has_thrown_blade_visual())
@@ -2512,7 +2508,7 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
 
                 # 4I-5. Non-solid engine actors (and the thrower themselves) must never stop the
                 #       blade: BL2's weapon trace reports volumes/triggers and the player's own
-                #       arms mesh, which used to end a throw in mid-air.
+                #       arms mesh, which is not a valid collision target.
                 world.pawn.Weapon = cleaver
                 self.assertTrue(secondary_attacks.begin_throw(cleaver, bl_inst, bl_card))
                 try:
@@ -2666,13 +2662,14 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                     secondary_attacks.on_melee_weapon_client_stop_zoom_pre, runtime_mod.ALL_HOOKS
                 )
                 runtime_mod._last_restored_pawn_key = "mock.pawn"
-                runtime_mod._last_frame_tick_at = 0.0
                 ticks_before = runtime_mod._tick_counter
-                runtime_mod.hook_player_tick(None, None, None, None)
-                self.assertEqual(runtime_mod._tick_counter, ticks_before + 1)
-                # Both tick hooks firing in the same frame must only run the body once.
-                runtime_mod.hook_viewport_tick(None, None, None, None)
-                self.assertEqual(runtime_mod._tick_counter, ticks_before + 1)
+                with mock.patch.object(runtime_mod.time, "monotonic", return_value=1.0):
+                    runtime_mod._last_frame_tick_at = 0.0
+                    runtime_mod.hook_player_tick(None, None, None, None)
+                    self.assertEqual(runtime_mod._tick_counter, ticks_before + 1)
+                    # Both tick hooks at one timestamp must only run the body once.
+                    runtime_mod.hook_viewport_tick(None, None, None, None)
+                    self.assertEqual(runtime_mod._tick_counter, ticks_before + 1)
 
                 # 4N. The map-restore pass keys the pawn by path name, not wrapper identity: an
                 #     `id()` that churns re-ran the whole restore (and reset the secondary state,
@@ -2709,7 +2706,7 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                     runtime_mod.hook_player_tick(None, None, None, None)
                     self.assertFalse(
                         secondary_attacks.is_any_weapon_thrown(),
-                        "a new pawn/map epoch must cancel the old throw before restore",
+                        "a pawn or map change must cancel the active throw before restore",
                     )
                     self.assertFalse(secondary_vfx.has_thrown_blade_visual())
                 finally:
@@ -2860,7 +2857,7 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
             with mock.patch.dict(sys.modules, sdk_mods):
                 import melee_arsenal  # type: ignore[import-not-found]
                 from melee_arsenal.core.enums import Rarity
-                from melee_arsenal.core.schemas import MeleeWeaponInstance, MeleeWeaponParts
+                from melee_arsenal.core.parts.weapon import MeleeWeaponInstance, MeleeWeaponParts
                 from melee_arsenal.runtime import commands, custom_assets, definitions, resolver, state
 
                 self.assertEqual(melee_arsenal.__version__, "0.4.5")
@@ -2885,18 +2882,15 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                     self.assertAlmostEqual(mat_obj.Rarity.BaseValueScaleConstant, 1.0)
 
                 # Verify equal-size UPK restage detection compares 129B UPK summary/GUID header
-                p_old = Path(tmp) / "old.upk"
-                p_new = Path(tmp) / "new.upk"
-                p_old.write_bytes(b"A" * 200)
-                p_new.write_bytes(b"A" * 45 + b"B" * 16 + b"A" * 139)
-                self.assertEqual(p_old.stat().st_size, p_new.stat().st_size)
-                self.assertTrue(custom_assets._upk_needs_restage(p_new, p_old))
-                self.assertFalse(custom_assets._upk_needs_restage(p_new, p_new))
+                stored_upk = Path(tmp) / "stored.upk"
+                candidate_upk = Path(tmp) / "candidate.upk"
+                stored_upk.write_bytes(b"A" * 200)
+                candidate_upk.write_bytes(b"A" * 45 + b"B" * 16 + b"A" * 139)
+                self.assertEqual(stored_upk.stat().st_size, candidate_upk.stat().st_size)
+                self.assertTrue(custom_assets._upk_needs_restage(candidate_upk, stored_upk))
+                self.assertFalse(custom_assets._upk_needs_restage(candidate_upk, candidate_upk))
 
-                # v0.3.1 Regression 1: Verify `Acc_None` / `Elem_None` vs visible donor separation!
-                # Even though `PLC_Common` ONLY contains `Pistol_Accessory_None` (`bHiddenNoMesh=True`),
-                # ZERO physical accessories (or `__s1..__s4` twins) and ZERO active elements (`Elem_Explosive`!)
-                # may inherit `bHiddenNoMesh=True`!
+                # Only the None accessory and element definitions are hidden; physical parts stay visible.
                 self.assertTrue(state.STATE.accessory_parts["Acc_None"].bHiddenNoMesh)
                 for acc_id, apart in state.STATE.accessory_parts.items():
                     if acc_id != "Acc_None":
@@ -2918,7 +2912,7 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                         self.assertGreater(len(acc_parts_in_plc), 0)
                         self.assertNotIn(none_acc_obj, acc_parts_in_plc)
 
-                # v0.3.2 Regression 2: Verify unsquished (+26 deg Yaw) & full-slot horizontal UI preview settings!
+                # Verify the horizontal item preview and full-slot framing settings.
                 for wt_obj in state.STATE.maker_to_wt.values():
                     self.assertEqual(wt_obj.UIMeshRotation.Roll, -12015)
                     self.assertEqual(wt_obj.UIMeshRotation.Yaw, 4733)
@@ -3166,7 +3160,7 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 ai_pool = world.find_object("ItemPoolDefinition", "GD_ItempoolsEnemyUse.Weapons.Pool_Weapons_Pistols_EnemyUse")
                 self.assertEqual(len(ai_pool.BalancedItems), 1)
 
-                # 4. Simulate a SparkLevelPatchEntry / BLCMM hotfix wiping `Pool_Weapons_All_01_Common` after menu init!
+                # Simulate a hotfix removing Melee Arsenal from a vanilla pool after menu initialization.
                 all_common = world.find_object("ItemPoolDefinition", "GD_Itempools.WeaponPools.Pool_Weapons_All_01_Common")
                 all_common.BalancedItems = [all_common.BalancedItems[0]]  # Wiped back to vanilla!
                 self.assertEqual(len(all_common.BalancedItems), 1)

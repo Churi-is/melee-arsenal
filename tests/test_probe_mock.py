@@ -1,10 +1,9 @@
-"""Offline CPython syntax & mock-execution test for `sdk_mods/melee_arsenal_probe` (v0.3.0)."""
+"""Offline syntax and mock-execution tests for `sdk_mods/melee_arsenal_probe`."""
 from __future__ import annotations
 
 import base64
 import ctypes
 import ctypes.util
-import io
 import json
 import py_compile
 import struct
@@ -14,7 +13,6 @@ import types
 import unittest
 from pathlib import Path
 from unittest import mock
-import zipfile
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 PROBE_INIT = ROOT_DIR / "sdk_mods" / "melee_arsenal_probe" / "__init__.py"
@@ -63,48 +61,42 @@ def _wrap_lzo_startup_upk(raw_upk: bytes, block_size: int = 0x20000) -> bytes:
     return bytes(out)
 
 
-class TestProbeV3AssetAndDonorSuite(unittest.TestCase):
+class TestProbeAssetAndDonorSuite(unittest.TestCase):
     def test_probe_modules_compile_cleanly(self) -> None:
         py_compile.compile(str(PROBE_INIT), doraise=True)
         py_compile.compile(str(PROBE_READER), doraise=True)
 
-    def test_probe_v3_executes_all_sections_and_extracts_compressed_startup_donor(self) -> None:
-        ribs_p1 = ROOT_DIR / "uploads" / "x01.txt"
-        ribs_p2 = ROOT_DIR / "uploads" / "x02.txt"
-        if ribs_p1.exists() and ribs_p2.exists():
-            zf = zipfile.ZipFile(io.BytesIO(ribs_p1.read_bytes() + ribs_p2.read_bytes()))
-            raw_skel_upk = zf.read("WillowGame/CookedPCConsole/MaliwanBarrelMeshes.upk")
-        else:
-            from tools.inkblade_upk.archive import UE3PackageArchive
-            from tools.inkblade_upk.codec import (
-                CustomFragmentInput,
-                SkeletalMeshBinary,
-                replace_with_custom_fragments,
-            )
+    def test_probe_executes_sections_and_extracts_compressed_startup_donor(self) -> None:
+        from tools.inkblade_upk.archive import UE3PackageArchive
+        from tools.inkblade_upk.codec import (
+            CustomFragmentInput,
+            SkeletalMeshBinary,
+            replace_with_custom_fragments,
+        )
 
-            donor_path = ROOT_DIR / "tools" / "inkblade_upk" / "donors" / "weap_pistol_donor.upk"
-            with UE3PackageArchive(donor_path) as ar:
-                sk = SkeletalMeshBinary.from_archive_export(ar, ar.exports[0])
-            positions = [(float(i % 7), -float(i), float(i % 5)) for i in range(160)]
-            normals = [(0.0, 0.0, 1.0)] * 160
-            tangents = [(1.0, 0.0, 0.0, 1.0)] * 160
-            uvs = [(0.5, 0.5)] * 160
-            triangles = [(i, i + 1, i + 2) for i in range(150)]
-            replace_with_custom_fragments(
-                sk,
-                [
-                    CustomFragmentInput(
-                        name="SyntheticGestalt",
-                        positions=positions,
-                        normals=normals,
-                        tangents=tangents,
-                        uvs=uvs,
-                        triangles=triangles,
-                        ref_bone_index=1,
-                    )
-                ],
-            )
-            raw_skel_upk = sk.to_package_bytes("SG_TestMesh")
+        donor_path = ROOT_DIR / "tools" / "inkblade_upk" / "donors" / "weap_pistol_donor.upk"
+        with UE3PackageArchive(donor_path) as ar:
+            sk = SkeletalMeshBinary.from_archive_export(ar, ar.exports[0])
+        positions = [(float(i % 7), -float(i), float(i % 5)) for i in range(160)]
+        normals = [(0.0, 0.0, 1.0)] * 160
+        tangents = [(1.0, 0.0, 0.0, 1.0)] * 160
+        uvs = [(0.5, 0.5)] * 160
+        triangles = [(i, i + 1, i + 2) for i in range(150)]
+        replace_with_custom_fragments(
+            sk,
+            [
+                CustomFragmentInput(
+                    name="SyntheticGestalt",
+                    positions=positions,
+                    normals=normals,
+                    tangents=tangents,
+                    uvs=uvs,
+                    triangles=triangles,
+                    ref_bone_index=1,
+                )
+            ],
+        )
+        raw_skel_upk = sk.to_package_bytes("SG_TestMesh")
         compressed_startup = _wrap_lzo_startup_upk(raw_skel_upk)
 
         def vec(x=0.0, y=0.0, z=0.0):

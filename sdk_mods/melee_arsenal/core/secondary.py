@@ -32,7 +32,6 @@ from .parts.manufacturers import (
     GUARD_COOLDOWN_BY_MANUFACTURER,
     GUARD_COOLDOWN_DEFAULT_SEC,
     MANUFACTURERS,
-    secondary_attack_for as secondary_attack_for,  # re-export: identity lives with the manufacturer data
 )
 from .parts.weapon import MeleeWeaponInstance
 
@@ -337,24 +336,10 @@ def compute_parry_reflect_damage(
     crit_bonus_pct: float = 0.0,
     blade_crit_damage: float = 0.0,
 ) -> int:
-    """Damage reflected by a perfect parry: a forced critical hit at the blade's own scale.
-
-    The old formula scaled only the *incoming* hit (`incoming * 2.0 * crit bonus`), so parrying a
-    weak melee poke with a 112-damage blade reflected a number in the 50s even though the mod
-    advertised a critical hit. The reflect now takes the larger of:
-
-      * the incoming melee blow, forced to critical, and
-      * the blade's own rolled critical hit (`compute_attack_damage(..., is_crit=True)`),
-
-    so a parry always reads as a real critical hit from the weapon you are holding.
-    """
+    """Return the greater of the incoming forced critical and the blade's own critical damage."""
     incoming = max(0.0, float(incoming_damage))
     blade_crit = max(0.0, float(blade_crit_damage))
     if incoming <= 0.0 and blade_crit <= 0.0:
         return 0
     crit_mult = PARRY_REFLECT_BASE_CRIT_MULT * (1.0 + max(0.0, float(crit_bonus_pct)) / 100.0)
     return max(1, int(round(max(incoming * crit_mult, blade_crit))))
-
-
-# `secondary_attack_for()` is defined in `core/parts/manufacturers.py` next to the
-# archetype data and re-exported from here for backwards compatibility.

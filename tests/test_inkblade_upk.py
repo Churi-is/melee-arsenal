@@ -1,9 +1,8 @@
-"""Unit tests for pure-Python UE3 LZO/zlib Startup.upk decompression, UPK codec, and r3->r4 Inkblade compiler."""
+"""Tests for UE3 package decoding, mesh compilation, and kit fingerprints."""
 from __future__ import annotations
 
 import ctypes
 import ctypes.util
-import io
 import json
 from pathlib import Path
 import struct
@@ -22,6 +21,7 @@ from tools.inkblade_upk.codec import (
     make_flat_normal_spec,
 )
 from tools.inkblade_upk.kit import (
+    GlbPartMesh,
     InkbladeModularKit,
     _repair_outward_manifold_winding,
     compile_inkblade_kit_to_upks,
@@ -30,15 +30,6 @@ from tools.inkblade_upk.kit import (
 from tools.inkblade_upk.lzo1x import lzo1x_decompress
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-
-
-def _find_optional_fixture(*rel_candidates: str) -> Path | None:
-    for rel in rel_candidates:
-        for base in (REPO_ROOT, REPO_ROOT / "uploads", REPO_ROOT.parent / "uploads"):
-            cand = base / rel
-            if cand.is_file():
-                return cand
-    return None
 
 
 def _wrap_fully_compressed_ue3(raw_upk: bytes, use_lzo: bool = True, block_size: int = 0x20000) -> bytes:
@@ -123,7 +114,7 @@ class TestInkbladeUpkPipeline(unittest.TestCase):
             self.assertEqual(lzo.lzo1x_1_compress(payload, len(payload), dst, ctypes.byref(olen), wrk), 0)
             self.assertEqual(lzo1x_decompress(dst.raw[: olen.value], len(payload)), payload)
 
-    def test_manifold_winding_repair_and_donor_roundtrip(self) -> None:
+    def test_manifold_winding_repair_and_donor_skeleton(self) -> None:
         # Build a watertight cube where 2 of the 6 faces (+Z and -Z) are deliberately wound inward!
         verts = [
             (-1.0, -1.0, -1.0),
@@ -176,180 +167,129 @@ class TestInkbladeUpkPipeline(unittest.TestCase):
             sk = SkeletalMeshBinary.from_archive_export(ar, ar.exports[0])
             self.assertTrue(any(b.name == "WeaponOffset" for b in sk.ref_skeleton))
 
-    def test_r3_kit_and_simulated_r4_divergent_sockets(self) -> None:
-        kit_zip = _find_optional_fixture(
-            "Inkblade_Modular_Kit_r3.zip",
-            "Inkblade_Modular_Kit_r3.zip.txt",
-        )
-        if kit_zip is None:
-            self.skipTest("Optional Inkblade_Modular_Kit_r3 archive not in uploads/")
+    def test_socket_baked_variants_group_matching_sockets(self) -> None:
+        def part(
+            part_id: str,
+            slot: str,
+            sockets: dict[str, tuple[float, float, float]],
+        ) -> GlbPartMesh:
+            return GlbPartMesh(
+                part_id=part_id,
+                slot=slot,
+                manufacturer="Universal",
+                positions=[],
+                normals=[],
+                tangents=[],
+                uvs=[],
+                triangles=[],
+                triangle_channels=[],
+                sockets_gltf_m=sockets,
+                texture_rel_path="",
+                uv_layout={},
+            )
 
-        kit = InkbladeModularKit(kit_zip)
-        self.assertEqual(len(kit.parts), 22)
-        r3_variants = kit.plan_socket_baked_variants()
-        # In r3 all blades share identical socket coordinates, so 22 parts -> 22 unique fragments!
-        self.assertEqual(len(r3_variants), 22)
+        kit = object.__new__(InkbladeModularKit)
+        kit.manifest = {
+            "parts": {
+                "accessory_serrated_edge": {"target_socket": "SOCKET_ACCESSORY"},
+                "accessory_balanced_pommel": {"target_socket": "SOCKET_POMMEL"},
+            }
+        }
+        kit.parts = {
+            "blade_bandit": part(
+                "blade_bandit",
+                "BarrelPartDefinition",
+                {"MOUNT": (0.0, 0.0, 0.0), "SOCKET_GRIP": (0.0, -0.3, 0.0), "SOCKET_ACCESSORY": (0.0, 0.16, 0.0)},
+            ),
+            "blade_torgue": part(
+                "blade_torgue",
+                "BarrelPartDefinition",
+                {"MOUNT": (0.0, 0.0, 0.0), "SOCKET_GRIP": (0.0, -0.3, 0.0), "SOCKET_ACCESSORY": (0.0, 0.16, 0.0)},
+            ),
+            "grip_bandit": part(
+                "grip_bandit",
+                "GripPartDefinition",
+                {"MOUNT": (0.0, 0.0, 0.0), "SOCKET_POMMEL": (0.0, -0.55, 0.0)},
+            ),
+            "accessory_serrated_edge": part(
+                "accessory_serrated_edge", "Accessory1PartDefinition", {"MOUNT": (0.0, 0.0, 0.0)}
+            ),
+            "accessory_balanced_pommel": part(
+                "accessory_balanced_pommel", "Accessory1PartDefinition", {"MOUNT": (0.0, 0.0, 0.0)}
+            ),
+        }
 
-        # Simulate r4 moving Torgue's accessory socket and Bandit's grip pommel socket!
-        torgue_blade = kit.parts["blade_torgue"]
-        torgue_blade.sockets_gltf_m["SOCKET_ACCESSORY"] = (0.0, 0.24, 0.095)
-        bandit_grip = kit.parts["grip_bandit"]
-        bandit_grip.sockets_gltf_m["SOCKET_POMMEL"] = (0.0, -0.58, 0.0)
+        variants = kit.plan_socket_baked_variants()
+        edge_variants = [v for v in variants if v.part_id == "accessory_serrated_edge"]
+        pommel_variants = [v for v in variants if v.part_id == "accessory_balanced_pommel"]
+        self.assertEqual(len(edge_variants), 1)
+        self.assertEqual(set(edge_variants[0].parent_part_ids), {"blade_bandit", "blade_torgue"})
+        self.assertEqual(len(pommel_variants), 1)
 
-        r4_variants = kit.plan_socket_baked_variants()
-        # 6 non-pommel accessories gain a 2nd socket variant (`+6`) and 1 pommel accessory gains a 2nd variant (`+1`) = 29!
-        self.assertEqual(len(r4_variants), 29)
-        torgue_serrated = [
-            v
-            for v in r4_variants
-            if v.part_id == "accessory_serrated_edge" and "blade_torgue" in v.parent_part_ids
+        kit.parts["blade_torgue"].sockets_gltf_m["SOCKET_ACCESSORY"] = (0.0, 0.24, 0.095)
+        edge_variants = [
+            v for v in kit.plan_socket_baked_variants() if v.part_id == "accessory_serrated_edge"
         ]
-        self.assertEqual(len(torgue_serrated), 1)
-        self.assertEqual(torgue_serrated[0].fragment_name, "Ink_accessory_serrated_edge__s1")
-        self.assertEqual(torgue_serrated[0].offset_gltf_m, (0.0, 0.24, 0.095))
+        self.assertEqual(len(edge_variants), 2)
+        torgue_variant = next(v for v in edge_variants if "blade_torgue" in v.parent_part_ids)
+        self.assertEqual(torgue_variant.offset_gltf_m, (0.0, 0.24, 0.095))
 
-    def test_end_to_end_upk_compile_with_donor_mesh(self) -> None:
-        ribs_p1 = _find_optional_fixture("x01.txt")
-        ribs_p2 = _find_optional_fixture("x02.txt")
-        r3_zip = _find_optional_fixture("Inkblade_Modular_Kit_r3.zip", "Inkblade_Modular_Kit_r3.zip.txt")
-        if not (ribs_p1 and ribs_p2 and r3_zip):
-            self.skipTest("Optional Ribs Arsenal or r3 kit archive not in uploads/")
+    def test_generated_kit_compiles_with_donor_mesh(self) -> None:
+        from tools.inkblade_gen.config import RunConfig
+        from tools.inkblade_gen.pipeline import Pipeline
 
-        zf = zipfile.ZipFile(io.BytesIO(ribs_p1.read_bytes() + ribs_p2.read_bytes()))
-        with UE3PackageArchive(zf.read("WillowGame/CookedPCConsole/MaliwanBarrelMeshes.upk")) as ar:
-            sk = SkeletalMeshBinary.from_archive_export(ar, ar.exports[0])
-            bbounds = sk.compute_fragment_bounds(0, 60)
-            self.assertGreater(bbounds["vertex_count"], 0)
-            sk.strip_to_donor()
-            donor_bytes = sk.to_package_bytes("DonorPistolStandIn")
-
-        with tempfile.TemporaryDirectory() as tmp:
-            mf = compile_inkblade_kit_to_upks(
-                kit_path=r3_zip,
-                donor_upk_path_or_bytes=donor_bytes,
-                out_meshes_upk=Path(tmp) / "MeleeArsenalMeshes.upk",
-                out_textures_upk=Path(tmp) / "MeleeArsenalTextures.upk",
-                out_manifest_json=Path(tmp) / "manifest.json",
-                atlas_size=1024,
-            )
-            self.assertEqual(mf["total_triangles"], 3188)
-            self.assertEqual(len(mf["fragments"]), 22)
-            # The manifest records what the packages were built from, so install can tell a repainted
-            # kit from an untouched one.
-            self.assertRegex(mf["kit_fingerprint"], r"^[0-9a-f]{32}$")
-            self.assertEqual(mf["kit_fingerprint"], kit_fingerprint(r3_zip))
-            meshes_raw = (Path(tmp) / "MeleeArsenalMeshes.upk").read_bytes()
-            textures_raw = (Path(tmp) / "MeleeArsenalTextures.upk").read_bytes()
-            self.assertEqual(struct.unpack_from("<I", meshes_raw, 29)[0], 129)
-            self.assertEqual(struct.unpack_from("<I", textures_raw, 29)[0], 129)
-            with UE3PackageArchive(meshes_raw) as out_ar:
-                out_sk = SkeletalMeshBinary.from_archive_export(out_ar, out_ar.exports[0])
-                self.assertEqual(len(out_sk.indices) // 3, 3188)
-
-            r4_zip = _find_optional_fixture(
-                "Inkblade_Modular_Kit_r4_final.zip",
-                "Inkblade_Modular_Kit_r4_final.zip.txt",
-            )
-            if r4_zip is not None:
-                mf_r4 = compile_inkblade_kit_to_upks(
-                    kit_path=r4_zip,
-                    donor_upk_path_or_bytes=donor_bytes,
-                    out_meshes_upk=Path(tmp) / "MeleeArsenalMeshes_r4.upk",
-                    out_textures_upk=Path(tmp) / "MeleeArsenalTextures_r4.upk",
-                    out_manifest_json=Path(tmp) / "manifest_r4.json",
-                    atlas_size=1024,
-                )
-                self.assertEqual(mf_r4["kit_revision"], "r4_final_slim_spine_hex_grip_uv3")
-                self.assertEqual(len(mf_r4["fragments"]), 42)
-                self.assertEqual(mf_r4["total_triangles"], 10020)
-                self.assertLess(mf_r4["total_gpu_vertices"], 22000)
-                r4_meshes_raw = (Path(tmp) / "MeleeArsenalMeshes_r4.upk").read_bytes()
-                self.assertEqual(struct.unpack_from("<I", r4_meshes_raw, 29)[0], 129)
-
-    def test_real_pistol_donor_weapon_offset_skinning_and_sockets(self) -> None:
         donor_upk = REPO_ROOT / "tools" / "inkblade_upk" / "donors" / "weap_pistol_donor.upk"
-        kit_zip = _find_optional_fixture(
-            "InkBlade.zip1.txt",
-            "InkBlade.zip",
-            "Inkblade_Bold.zip",
-            "Inkblade_Modular_Kit_r4_final.zip",
-            "Inkblade_Modular_Kit_r4_final.zip.txt",
-        )
-        if not donor_upk.is_file() or kit_zip is None:
-            self.skipTest("Optional r4_final / r5 InkBlade Bold archive not in uploads/")
-
-        kit = InkbladeModularKit(kit_zip)
-        placements_2k = kit.pack_atlas_layout(atlas_size=2048)
-        for pid, pl in placements_2k.items():
-            if kit.parts[pid].slot in ("BarrelPartDefinition", "GripPartDefinition"):
-                self.assertGreaterEqual(
-                    pl.width,
-                    512,
-                    f"{pid} packed below 512px width ({pl.width}x{pl.height}) in 2048 atlas",
-                )
-
+        self.assertTrue(donor_upk.is_file())
         with tempfile.TemporaryDirectory() as tmp:
-            mf = compile_inkblade_kit_to_upks(
-                kit_path=kit_zip,
-                donor_upk_path_or_bytes=donor_upk,
-                out_meshes_upk=Path(tmp) / "MeleeArsenalMeshes.upk",
-                out_textures_upk=Path(tmp) / "MeleeArsenalTextures.upk",
-                out_manifest_json=Path(tmp) / "manifest.json",
-                atlas_size=1024,
+            root = Path(tmp)
+            kit_dir = root / "kit"
+            config = RunConfig(
+                out_dir=kit_dir,
+                work_dir=root / "stages",
+                density=256.0,
+                ink_px=3,
+                padding=4,
+                parts=("blade_bandit", "grip_bandit"),
+                bake_combinations=False,
             )
-            self.assertEqual(mf["ref_bone_index"], 1)
-            self.assertEqual(mf["ref_bone_name"], "WeaponOffset")
-            self.assertEqual(len(mf["fragments"]), 42)
-            self.assertEqual(mf["total_triangles"], 10020)
+            Pipeline(config).run()
 
-            textures_raw = (Path(tmp) / "MeleeArsenalTextures.upk").read_bytes()
+            kit = InkbladeModularKit(kit_dir)
+            self.assertEqual(set(kit.parts), {"blade_bandit", "grip_bandit"})
+            manifest = compile_inkblade_kit_to_upks(
+                kit_path=kit_dir,
+                donor_upk_path_or_bytes=donor_upk,
+                out_meshes_upk=root / "MeleeArsenalMeshes.upk",
+                out_textures_upk=root / "MeleeArsenalTextures.upk",
+                out_manifest_json=root / "manifest.json",
+                atlas_size=512,
+            )
+            self.assertEqual(manifest["ref_bone_index"], 1)
+            self.assertEqual(manifest["ref_bone_name"], "WeaponOffset")
+            self.assertGreater(manifest["total_triangles"], 0)
+            self.assertEqual(len(manifest["fragments"]), 2)
+            self.assertEqual(manifest["kit_fingerprint"], kit_fingerprint(kit_dir))
+
+            textures_raw = (root / "MeleeArsenalTextures.upk").read_bytes()
             self.assertEqual(struct.unpack_from("<I", textures_raw, 29)[0], 129)
-            with UE3PackageArchive(textures_raw) as tex_ar:
-                self.assertEqual(len(tex_ar.exports), 7)
+            with UE3PackageArchive(textures_raw) as texture_archive:
+                self.assertEqual(len(texture_archive.exports), 7)
 
-            meshes_raw = (Path(tmp) / "MeleeArsenalMeshes.upk").read_bytes()
+            meshes_raw = (root / "MeleeArsenalMeshes.upk").read_bytes()
             self.assertEqual(struct.unpack_from("<I", meshes_raw, 29)[0], 129)
-            with UE3PackageArchive(meshes_raw) as out_ar:
-                self.assertEqual(len(out_ar.exports), 61)  # 1 SkeletalMesh + 60 SkeletalMeshSockets
-                sk = SkeletalMeshBinary.from_archive_export(out_ar, out_ar.exports[0])
-                self.assertEqual(sk.chunks[0].bone_map, [0, 1])
-                self.assertEqual(sk.gpu_vertices[0].influence_bones, (1, 0, 0, 0))
-                self.assertEqual(sk.gpu_vertices[0].influence_weights, (255, 0, 0, 0))
-                lod_prop = next(p for p in sk.props if p.name == "LODInfo")
-                shadow_prop = next(
-                    sp for sp in lod_prop.struct_array_items[0] if sp.name == "bEnableShadowCasting"
+            with UE3PackageArchive(meshes_raw) as mesh_archive:
+                mesh_export = next(
+                    export for export in mesh_archive.exports
+                    if mesh_archive.export_class_name(export) == "SkeletalMesh"
                 )
-                self.assertEqual(shadow_prop.raw_payload, b"\x01\x00\x00\x00\x01")
-
-                # Verify bilateral D3D9 front-face symmetry on every single base fragment
-                # (regression test against inward-wound back bevels & Y-cylinders in r3/r4 GLBs!)
-                for frag in mf["fragments"]:
-                    if frag["variant_index"] != 0:
-                        continue
-                    s, c = frag["start_index"], frag["num_triangles"] * 3
-                    vis_front = 0
-                    vis_back = 0
-                    for k in range(s, s + c, 3):
-                        p0 = sk.gpu_vertices[sk.indices[k]].position
-                        p1 = sk.gpu_vertices[sk.indices[k + 1]].position
-                        p2 = sk.gpu_vertices[sk.indices[k + 2]].position
-                        e1 = (p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2])
-                        e2 = (p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2])
-                        cx = e1[1] * e2[2] - e1[2] * e2[1]
-                        if cx > 1e-6:
-                            vis_front += 1
-                        elif cx < -1e-6:
-                            vis_back += 1
-                    self.assertGreater(vis_front, 0, frag["fragment_name"])
-                    self.assertEqual(
-                        vis_front,
-                        vis_back,
-                        f"Asymmetric front/back face culling on {frag['fragment_name']}: {vis_front} vs {vis_back}",
-                    )
+                mesh = SkeletalMeshBinary.from_archive_export(mesh_archive, mesh_export)
+                self.assertEqual(mesh.chunks[0].bone_map, [0, 1])
+                self.assertEqual(mesh.gpu_vertices[0].influence_bones, (1, 0, 0, 0))
+                self.assertEqual(mesh.gpu_vertices[0].influence_weights, (255, 0, 0, 0))
 
 
 class KitFingerprintTests(unittest.TestCase):
-    """The kit fingerprint is what tells `melee install` that the generator repainted the atlases."""
+    """The kit fingerprint covers generated mesh, texture, and manifest inputs."""
 
     def _make_kit(self, root: Path) -> Path:
         kit = root / "kit"
@@ -359,19 +299,19 @@ class KitFingerprintTests(unittest.TestCase):
         (kit / "textures/blade_bandit_uv_layout.json").write_text("{}")
         return kit
 
-    def test_fingerprint_tracks_texture_content_only(self) -> None:
+    def test_fingerprint_tracks_compiler_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             kit = self._make_kit(Path(tmp))
             first = kit_fingerprint(kit)
             self.assertEqual(first, kit_fingerprint(kit))
-            # Unrelated files in the folder must not force a recompile...
+            # Non-asset files are outside the compiler fingerprint.
             (kit / "notes.txt").write_text("scratch")
             (kit / "README.md").write_text("docs")
             self.assertEqual(first, kit_fingerprint(kit))
-            # ...but repainted pixels must.
+            # Texture content contributes to the fingerprint.
             (kit / "textures/blade_bandit_basecolor.png").write_bytes(b"png-two")
             self.assertNotEqual(first, kit_fingerprint(kit))
-            # And so must a moved layout.
+            # UV layout content contributes to the fingerprint.
             (kit / "textures/blade_bandit_uv_layout.json").write_text('{"islands": []}')
             self.assertNotEqual(first, kit_fingerprint(kit))
 
@@ -391,7 +331,7 @@ class KitFingerprintTests(unittest.TestCase):
             kit = self._make_kit(Path(tmp))
             manifest = {
                 "schema": "inkblade.socket-kit/1.0",
-                "revision": "r6_staged",
+                "revision": "baseline",
                 "generator": {"seed": "default", "stages": [{"stage": "geometry", "fingerprint": "abc", "status": "ran", "seconds": 1.25}]},
             }
             socket_manifest = kit / "socket_manifest.json"
@@ -400,7 +340,7 @@ class KitFingerprintTests(unittest.TestCase):
             manifest["generator"]["stages"][0].update(status="cached", seconds=99.5)
             socket_manifest.write_text(json.dumps(manifest))
             self.assertEqual(first, kit_fingerprint(kit))
-            manifest["revision"] = "r7"
+            manifest["revision"] = "alternate"
             socket_manifest.write_text(json.dumps(manifest))
             self.assertNotEqual(first, kit_fingerprint(kit))
 

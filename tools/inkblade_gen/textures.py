@@ -40,8 +40,7 @@ def stage_rng(part_id: str, salt: str) -> random.Random:
 def role_colours(part: Part, layout: PartLayout, cfg_seed: str) -> dict[int, RGB]:
     """Resolve the flat base colour of every owned island.
 
-    Tags address the manufacturer palette exactly like R3 did (`paint` / `metal` / `dark` / `trim` /
-    `edge` / `accent`), with the per-island brightness jitter and the 25%-toward-white `edge` rule.
+    Island tags select manufacturer palette roles; edge islands are blended 25% toward white.
     """
     palette = PALETTE.get(part.manufacturer, PALETTE["Universal"])
     element_hex = str(part.meta.get("element") or "")
@@ -127,7 +126,7 @@ def _unit_field(size: tuple[int, int], cells: float, rng: random.Random) -> Imag
 
 
 def _signed_field(size: tuple[int, int], rng: random.Random) -> Image.Image:
-    """R3's three-octave mottle: 5.2% broad wash + 3.0% broken mid + 0.7% fine tooth."""
+    """Three-octave mottle: 5.2% broad wash, 3.0% broken mid, and 0.7% fine tooth."""
 
     def scaled(field: Image.Image, weight: float) -> Image.Image:
         return field.point([max(0, min(255, int(round(128 + (v - 128) * weight)))) for v in range(256)])
@@ -174,7 +173,7 @@ def paint_flat_colours(
 
 
 # ---------------------------------------------------------------------------
-# Stage: mottling / deposits / wear (R3 painter's detail pass)
+# Stage: mottling, deposits, and wear
 # ---------------------------------------------------------------------------
 def paint_mottle(part: Part, layout: PartLayout, canvas: Image.Image) -> Image.Image:
     """Broad paint wash, deposits, scratches, chipped paint, gouges and micro ink marks."""
@@ -394,7 +393,7 @@ def paint_surface_detail(part: Part, layout: PartLayout, canvas: Image.Image) ->
 
 
 # ---------------------------------------------------------------------------
-# Stage: bold linework (R5 / Bold ink pass)
+# Stage: linework
 # ---------------------------------------------------------------------------
 def _polygon_area(poly: Sequence[Vec2]) -> float:
     area = 0.0
@@ -474,11 +473,7 @@ def _paint_face_ink(
 def linework_layers(
     part_id: str, layout: PartLayout, seed_salt: str = ""
 ) -> tuple[Image.Image, Image.Image]:
-    """The ink overlay as `(shade, ink)`: translucent shadow planes beneath, ink on top, both clipped.
-
-    Split out of `paint_linework` so the port can be compared layer-for-layer with the reference
-    implementation in the tests.
-    """
+    """Build the clipped shadow and ink overlays for one part."""
     width, height = layout.atlas_size
     shade = Image.new("RGBA", (width, height))
     ink = Image.new("RGBA", (width, height))

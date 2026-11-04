@@ -1,16 +1,6 @@
-"""Melee Arsenal — Phase 3 Custom Part Assets, Donor Mesh, Socket & Shader Probe (v0.3.1).
+"""In-game diagnostics for Melee Arsenal assets, donor meshes, sockets, and combat poses.
 
-Fixes the `v0.3.0` `LoadPackage("MeleeProbeTex")` crash (`FPackageFileSummary` was 121B instead of
-129B — missing the 8 zero bytes for `AdditionalPackagesToCook` + `TextureAllocations`, which caused
-UE3 to misread `NameTable[0]` as `AdditionalPackagesToCook.Num = 5`).
-
-Also adds `os.fsync` step-by-step progress logging (`reports/probe_progress.log`), eliminates any
-blind `load_package` calls on non-existent `.upk` names, and saves `melee_asset_probe_report.json` +
-`weap_pistol_donor.upk` to disk *before* running the `MeleeProbeTex.upk` smoke test (then updates the
-report immediately after).
-
-Output file to share back:
-  `<Borderlands 2>/sdk_mods/melee_arsenal_probe/reports/melee_asset_probe_report.json`
+Writes a report and stripped donor package under `reports/`.
 """
 from __future__ import annotations
 
@@ -246,7 +236,7 @@ def _probe_custom_upk_and_shader(cooked_dir: Path | None) -> dict[str, Any]:
 
         if cooked_dir is not None and BUNDLED_PROBE_TEX.exists():
             dst_upk = cooked_dir / "MeleeProbeTex.upk"
-            # Always overwrite if bytes differ (e.g. replacing v0.3.0's 121B-header file with v0.3.1's 129B file!)
+            # Copy the package when the installed bytes differ from the bundled package.
             if not dst_upk.exists() or dst_upk.read_bytes() != BUNDLED_PROBE_TEX.read_bytes():
                 shutil.copy2(BUNDLED_PROBE_TEX, dst_upk)
                 out["copied_probe_upk_to"] = str(dst_upk)
@@ -938,15 +928,15 @@ def _swing_sampler_tick(obj: Any, _args: Any, _ret: Any, _func: Any) -> None:
             _write_report(rep)
         _notify_hud(
             obj,
-            "Melee Asset Probe v0.3.1: COMPLETE!",
+            "Melee Asset Probe: COMPLETE!",
             f"Saved report:\n{REPORT_FILE.name}\n(Ready to share back!)",
             6.5,
         )
 
 
 def run_asset_probe() -> dict[str, Any]:
-    """Execute all Phase 3 Asset, Donor, Socket, Shader, Pose & VFX probes safely."""
-    _log("=== Starting Phase 3 Asset & Socket Probe v0.3.1 ===")
+    """Collect asset, donor, socket, shader, pose, and VFX diagnostics."""
+    _log("=== Starting asset and socket probe ===")
     pc = get_pc()
     cooked_dir = _locate_cooked_pc_console()
     _log(f"cooked_dir={cooked_dir}")
@@ -1016,43 +1006,38 @@ def run_asset_probe() -> dict[str, Any]:
             pass
         _notify_hud(
             pc,
-            "Melee Asset Probe v0.3.1",
+            "Melee Asset Probe",
             "Sampling Bladed_Melee swing arc (~0.7s)...",
             2.0,
         )
     else:
         _notify_hud(
             pc,
-            "Melee Asset Probe v0.3.1: COMPLETE!",
+            "Melee Asset Probe: COMPLETE!",
             f"Saved report:\n{REPORT_FILE.name}",
             6.0,
         )
     return report_data
 
 
-@command("melee_asset_probe", description="Run Phase 3 Custom Asset, Startup.upk Donor, Socket & Pose Probe.")
+@command("melee_asset_probe", description="Collect asset, donor, socket, and pose diagnostics.")
 def _cmd_melee_asset_probe(_args: Any) -> None:
-    run_asset_probe()
-
-
-@command("melee_probe_test", description="Alias for melee_asset_probe (Phase 3 Asset & Socket Probe).")
-def _cmd_melee_probe_test_alias(_args: Any) -> None:
     run_asset_probe()
 
 
 if build_mod is not None and ButtonOption is not None:
     _btn_run = ButtonOption(
-        "Run Phase 3 Asset & Socket Probe",
+        "Run Asset and Socket Probe",
         on_press=lambda _opt: run_asset_probe(),
         description="Extracts Weap_Pistol donor template, socket bounds, custom UPK smoke test & swing poses.",
     )
     build_mod(
         options=[_btn_run],
-        commands=[_cmd_melee_asset_probe, _cmd_melee_probe_test_alias],
+        commands=[_cmd_melee_asset_probe],
         hooks=[_swing_sampler_tick],
     )
     try:
         _swing_sampler_tick.disable()
     except Exception:
         pass
-    _log("Armed and ready (type 'melee_asset_probe' or 'melee_probe_test').")
+    _log("Armed and ready (type 'melee_asset_probe').")

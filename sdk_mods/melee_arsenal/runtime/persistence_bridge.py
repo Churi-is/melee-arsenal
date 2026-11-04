@@ -186,8 +186,8 @@ def snapshot_player_melee_inventory(pc: Any = None, explicit_save_name: str | No
     updates: dict[str, dict[str, Any]] = {}
     carried_uids: list[str] = []
     reserved: set[int] = {int(k) for k in existing if str(k).lstrip("-").isdigit()}
-    legacy_zero = existing.get("0") if isinstance(existing.get("0"), dict) else None
-    legacy_zero_used = False
+    zero_id_record = existing.get("0") if isinstance(existing.get("0"), dict) else None
+    zero_id_record_used = False
 
     for wpn, slot_tag in carried:
         resolved = resolve_melee_weapon(wpn, sync_weapon_props=False)
@@ -196,9 +196,9 @@ def snapshot_player_melee_inventory(pc: Any = None, explicit_save_name: str | No
         inst, _ = resolved
         previous = existing.get(str(int(inst.unique_id)))
         if int(inst.unique_id) <= 0 or str(int(inst.unique_id)) in updates:
-            if int(inst.unique_id) <= 0 and legacy_zero is not None and not legacy_zero_used:
-                previous = legacy_zero
-                legacy_zero_used = True
+            if int(inst.unique_id) <= 0 and zero_id_record is not None and not zero_id_record_used:
+                previous = zero_id_record
+                zero_id_record_used = True
             inst = _assign_live_unique_id(wpn, inst, reserved)
             if inst is None:
                 continue
@@ -208,16 +208,16 @@ def snapshot_player_melee_inventory(pc: Any = None, explicit_save_name: str | No
         updates[key] = rec
         carried_uids.append(key)
 
-    if legacy_zero_used and "0" in existing:
-        updates["0"] = {**legacy_zero, "carried_slot": ""}
+    if zero_id_record_used and "0" in existing:
+        updates["0"] = {**zero_id_record, "carried_slot": ""}
 
-    for k, old_rec in existing.items():
-        if k.startswith("_") or not isinstance(old_rec, dict):
+    for k, existing_rec in existing.items():
+        if k.startswith("_") or not isinstance(existing_rec, dict):
             continue
-        if k not in updates and old_rec.get("carried_slot"):
-            updated_old = dict(old_rec)
-            updated_old["carried_slot"] = ""
-            updates[k] = updated_old
+        if k not in updates and existing_rec.get("carried_slot"):
+            updated_rec = dict(existing_rec)
+            updated_rec["carried_slot"] = ""
+            updates[k] = updated_rec
 
     try:
         write_save_records_atomic(target, updates)
@@ -279,11 +279,9 @@ def restore_player_melee_inventory(pc: Any = None, explicit_save_name: str | Non
             inst = deserialize_weapon(rec)
             uid = int(inst.unique_id)
             if uid <= 0:
-                # Legacy collapsed zero-ID record. If a zero-ID weapon is already carried we
-                # cannot know whether it is this record, so do not duplicate it; snapshot will
-                # assign stable IDs. Otherwise migrate the record to a fresh positive ID.
+                # A zero-ID record cannot be matched to a carried weapon; avoid duplicating one.
                 if zero_present > 0:
-                    log_warn(f"Skipping legacy zero-ID sidecar entry for {save_name}; a zero-ID weapon is already carried.")
+                    log_warn(f"Skipping zero-ID sidecar entry for {save_name}; a zero-ID weapon is already carried.")
                     continue
                 inst = replace(inst, unique_id=allocate_unique_id(reserved))
                 reserved.add(int(inst.unique_id))
@@ -302,7 +300,7 @@ def restore_player_melee_inventory(pc: Any = None, explicit_save_name: str | Non
             merged.update(migration_updates)
             write_save_records_atomic(target, merged)
         except Exception as exc:
-            log_error(f"Could not migrate legacy zero-ID sidecar entry: {exc!r}")
+            log_error(f"Could not migrate zero-ID sidecar entry: {exc!r}")
             return 0
 
     if not missing_instances:
