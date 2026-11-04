@@ -1,14 +1,15 @@
 """Resolved and cached Unreal assets used by melee combat."""
 
 from __future__ import annotations
+from .sdk import unrealsdk
 
 from typing import Any
 
-import unrealsdk
 
-from ...core.enums import Element
-from ..log import log_debug, log_debug_once, log_info
-from ..object_identity import is_dead
+from ..core.enums import Element
+from ..core.parts import ELEMENTS
+from .log import log_debug, log_debug_once, log_info
+from .object_identity import is_dead
 
 
 ATTR_MELEE_MODIFIER = "D_Attributes.DamageSourceModifiers.InstigatedMeleeDamageModifier"
@@ -24,12 +25,7 @@ ATTR_STATUS_CHANCE_MOD = "D_Attributes.DamageSourceModifiers.InstigatedStatusEff
 
 
 ELEM_DMG_TYPE_PROC_PATHS: dict[Element, str] = {
-    Element.NONE: "GD_Impact.DamageType.DmgType_Normal",
-    Element.FIRE: "GD_Incendiary.DamageType.DmgType_Incendiary_Impact",
-    Element.SHOCK: "GD_Shock.DamageType.DmgType_Shock_Impact",
-    Element.CORROSIVE: "GD_Corrosive.DamageType.DmgType_Corrosive_Impact",
-    Element.SLAG: "GD_Amp.DamageType.DmgType_Amp_Impact",
-    Element.EXPLOSIVE: "GD_Explosive.DamageType.DmgType_Explosive_Impact_ForceFlinch",
+    spec.element: spec.damage_type_path for spec in ELEMENTS.values()
 }
 
 
@@ -103,12 +99,35 @@ _CACHED_EXPLOSION_AK: Any = None
 _EXPLOSION_ASSETS_SCANNED: bool = False
 
 
+# Definition-tier assets: read while the weapon/part/firing-mode definitions are built.
+_CACHED_DEF_DMG_TYPES: dict[Element, Any] = {}
+_CACHED_SWING_SOUNDS: dict[str, Any] = {}
+
+
 def _safe_find(cls_name: str, path: str) -> Any:
     try:
         return unrealsdk.find_object(cls_name, path)
     except Exception as exc:
         log_debug_once(f"combat._safe_find:{cls_name}:{path}", f"_safe_find {cls_name} {path} failed: {exc!r}")
         return None
+
+
+def _cache_definition_assets() -> None:
+    """The three assets the definition builders need: damage types and the two swing sounds."""
+    for elem_spec in ELEMENTS.values():
+        if _CACHED_DEF_DMG_TYPES.get(elem_spec.element) is None:
+            dt = _safe_find("WillowDamageTypeDefinition", elem_spec.damage_type_path) or _safe_find(
+                "DamageTypeDefinition", elem_spec.damage_type_path
+            )
+            if dt is not None:
+                _CACHED_DEF_DMG_TYPES[elem_spec.element] = dt
+
+    for key, path in (
+        ("light", AK_SWING_WHOOSH),
+        ("heavy", "Ake_Mon_Thresher.v2.Ak_Play_Mon_Thresher_Melee_Swipe"),
+    ):
+        if _CACHED_SWING_SOUNDS.get(key) is None:
+            _CACHED_SWING_SOUNDS[key] = _safe_find("AkEvent", path)
 
 
 def ensure_combat_resources_cached() -> None:
@@ -171,6 +190,7 @@ def ensure_combat_resources_cached() -> None:
             log_debug(f"find_class WillowDmgSource_Grenade failed: {exc!r}")
             _CACHED_GRENADE_DMG_CLS = _CACHED_BULLET_DMG_CLS
 
+    _cache_definition_assets()
     _cache_torgue_explosion_assets()
 
 

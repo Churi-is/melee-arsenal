@@ -1,6 +1,7 @@
 """Thrown-blade state, flight, collision, and impact handling."""
 
 from __future__ import annotations
+from ..sdk import prevent_hooking_direct_calls
 
 import math
 import time
@@ -27,7 +28,6 @@ from .. import secondary_vfx
 from ..log import log_error, log_info
 from ..object_identity import deref_weak, is_dead, same_uobject, wrap_weak
 from ..resolver import get_local_player_controller, unwrap_weapon_object
-from unrealsdk.hooks import prevent_hooking_direct_calls
 from .common import _clear_pose, _combat, _same_object
 
 

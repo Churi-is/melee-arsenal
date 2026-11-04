@@ -4,15 +4,12 @@
 objects with a library type, cached package name, and `NameBasedObjectPath` entries.
 """
 from __future__ import annotations
+from .sdk import unrealsdk
 
 from typing import Any, Iterable
 import json
 from pathlib import Path
 
-try:
-    import unrealsdk  # type: ignore[import-not-found]
-except ImportError:  # pragma: no cover
-    unrealsdk = None  # type: ignore[assignment]
 
 from .log import log_debug, log_info, log_warn, obj_path
 from .state import KEEP_ALIVE_FLAGS, STATE

@@ -1,14 +1,14 @@
 """Construct and register the live UE3 weapon definitions."""
 from __future__ import annotations
+from ..sdk import unrealsdk
 
 import traceback
 
 from ...core.enums import Manufacturer
-from .. import asset_library
+from .. import asset_library, resources
 from ..log import log_error, log_info, log_warn
 from ..state import STATE
-from . import balances, donors, firing_modes, name_parts, parts, resources, weapon_types
-from ._sdk import unrealsdk
+from . import balances, donors, firing_modes, name_parts, parts, weapon_types
 from .context import BuildContext
 
 __all__ = ["ensure_definitions_built"]

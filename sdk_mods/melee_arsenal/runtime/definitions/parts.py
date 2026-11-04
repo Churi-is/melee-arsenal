@@ -5,6 +5,7 @@ builder iterates its `core/parts/` registry, so adding a part needs no SDK edits
 `ctx` carries the packages and the donor objects shared between builders.
 """
 from __future__ import annotations
+from ..sdk import unrealsdk
 
 from typing import Any
 
@@ -12,8 +13,8 @@ from ...core.enums import Element, Manufacturer, Rarity
 from ...core.parts import ACCESSORIES, BLADES, ELEMENTS, GRIPS, MANUFACTURERS
 from ..custom_assets import setup_custom_inkblade_assets
 from ..log import obj_path
+from .. import resources
 from ..state import KEEP_ALIVE_FLAGS, STATE
-from ._sdk import unrealsdk
 from .context import BuildContext
 from .helpers import _clear_array_prop, _find, _sum_crit_bonus
 from .name_parts import _apply_crit_bonus_if_supported, _clear_part_stat_bonuses
@@ -245,7 +246,7 @@ def build_element_parts(ctx: BuildContext) -> None:
             except Exception:
                 pass
 
-        dt = STATE.damage_types.get(espec.element)
+        dt = resources._CACHED_DEF_DMG_TYPES.get(espec.element)
         if dt is not None and hasattr(part, "CustomDamageTypeDefinition"):
             try:
                 part.CustomDamageTypeDefinition = dt

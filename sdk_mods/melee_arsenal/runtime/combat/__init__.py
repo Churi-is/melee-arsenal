@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from ..object_identity import cache_key
 from ..state import STATE
-from . import common, resources, damage, pose, attacks, hooks
+from .. import resources
+from . import common, damage, pose, attacks, hooks
 from .attacks import (
     SINGLE_TARGET_ASSIST_HALF_DEG,
     WEAKSPOT_BONE_KEYWORDS,
@@ -79,7 +80,7 @@ from .pose import (
     restore_all_arms_rest_transforms,
     update_first_person_pose,
 )
-from .resources import (
+from ..resources import (
     AK_BLADE_HIT_FLESH,
     AK_HEAVY_IMPACT,
     AK_SWING_HEAVY_SWIPE,

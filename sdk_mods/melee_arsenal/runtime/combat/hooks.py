@@ -1,10 +1,10 @@
 """SDK hook callbacks that route into the combat subsystems."""
 
 from __future__ import annotations
+from ..sdk import Block
 
 from typing import Any
 
-from unrealsdk.hooks import Block
 
 from ...core.enums import SecondaryAttack
 from ...core.parts.weapon import MeleeWeaponInstance

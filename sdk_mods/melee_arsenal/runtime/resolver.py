@@ -9,6 +9,7 @@ Why single-item staggered `ServerGrantMissionRewards` (`GD_Episode01.M_Ep1_Champ
   1 every 3 ticks (~50ms apart) so all 5 archetypes arrive directly in your Backpack!
 """
 from __future__ import annotations
+from .sdk import Block, unrealsdk
 
 import copy
 import math
@@ -18,13 +19,6 @@ import traceback
 from collections import deque
 from typing import Any
 
-try:
-    import unrealsdk  # type: ignore[import-not-found]
-    from unrealsdk.hooks import Block, prevent_hooking_direct_calls  # type: ignore[import-not-found]
-except ImportError:  # pragma: no cover
-    unrealsdk = None  # type: ignore[assignment]
-    Block = object()  # type: ignore[assignment]
-    prevent_hooking_direct_calls = None  # type: ignore[assignment]
 
 from ..core.parts import (
     BLADES,

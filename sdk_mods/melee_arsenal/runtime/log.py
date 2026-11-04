@@ -1,14 +1,11 @@
 """Logging utilities for Melee Arsenal SDK runtime."""
 from __future__ import annotations
+from .sdk import unrealsdk
 
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-try:
-    import unrealsdk  # type: ignore[import-not-found]
-except ImportError:  # pragma: no cover
-    unrealsdk = None  # type: ignore[assignment]
 
 try:
     from mods_base import MODS_DIR  # type: ignore[import-not-found]

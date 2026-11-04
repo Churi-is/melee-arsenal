@@ -1,13 +1,13 @@
 """Primary melee target acquisition, damage delivery, and hit feedback."""
 
 from __future__ import annotations
+from ..sdk import prevent_hooking_direct_calls
 
 import copy
 import math
 from typing import Any
 
 from mods_base import get_pc
-from unrealsdk.hooks import prevent_hooking_direct_calls
 
 from ...core.enums import Element, Manufacturer, TargetingMode
 from ...core.parts.weapon import MeleeWeaponInstance
@@ -16,7 +16,8 @@ from ...core.targeting import TargetCandidate, Vec3
 from ..log import log_error, log_info
 from ..object_identity import cache_key, is_dead
 from ..state import STATE
-from . import common, resources
+from .. import resources
+from . import common
 from .damage import (
     clear_pending_crit_feedback,
     mark_pending_crit_feedback,

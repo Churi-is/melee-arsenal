@@ -4,6 +4,7 @@ Each archetype's cadence, clip, recoil-free first-person swing, instant-hit dama
 scale and melee swipe audio are stamped onto a clone of the vanilla pistol type.
 """
 from __future__ import annotations
+from ..sdk import unrealsdk
 
 import copy
 
@@ -11,8 +12,8 @@ from ...core.enums import TargetingMode
 from ...core.parts import BLADE_BY_MANUFACTURER, MANUFACTURERS
 from ...core.stats import compute_swing_speed_damage_scale
 from ..log import log_info, obj_path
+from .. import resources
 from ..state import KEEP_ALIVE_FLAGS, STATE
-from ._sdk import unrealsdk
 from .context import BuildContext
 from .firing_modes import _configure_melee_firing_mode
 from .helpers import (
@@ -116,10 +117,8 @@ def build_weapon_types(ctx: BuildContext) -> None:
         wt.InstantHitDamage = ihd
 
         # Replace gunshot audio with melee swipe AkEvent (or silence so no gun bang ever plays!)
-        swing_event = (
-            STATE.ak_swing_heavy
-            if mspec.cleave_profile.mode == TargetingMode.FRONTAL_CLEAVE
-            else STATE.ak_swing_light
+        swing_event = resources._CACHED_SWING_SOUNDS.get(
+            "heavy" if mspec.cleave_profile.mode == TargetingMode.FRONTAL_CLEAVE else "light"
         )
         donor_sounds = list(getattr(donor_wt, "FireSounds", []) or [])
         if donor_sounds and swing_event is not None:

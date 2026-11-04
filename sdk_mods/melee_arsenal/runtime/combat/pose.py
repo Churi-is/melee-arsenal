@@ -1,14 +1,13 @@
 """First-person melee animation and procedural hand/weapon poses."""
 
 from __future__ import annotations
+from ..sdk import prevent_hooking_direct_calls, unrealsdk
 
 import copy
 import math
 import time
 from typing import Any
 
-import unrealsdk
-from unrealsdk.hooks import prevent_hooking_direct_calls
 
 from ...core.enums import Manufacturer, TargetingMode
 from ...core.stats import ComputedCardStats
@@ -23,7 +22,8 @@ from ..object_identity import (
 )
 from ..resolver import get_local_player_controller, resolve_melee_weapon, unwrap_weapon_object
 from ..state import STATE
-from . import common, resources
+from .. import resources
+from . import common
 from .damage import play_camera_anim
 
 

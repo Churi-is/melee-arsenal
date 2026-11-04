@@ -4,6 +4,7 @@ For each (Manufacturer, Rarity) this builds the weighted Blade/Grip/Accessory/
 Element part lists from the catalog specs, then a dedicated 100% ground-drop pool.
 """
 from __future__ import annotations
+from ..sdk import unrealsdk
 
 import copy
 from typing import Any
@@ -27,7 +28,6 @@ from ..custom_assets import (
 )
 from ..log import log_warn, obj_path
 from ..state import KEEP_ALIVE_FLAGS, STATE
-from ._sdk import unrealsdk
 from .context import BuildContext
 from .helpers import _ensure_subpackage, _find, _inherited_manufacturers, _inherited_plc
 

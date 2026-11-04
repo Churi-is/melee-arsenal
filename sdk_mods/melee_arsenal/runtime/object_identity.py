@@ -5,13 +5,10 @@ pyunrealsdk may return a fresh Python wrapper for the same UE3 object.  Python `
 rule for gameplay state.  The full object path is the stable identity exposed by the SDK.
 """
 from __future__ import annotations
+from .sdk import unrealsdk
 
 from typing import Any
 
-try:
-    import unrealsdk  # type: ignore[import-not-found]
-except ImportError:  # pragma: no cover - offline import fallback
-    unrealsdk = None  # type: ignore[assignment]
 
 from .log import log_debug_once
 

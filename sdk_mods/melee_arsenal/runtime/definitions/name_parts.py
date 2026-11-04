@@ -4,6 +4,7 @@ Titles come from the Blade+Grip matrix, prefixes from Accessory and Element part
 every distinct string in the part catalog gets exactly one UE3 name part object.
 """
 from __future__ import annotations
+from ..sdk import unrealsdk
 
 import copy
 from typing import Any
@@ -12,7 +13,6 @@ from ...core.parts import ACCESSORIES, BLADES, ELEMENTS, MANUFACTURERS
 from ..custom_assets import apply_gestalt_bounds_framing
 from ..log import obj_path
 from ..state import KEEP_ALIVE_FLAGS, STATE
-from ._sdk import unrealsdk
 from .context import BuildContext
 from .helpers import _clear_array_prop, _deg_to_rot_units, _ensure_subpackage, _find, _sanitize_token
 

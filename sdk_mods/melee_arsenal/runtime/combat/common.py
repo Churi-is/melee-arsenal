@@ -1,12 +1,12 @@
 """Small UE3 object and transform helpers shared by combat modules."""
 
 from __future__ import annotations
+from ..sdk import unrealsdk
 
 import copy
 import math
 from typing import Any
 
-import unrealsdk
 
 from ..log import log_debug_once
 

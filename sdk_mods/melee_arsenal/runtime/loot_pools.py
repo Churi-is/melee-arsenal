@@ -4,14 +4,11 @@ Pools are updated idempotently on map loads. Melee weights scale against the van
 weight total, and vendor shelves are refreshed after injection.
 """
 from __future__ import annotations
+from .sdk import unrealsdk
 
 import copy
 from typing import Any
 
-try:
-    import unrealsdk  # type: ignore[import-not-found]
-except ImportError:  # pragma: no cover
-    unrealsdk = None  # type: ignore[assignment]
 
 from ..core.enums import Rarity
 from .custom_assets import assign_struct_array

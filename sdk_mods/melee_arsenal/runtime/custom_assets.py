@@ -5,6 +5,7 @@ manifest under `build/`; packaging and installation place it alongside the match
 updating part bounds, socket offsets, face-gap twins, and atlases without code changes.
 """
 from __future__ import annotations
+from .sdk import unrealsdk
 
 import copy
 import json
@@ -15,10 +16,6 @@ import sys
 import traceback
 from typing import Any
 
-try:
-    import unrealsdk  # type: ignore[import-not-found]
-except ImportError:  # pragma: no cover
-    unrealsdk = None  # type: ignore[assignment]
 
 from ..core.parts import (
     ACCESSORIES,

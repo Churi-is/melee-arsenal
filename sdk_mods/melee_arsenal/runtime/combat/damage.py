@@ -1,12 +1,12 @@
 """Damage, status-effect, mitigation, and crit-feedback behavior."""
 
 from __future__ import annotations
+from ..sdk import Block, prevent_hooking_direct_calls
 
 import random
 import time
 from typing import Any
 
-from unrealsdk.hooks import Block, prevent_hooking_direct_calls
 
 from ...core.enums import Element
 from ...core.parts.weapon import PlayerMeleeContext
@@ -16,7 +16,7 @@ from ..object_identity import cache_key, same_uobject
 from ..resolver import get_local_player_controller, resolve_melee_weapon
 from ..secondary.guard import handle_guard_incoming_damage
 from ..state import STATE
-from . import resources
+from .. import resources
 
 
 DAMAGE_EVENT_FLAG_CRIT = 1

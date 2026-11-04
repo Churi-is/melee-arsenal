@@ -1,13 +1,13 @@
 """Held guard, cooldown, damage reduction, parry, and release handling."""
 
 from __future__ import annotations
+from ..sdk import Type, prevent_hooking_direct_calls
 
 import time
 from dataclasses import dataclass
 from typing import Any
 
 from mods_base import hook  # type: ignore[import-not-found]
-from unrealsdk.hooks import Type, prevent_hooking_direct_calls  # type: ignore[import-not-found]
 
 from ...core.enums import SecondaryAttack
 from ...core.parts.weapon import MeleeWeaponInstance
