@@ -6,17 +6,11 @@ Damage Reduction. Standard gun-only stats are hidden.
 Do not call `gfx_obj.AdjustHeight()`: in BL2 it moves and shrinks the shared item-card movie clip.
 """
 from __future__ import annotations
+from .sdk import Block, prevent_hooking_direct_calls, unrealsdk
 
 from dataclasses import dataclass, field
 from typing import Any
 
-try:
-    import unrealsdk  # type: ignore[import-not-found]
-    from unrealsdk.hooks import Block, prevent_hooking_direct_calls  # type: ignore[import-not-found]
-except ImportError:  # pragma: no cover
-    unrealsdk = None  # type: ignore[assignment]
-    Block = object()  # type: ignore[assignment]
-    prevent_hooking_direct_calls = None  # type: ignore[assignment]
 
 from ..core.enums import Element
 from ..core.item_card import CompareArrow, ItemCardPayload, build_item_card_payload
@@ -206,9 +200,7 @@ def _apply_melee_card_override(gfx_obj: Any, ov: ActiveCardOverride) -> None:
         log_error(f"SetFunStats error on melee card: {exc!r}")
 
 
-# ---------------------------------------------------------------------------
 # Engine Hook Callbacks
-# ---------------------------------------------------------------------------
 
 def on_set_item_card_ex_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
     """Begin Melee Item Card override (`SetItemCard` or `SetItemCardEx`)."""

@@ -1,16 +1,14 @@
-"""SDK-independent part specifications, registries, and lookup helpers.
+"""Data layer: part specs, registries, and the roll rules that own them.
 
-Each part type is defined in its own module. The package exports the registries,
-composed weapon types, and lookup helpers used by core math and the runtime.
+One module per part type. Each owns its spec dataclass, its complete registry, and the
+logic for that part type, so adding a blade/grip/accessory/element never touches another file.
+Nothing in this package imports `unrealsdk`.
 """
 from __future__ import annotations
 
 from .accessories import (
     ACCESSORIES,
-    ACCESSORY_GUARD_COOLDOWN_DELTA,
     ACCESSORY_ROLL_CHANCE,
-    ACCESSORY_TO_KIT_ID,
-    ACCESSORY_WEIGHT_KG,
     NO_ACCESSORY_ID,
     AccessoryPartSpec,
     eligible_accessories_for_roll,
@@ -18,100 +16,55 @@ from .accessories import (
 )
 from .blades import (
     BLADE_BY_MANUFACTURER,
-    BLADE_TO_KIT_ID,
     BLADES,
     BladePartSpec,
-    blade_for_manufacturer,
-    title_for_parts,
 )
 from .common import GestaltFragmentMeta, StatModifier, resolve_prefix, weighted_choice
 from .elements import (
-    DOT_ELEMENTS,
-    ELEMENT_ID_TO_ATLAS_KEY,
     ELEMENT_PART_BY_TYPE,
-    ELEMENT_TO_KIT_ID,
     ELEMENTS,
     NO_ELEMENT_ID,
     ElementPartSpec,
     eligible_elements_for_blade,
     roll_element_id,
 )
-from .grips import (
-    GRIP_BY_MANUFACTURER,
-    GRIP_TO_KIT_ID,
-    GRIPS,
-    GripPartSpec,
-    is_matching_grip,
-    roll_grip_id,
-)
-from .manufacturers import (
-    GUARD_COOLDOWN_BY_MANUFACTURER,
-    GUARD_COOLDOWN_DEFAULT_SEC,
-    MANUFACTURERS,
-    CleaveProfile,
-    ManufacturerSpec,
-    allowed_elements_for,
-    guard_cooldown_base_sec,
-    manufacturer_spec,
-    secondary_attack_for,
-)
+from .grips import GRIPS, GripPartSpec, roll_grip_id
+from .manufacturers import MANUFACTURERS, CleaveProfile, ManufacturerSpec
 from .weapon import (
     MeleeWeaponInstance,
     MeleeWeaponParts,
     PlayerMeleeContext,
-    ResolvedParts,
-    resolve_parts,
     resolve_weapon_name,
 )
 
 __all__ = [
     "ACCESSORIES",
-    "ACCESSORY_GUARD_COOLDOWN_DELTA",
     "ACCESSORY_ROLL_CHANCE",
-    "ACCESSORY_TO_KIT_ID",
-    "ACCESSORY_WEIGHT_KG",
-    "BLADE_BY_MANUFACTURER",
-    "BLADE_TO_KIT_ID",
     "BLADES",
-    "CleaveProfile",
-    "DOT_ELEMENTS",
-    "ELEMENT_ID_TO_ATLAS_KEY",
-    "ELEMENT_PART_BY_TYPE",
-    "ELEMENT_TO_KIT_ID",
+    "BLADE_BY_MANUFACTURER",
     "ELEMENTS",
-    "GRIP_BY_MANUFACTURER",
-    "GRIP_TO_KIT_ID",
+    "ELEMENT_PART_BY_TYPE",
     "GRIPS",
-    "GUARD_COOLDOWN_BY_MANUFACTURER",
-    "GUARD_COOLDOWN_DEFAULT_SEC",
-    "GestaltFragmentMeta",
     "MANUFACTURERS",
-    "MeleeWeaponInstance",
-    "MeleeWeaponParts",
     "NO_ACCESSORY_ID",
     "NO_ELEMENT_ID",
-    "PlayerMeleeContext",
-    "ResolvedParts",
-    "StatModifier",
     "AccessoryPartSpec",
     "BladePartSpec",
+    "CleaveProfile",
     "ElementPartSpec",
+    "GestaltFragmentMeta",
     "GripPartSpec",
     "ManufacturerSpec",
-    "allowed_elements_for",
-    "blade_for_manufacturer",
+    "MeleeWeaponInstance",
+    "MeleeWeaponParts",
+    "PlayerMeleeContext",
+    "StatModifier",
     "eligible_accessories_for_roll",
     "eligible_elements_for_blade",
-    "guard_cooldown_base_sec",
-    "is_matching_grip",
-    "manufacturer_spec",
     "resolve_prefix",
-    "resolve_parts",
     "resolve_weapon_name",
     "roll_accessory_id",
     "roll_element_id",
     "roll_grip_id",
-    "secondary_attack_for",
-    "title_for_parts",
     "weighted_choice",
 ]

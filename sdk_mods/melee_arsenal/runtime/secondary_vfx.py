@@ -9,7 +9,7 @@ Melee Weapons are custom clones of donor pistol types and have no such behaviour
 module reproduces the visually important half of that trick: a real `SkeletalMeshComponent` using
 the held weapon's own `SkeletalMesh` + material instances is attached to the pawn and flown along
 the solved ballistic arc, then back into your hand on the rebound. Damage, traces and Torgue's
-splash stay in `runtime.secondary` — the Bandit blade deliberately has no explosion, only the
+splash stay in `runtime.secondary` — the Bandit blade has no explosion, only the
 flying blade and the catch.
 
 Everything is best-effort: any engine function that is missing on a given build simply leaves the
@@ -310,12 +310,3 @@ def thrown_blade_debug_info() -> dict[str, Any]:
     }
 
 
-def lerp_xyz(
-    start: tuple[float, float, float], end: tuple[float, float, float], u: float
-) -> tuple[float, float, float]:
-    u = max(0.0, min(1.0, float(u)))
-    return (
-        start[0] + (end[0] - start[0]) * u,
-        start[1] + (end[1] - start[1]) * u,
-        start[2] + (end[2] - start[2]) * u,
-    )

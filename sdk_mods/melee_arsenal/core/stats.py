@@ -7,11 +7,19 @@ from typing import Iterable
 
 from .enums import Element, Manufacturer, ModifierMode, Rarity, SecondaryAttack, StatId, TargetingMode
 from .parts import (
+    ACCESSORIES,
+    BLADES,
+    ELEMENTS,
+    GRIPS,
+    MANUFACTURERS,
+    AccessoryPartSpec,
+    BladePartSpec,
+    ElementPartSpec,
+    GripPartSpec,
+    ManufacturerSpec,
     MeleeWeaponInstance,
     PlayerMeleeContext,
     StatModifier,
-    is_matching_grip,
-    resolve_parts,
     resolve_weapon_name,
 )
 from .secondary import (
@@ -40,7 +48,6 @@ SWING_SPEED_DAMAGE_EXPONENT: float = 0.55
 #   * Lv 1 (no OP levels)  -> 30% floor, ~30-34% with parts
 #   * Lv 80 + OP10         -> 61% floor, up to the 70% cap with good parts
 #   * Unique rarities (Legendary / Seraph / Pearlescent / Effervescent) may pass the 70% cap.
-DAMAGE_REDUCTION_MIN_PCT: int = 30
 DAMAGE_REDUCTION_MAX_PCT: int = 70
 DAMAGE_REDUCTION_MIN_STAGE: int = 1
 DAMAGE_REDUCTION_MAX_STAGE: int = 90        # Lv 80 + OP1..OP10
@@ -243,14 +250,54 @@ def apply_guard_damage_reduction(damage: float, damage_reduction_pct: float) -> 
     return apply_incoming_damage_reduction(guarded, damage_reduction_pct)
 
 
+def _weapon_modifiers(
+    weapon: MeleeWeaponInstance,
+    blade: BladePartSpec,
+    grip: GripPartSpec,
+    accessory: AccessoryPartSpec,
+    element_part: ElementPartSpec,
+    maker_spec: ManufacturerSpec,
+) -> tuple[list[StatModifier], bool]:
+    """Every stat modifier that applies to this weapon, plus whether the grip matches the blade."""
+    matching_grip = grip.manufacturer == blade.manufacturer
+    mods: list[StatModifier] = [
+        *maker_spec.intrinsic_modifiers,
+        *blade.modifiers,
+        *grip.modifiers,
+        *accessory.modifiers,
+        *element_part.modifiers,
+    ]
+    rarity_dmg = RARITY_DAMAGE_GRADE_BONUS.get(weapon.rarity, 0.0)
+    if rarity_dmg:
+        mods.append(StatModifier(StatId.BASE_DAMAGE, ModifierMode.SCALE, rarity_dmg))
+    if matching_grip:
+        mods.append(StatModifier(StatId.BASE_DAMAGE, ModifierMode.SCALE, maker_spec.matching_grip_damage_bonus))
+        mods.append(StatModifier(StatId.SWING_SPEED, ModifierMode.SCALE, maker_spec.matching_grip_speed_bonus))
+    return mods, matching_grip
+
+
+def _elemental_stats(
+    element_part: ElementPartSpec, level_curve: float, mods: list[StatModifier]
+) -> tuple[float, float, bool]:
+    """(DoT dps, proc chance, whether the card shows an elemental section)."""
+    if element_part.is_dot_element:
+        base_dot = level_curve * MELEE_WEAPON_TYPE_DAMAGE_SCALAR * element_part.dot_dps_ratio
+        dps = max(1.0, apply_bl2_modifiers(base_dot, mods, StatId.STATUS_DAMAGE))
+        chance = min(0.95, max(0.01, apply_bl2_modifiers(element_part.base_proc_chance, mods, StatId.STATUS_CHANCE)))
+        return dps, chance, True
+    if element_part.is_explosive:
+        return 0.0, 1.0, True
+    return 0.0, 0.0, False
+
+
 def compute_card_stats(weapon: MeleeWeaponInstance) -> ComputedCardStats:
     """Compute exact item card and runtime combat stats for a `MeleeWeaponInstance`."""
-    resolved = resolve_parts(weapon.parts)
-    blade = resolved.blade
-    grip = resolved.grip
-    accessory = resolved.accessory
-    element_part = resolved.element
-    maker_spec = resolved.manufacturer
+    blade = BLADES[weapon.parts.blade_id]
+    grip = GRIPS[weapon.parts.grip_id]
+    accessory = ACCESSORIES[weapon.parts.accessory_id]
+    element_part = ELEMENTS[weapon.parts.element_id]
+    maker_spec = MANUFACTURERS[blade.manufacturer]
+    profile = maker_spec.cleave_profile
 
     prefix, title, full_name = resolve_weapon_name(
         weapon.parts.blade_id,
@@ -258,104 +305,38 @@ def compute_card_stats(weapon: MeleeWeaponInstance) -> ComputedCardStats:
         weapon.parts.accessory_id,
         weapon.parts.element_id,
     )
+    mods, matching_grip = _weapon_modifiers(weapon, blade, grip, accessory, element_part, maker_spec)
 
-    matching_grip = is_matching_grip(blade, grip)
-
-    all_mods: list[StatModifier] = [
-        *maker_spec.intrinsic_modifiers,
-        *blade.modifiers,
-        *grip.modifiers,
-        *accessory.modifiers,
-        *element_part.modifiers,
-    ]
-
-    # Rarity grade bonus + matching-grip bonus (just like BL2 matching grip bonuses)
-    rarity_dmg = RARITY_DAMAGE_GRADE_BONUS.get(weapon.rarity, 0.0)
-    if rarity_dmg:
-        all_mods.append(StatModifier(StatId.BASE_DAMAGE, ModifierMode.SCALE, rarity_dmg))
-    if matching_grip:
-        all_mods.append(
-            StatModifier(StatId.BASE_DAMAGE, ModifierMode.SCALE, maker_spec.matching_grip_damage_bonus)
-        )
-        all_mods.append(
-            StatModifier(StatId.SWING_SPEED, ModifierMode.SCALE, maker_spec.matching_grip_speed_bonus)
-        )
-
-    # 1. Swing Speed (swings/sec) & FireInterval — resolved first because the per-hit damage
-    #    budget below trades against the blade's FINAL cadence (matching grip & accessory included).
-    swing_speed = max(
-        0.35,
-        apply_bl2_modifiers(maker_spec.base_swing_speed, all_mods, StatId.SWING_SPEED),
-    )
+    # Swing speed is resolved first: per-hit damage trades against the final cadence, so it needs
+    # the grip and accessory bonuses already folded in.
+    swing_speed = max(0.35, apply_bl2_modifiers(maker_spec.base_swing_speed, mods, StatId.SWING_SPEED))
     fire_interval_sec = 1.0 / swing_speed
 
-    # 2. Gun-scaled Base Damage, then the swing-speed trade-off (fast blades hit a little softer)
     level_curve = GUN_DAMAGE_L0_CONSTANT * (BL2_LEVEL_GROWTH ** max(1, weapon.game_stage))
     unmodified_damage = level_curve * MELEE_WEAPON_TYPE_DAMAGE_SCALAR * maker_spec.base_damage_mult
-    unspeed_damage = max(1.0, apply_bl2_modifiers(unmodified_damage, all_mods, StatId.BASE_DAMAGE))
+    unspeed_damage = max(1.0, apply_bl2_modifiers(unmodified_damage, mods, StatId.BASE_DAMAGE))
     raw_damage = max(1.0, unspeed_damage * compute_swing_speed_damage_scale(swing_speed))
-    card_damage = max(1, round(raw_damage))
 
-    # 3. Range (UU & meters)
-    range_uu = max(
-        120.0,
-        apply_bl2_modifiers(maker_spec.cleave_profile.base_range_uu, all_mods, StatId.RANGE_UU),
-    )
-    range_meters = round(range_uu / UU_PER_METER, 2)
+    range_uu = max(120.0, apply_bl2_modifiers(profile.base_range_uu, mods, StatId.RANGE_UU))
 
-    # 4. Targeting Arc & Critical Bonus
-    cleave_arc = maker_spec.cleave_profile.arc_degrees
-    if maker_spec.cleave_profile.mode == TargetingMode.FRONTAL_CLEAVE:
-        cleave_arc = min(
-            175.0,
-            max(30.0, apply_bl2_modifiers(cleave_arc, all_mods, StatId.CLEAVE_ARC)),
-        )
+    cleave_arc = profile.arc_degrees
+    if profile.mode == TargetingMode.FRONTAL_CLEAVE:
+        cleave_arc = min(175.0, max(30.0, apply_bl2_modifiers(cleave_arc, mods, StatId.CLEAVE_ARC)))
+    crit_bonus = max(0.0, apply_bl2_modifiers(profile.base_crit_bonus, mods, StatId.CRIT_BONUS))
 
-    crit_bonus = max(
-        0.0,
-        apply_bl2_modifiers(maker_spec.cleave_profile.base_crit_bonus, all_mods, StatId.CRIT_BONUS),
-    )
+    elem_dps, proc_chance, show_elem = _elemental_stats(element_part, level_curve, mods)
 
-    # 5. Optional Elemental Stats (Fire, Shock, Corrosive, Slag show DoT + Chance; Explosive shows Explosive element)
-    element = element_part.element
-    if element_part.is_dot_element:
-        base_dot = level_curve * MELEE_WEAPON_TYPE_DAMAGE_SCALAR * element_part.dot_dps_ratio
-        elem_dps = max(1.0, apply_bl2_modifiers(base_dot, all_mods, StatId.STATUS_DAMAGE))
-        proc_chance = min(
-            0.95,
-            max(0.01, apply_bl2_modifiers(element_part.base_proc_chance, all_mods, StatId.STATUS_CHANCE)),
-        )
-        show_elem = True
-    elif element_part.is_explosive:
-        elem_dps = 0.0
-        proc_chance = 1.0
-        show_elem = True
-    else:
-        elem_dps = 0.0
-        proc_chance = 0.0
-        show_elem = False
-
-    # 6. Splash & Knockback Momentum
-    splash_radius = apply_bl2_modifiers(
-        maker_spec.cleave_profile.splash_radius_uu, all_mods, StatId.SPLASH_RADIUS
-    )
-    splash_pct = apply_bl2_modifiers(
-        maker_spec.cleave_profile.splash_damage_pct, all_mods, StatId.SPLASH_PCT
-    )
+    splash_radius = apply_bl2_modifiers(profile.splash_radius_uu, mods, StatId.SPLASH_RADIUS)
+    splash_pct = apply_bl2_modifiers(profile.splash_damage_pct, mods, StatId.SPLASH_PCT)
     splash_damage = round(raw_damage * splash_pct) if splash_radius > 0.0 and splash_pct > 0.0 else 0
-    momentum_scale = max(0.1, apply_bl2_modifiers(1.0, all_mods, StatId.MOMENTUM))
+    momentum_scale = max(0.1, apply_bl2_modifiers(1.0, mods, StatId.MOMENTUM))
 
-    # 7. Manufacturer secondary attack (RMB / Left Trigger). Throw arcs are solved from the
-    #    weapon's actual mass (blade + grip manufacturer hardware + accessory), guard cooldowns
-    #    from its parts. Maliwan deliberately has no secondary attack.
+    # RMB secondary attack: a thrown blade's arc comes from the weapon's actual mass, a guard's
+    # cooldown from its parts.
     damage_reduction_pct = compute_damage_reduction_pct(weapon)
     secondary_attack = maker_spec.secondary_attack
-    throw_weight_kg = 0.0
-    throw_range_m = 0.0
-    throw_arc_height_m = 0.0
-    throw_flight_time_sec = 0.0
-    guard_cooldown_sec = 0.0
-    guard_parry_window_sec = 0.0
+    throw_weight_kg = throw_range_m = throw_arc_height_m = throw_flight_time_sec = 0.0
+    guard_cooldown_sec = guard_parry_window_sec = 0.0
     guard_reduction_pct = 0
     if secondary_attack == SecondaryAttack.THROW:
         throw_weight_kg = compute_throw_weight_kg(weapon)
@@ -376,20 +357,20 @@ def compute_card_stats(weapon: MeleeWeaponInstance) -> ComputedCardStats:
         archetype_name=maker_spec.archetype_name,
         rarity=weapon.rarity,
         game_stage=weapon.game_stage,
-        card_damage=card_damage,
+        card_damage=max(1, round(raw_damage)),
         raw_damage=raw_damage,
         range_uu=round(range_uu, 1),
-        range_meters=range_meters,
+        range_meters=round(range_uu / UU_PER_METER, 2),
         swing_speed=round(swing_speed, 2),
         fire_interval_sec=round(fire_interval_sec, 4),
-        targeting_mode=maker_spec.cleave_profile.mode,
+        targeting_mode=profile.mode,
         semi_auto_click=maker_spec.semi_auto_click,
         cleave_arc_degrees=round(cleave_arc, 1),
-        pitch_limit_degrees=maker_spec.cleave_profile.pitch_limit_degrees,
-        max_targets=maker_spec.cleave_profile.max_targets,
-        can_weakspot_crit=maker_spec.cleave_profile.can_weakspot_crit,
+        pitch_limit_degrees=profile.pitch_limit_degrees,
+        max_targets=profile.max_targets,
+        can_weakspot_crit=profile.can_weakspot_crit,
         crit_bonus_pct=round(crit_bonus * 100),
-        element=element,
+        element=element_part.element,
         show_elemental_stats=show_elem,
         elemental_dps=round(elem_dps, 1),
         elemental_chance_pct=round(proc_chance * 100, 1),

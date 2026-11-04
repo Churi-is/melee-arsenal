@@ -16,10 +16,9 @@ from mods_base import (  # type: ignore[import-not-found]
 from unrealsdk.hooks import Block, Type  # type: ignore[import-not-found]
 
 from .combat import (
-    _update_first_person_slash_motion,
+    update_first_person_slash_motion,
     capture_first_person_rest_transform,
     clear_all_pending_crit_feedback,
-    ensure_combat_resources_cached as ensure_live_combat_cached,
     on_ai_take_damage_post,
     on_display_recent_damage_pre,
     on_light_projectile_add_proj_pre,
@@ -42,7 +41,6 @@ from .commands import (
     tune_ui_preview_command,
 )
 from .definitions import ensure_definitions_built
-from .definitions.resources import ensure_combat_resources_cached
 from .log import clear_debug_once_cache, log_info
 from .loot_pools import inspect_loot_pools, refresh_vending_machines, remove_melee_loot_entries, sync_loot_pools
 from .persistence_bridge import (
@@ -76,6 +74,7 @@ from .resolver import (
     on_weapon_initialize_internal_pre,
     tick_spawner_restore,
 )
+from . import resources
 from .state import STATE
 from .object_identity import cache_key
 from .ui_item_card import (
@@ -106,9 +105,7 @@ def _notify_hud(title: str, message: str) -> None:
         pass
 
 
-# ---------------------------------------------------------------------------
 # Mod Menu Options
-# ---------------------------------------------------------------------------
 
 def _on_world_drops_changed(_opt: Any, new_val: bool) -> None:
     STATE.world_drops_enabled = bool(new_val)
@@ -252,9 +249,7 @@ btn_spawn_all = ButtonOption(
 )
 
 
-# ---------------------------------------------------------------------------
 # Engine Hooks
-# ---------------------------------------------------------------------------
 
 def _run_frame_tick() -> None:
     """One frame of runtime work, driven by whichever engine tick actually fires.
@@ -271,7 +266,7 @@ def _run_frame_tick() -> None:
     _last_frame_tick_at = now
     _tick_counter += 1
 
-    # 1. Drain staggered multi-weapon grants & restore reward mission template
+    # Drain staggered multi-weapon grants & restore reward mission template
     tick_spawner_restore()
     acknowledge_restored_inventory()
 
@@ -284,22 +279,21 @@ def _run_frame_tick() -> None:
             pass
 
     # 2b. Advance thrown blades (Bandit/Torgue arcs), keep the held guard honest, and self-heal
-    #     any first-person pose whose state has ended. RMB-release hooks are registered with
-    #     `ALL_HOOKS` at load.
+    #     any first-person pose whose state has ended. The RMB-release hooks live in `HOOKS`.
     tick_secondary_attacks()
 
-    # 3. Drive smooth 1st-person slash motion ONLY during active ~150ms swing window
+    # Drive smooth 1st-person slash motion ONLY during active ~150ms swing window
     if STATE.swing_motion.active:
         pc = get_local_player_controller()
         if pc is not None:
-            _update_first_person_slash_motion(pc)
+            update_first_person_slash_motion(pc)
 
-    # 4. Build definitions & inject loot pools once base packages finish loading
+    # Build definitions & inject loot pools once base packages finish loading
     if not STATE.initialized and _tick_counter >= 90 and (_tick_counter % 60 == 0):
         if ensure_definitions_built():
             sync_loot_pools()
 
-    # 5. Check once per second for new pawn spawn in a gameplay map to restore sidecar inventory
+    # Check once per second for new pawn spawn in a gameplay map to restore sidecar inventory
     if STATE.initialized and (_tick_counter % 60 == 0):
         pc = get_local_player_controller()
         pawn = getattr(pc, "Pawn", None) if pc is not None else None
@@ -328,184 +322,69 @@ def _run_frame_tick() -> None:
             if now >= _map_restore_ready_at:
                 _last_restored_pawn_key = pawn_key
                 _map_restore_ready_at = 0.0
-                ensure_combat_resources_cached()
-                ensure_live_combat_cached()
+                resources.ensure_combat_resources_cached()
                 # Always re-sync on map load so SparkLevelPatchEntry / BLCMM / UCP hotfixes never wipe our pools
                 sync_loot_pools()
                 restore_player_melee_inventory(pc=pc)
 
 
-@hook("Engine.GameViewportClient:Tick", Type.POST)
-def hook_viewport_tick(obj: Any, args: Any, ret: Any, func: Any) -> None:
+def _on_viewport_tick(obj: Any, args: Any, ret: Any, func: Any) -> None:
     _run_frame_tick()
 
 
-@hook("WillowGame.WillowPlayerController:PlayerTick", Type.POST)
-def hook_player_tick(obj: Any, args: Any, ret: Any, func: Any) -> None:
+def _on_player_tick(obj: Any, args: Any, ret: Any, func: Any) -> None:
     _run_frame_tick()
 
 
-@hook("WillowGame.WillowWeapon:InitializeFromDefinitionData", Type.PRE)
-def hook_weapon_init_from_def(obj: Any, args: Any, ret: Any, func: Any) -> Any:
-    return on_weapon_initialize_from_def_pre(obj, args, ret, func)
-
-
-@hook("WillowGame.WillowWeapon:InitializeInternal", Type.PRE)
-def hook_weapon_init_internal_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
-    return on_weapon_initialize_internal_pre(obj, args, ret, func)
-
-
-@hook("WillowGame.WillowWeapon:InitializeInternal", Type.POST)
-def hook_weapon_init_internal_post(obj: Any, args: Any, ret: Any, func: Any) -> Any:
-    return on_weapon_initialize_internal_post(obj, args, ret, func)
-
-
-@hook("WillowGame.WillowWeapon:ChooseRandomNameParts", Type.POST)
-def hook_weapon_choose_names(obj: Any, args: Any, ret: Any, func: Any) -> Any:
-    return on_choose_random_name_parts_post(obj, args, ret, func)
-
-
-@hook("WillowGame.WillowWeapon:PlayAnimation", Type.PRE)
-def hook_weapon_play_anim(obj: Any, args: Any, ret: Any, func: Any) -> Any:
-    return on_play_weapon_animation_pre(obj, args, ret, func)
-
-
-@hook("WillowGame.WillowWeapon:InitConstructPreview", Type.POST)
-def hook_weapon_init_preview(obj: Any, args: Any, ret: Any, func: Any) -> Any:
-    return on_init_construct_preview_post(obj, args, ret, func)
-
-
-@hook("WillowGame.WillowPawn:WeaponFired", Type.PRE)
-def hook_pawn_weapon_fired(obj: Any, args: Any, ret: Any, func: Any) -> Any:
-    return on_pawn_weapon_fired_pre(obj, args, ret, func)
-
-
-@hook("WillowGame.WillowWeapon:ConsumeAmmo", Type.POST)
-def hook_weapon_consume_ammo(obj: Any, args: Any, ret: Any, func: Any) -> Any:
-    return on_weapon_consume_ammo_post(obj, args, ret, func)
-
-
-@hook("WillowGame.WillowWeapon:InstantFire", Type.PRE)
-def hook_weapon_instant_fire_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
-    return on_weapon_instant_fire_pre(obj, args, ret, func)
-
-
-@hook("WillowGame.WillowWeapon:FiringModeDefinitionFire", Type.PRE)
-def hook_weapon_firing_mode_fire_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
-    return on_weapon_firing_mode_fire_pre(obj, args, ret, func)
-
-
-@hook("WillowGame.WillowWeapon:PlayFireEffects", Type.PRE)
-def hook_weapon_play_fire_effects_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
-    return on_weapon_play_fire_effects_pre(obj, args, ret, func)
-
-
-@hook("WillowGame.WillowLightProjectileManager:AddProj", Type.PRE)
-def hook_light_proj_add_proj(obj: Any, args: Any, ret: Any, func: Any) -> Any:
-    return on_light_projectile_add_proj_pre(obj, args, ret, func)
-
-
-@hook("WillowGame.WillowWeapon:SharedFireAmmunition", Type.POST)
-def hook_weapon_shared_fire_post(obj: Any, args: Any, ret: Any, func: Any) -> Any:
-    return on_weapon_shared_fire_post(obj, args, ret, func)
-
-
-@hook("WillowGame.WillowWeapon:HasActiveAmmo", Type.PRE)
-def hook_weapon_has_active_ammo(obj: Any, args: Any, ret: Any, func: Any) -> Any:
+def _on_has_active_ammo(obj: Any, args: Any, ret: Any, func: Any) -> Any:
+    """A blade never runs dry: blocking this stops the engine's out-of-ammo handling."""
     if is_melee_weapon(obj):
         return Block, True
     return None
 
 
-@hook("WillowGame.WillowWeapon:StartReload", Type.PRE)
-def hook_weapon_start_reload(obj: Any, args: Any, ret: Any, func: Any) -> Any:
-    return on_weapon_reload_pre(obj, args, ret, func)
+# Every engine hook this mod installs. Registered through `build_mod(hooks=...)`, which enables
+# them when the mod is enabled and disables them when it is not.
+HOOKS = [
+    hook("Engine.GameViewportClient:Tick", Type.POST)(_on_viewport_tick),
+    hook("WillowGame.WillowPlayerController:PlayerTick", Type.POST)(_on_player_tick),
+    hook("WillowGame.WillowWeapon:InitializeFromDefinitionData", Type.PRE)(on_weapon_initialize_from_def_pre),
+    hook("WillowGame.WillowWeapon:InitializeInternal", Type.PRE)(on_weapon_initialize_internal_pre),
+    hook("WillowGame.WillowWeapon:InitializeInternal", Type.POST)(on_weapon_initialize_internal_post),
+    hook("WillowGame.WillowWeapon:ChooseRandomNameParts", Type.POST)(on_choose_random_name_parts_post),
+    hook("WillowGame.WillowWeapon:PlayAnimation", Type.PRE)(on_play_weapon_animation_pre),
+    hook("WillowGame.WillowWeapon:InitConstructPreview", Type.POST)(on_init_construct_preview_post),
+    hook("WillowGame.WillowPawn:WeaponFired", Type.PRE)(on_pawn_weapon_fired_pre),
+    hook("WillowGame.WillowWeapon:ConsumeAmmo", Type.POST)(on_weapon_consume_ammo_post),
+    hook("WillowGame.WillowWeapon:InstantFire", Type.PRE)(on_weapon_instant_fire_pre),
+    hook("WillowGame.WillowWeapon:FiringModeDefinitionFire", Type.PRE)(on_weapon_firing_mode_fire_pre),
+    hook("WillowGame.WillowWeapon:PlayFireEffects", Type.PRE)(on_weapon_play_fire_effects_pre),
+    hook("WillowGame.WillowLightProjectileManager:AddProj", Type.PRE)(on_light_projectile_add_proj_pre),
+    hook("WillowGame.WillowWeapon:SharedFireAmmunition", Type.POST)(on_weapon_shared_fire_post),
+    hook("WillowGame.WillowWeapon:HasActiveAmmo", Type.PRE)(_on_has_active_ammo),
+    hook("WillowGame.WillowWeapon:StartReload", Type.PRE)(on_weapon_reload_pre),
+    hook("WillowGame.WillowAIPawn:TakeDamage", Type.POST)(on_ai_take_damage_post),
+    hook("WillowGame.WillowPlayerPawn:TakeDamage", Type.PRE)(on_player_take_damage_pre),
+    hook("WillowGame.WillowDamageTypeDefinition:DisplayRecentDamageForPlayer", Type.PRE)(on_display_recent_damage_pre),
+    hook("WillowGame.WillowWeapon:StartZoom", Type.PRE)(on_melee_weapon_start_zoom_pre),
+    hook("WillowGame.WillowWeapon:ClientStartZoom", Type.PRE)(on_melee_weapon_start_zoom_pre),
+    hook("WillowGame.WillowWeapon:StopZoom", Type.PRE)(on_melee_weapon_stop_zoom_pre),
+    hook("WillowGame.WillowWeapon:ClientStopZoom", Type.PRE)(on_melee_weapon_client_stop_zoom_pre),
+    hook("WillowGame.ItemCardGFxObject:SetItemCard", Type.PRE)(on_set_item_card_ex_pre),
+    hook("WillowGame.ItemCardGFxObject:SetItemCard", Type.POST)(on_set_item_card_ex_post),
+    hook("WillowGame.ItemCardGFxObject:SetItemCardEx", Type.PRE)(on_set_item_card_ex_pre),
+    hook("WillowGame.ItemCardGFxObject:SetTitle", Type.PRE)(on_set_title_pre),
+    hook("WillowGame.ItemCardGFxObject:SetTopStat", Type.PRE)(on_set_top_stat_pre),
+    hook("WillowGame.ItemCardGFxObject:SetFunStats", Type.PRE)(on_set_fun_stats_pre),
+    hook("WillowGame.ItemCardGFxObject:SetItemCardEx", Type.POST)(on_set_item_card_ex_post),
+    hook("WillowGame.WillowPlayerController:ValidateWeaponDefinition", Type.PRE)(on_validate_weapon_definition_pre),
+    hook("WillowGame.WillowPlayerController:ApplyWeaponSaveGameData", Type.PRE)(on_apply_weapon_save_data_pre),
+    hook("WillowGame.Behavior_SpawnLootAroundPoint:PlaceSpawnedItems", Type.POST)(on_place_spawned_items_post),
+    hook("WillowGame.WillowSaveGameManager:SaveGame", Type.PRE)(on_save_game_pre),
+]
 
-
-@hook("WillowGame.WillowAIPawn:TakeDamage", Type.POST)
-def hook_ai_take_damage(obj: Any, args: Any, ret: Any, func: Any) -> Any:
-    return on_ai_take_damage_post(obj, args, ret, func)
-
-
-@hook("WillowGame.WillowPlayerPawn:TakeDamage", Type.PRE)
-def hook_player_take_damage(obj: Any, args: Any, ret: Any, func: Any) -> Any:
-    return on_player_take_damage_pre(obj, args, ret, func)
-
-
-@hook("WillowGame.WillowDamageTypeDefinition:DisplayRecentDamageForPlayer", Type.PRE)
-def hook_display_recent_damage(obj: Any, args: Any, ret: Any, func: Any) -> Any:
-    return on_display_recent_damage_pre(obj, args, ret, func)
-
-
-@hook("WillowGame.WillowWeapon:StartZoom", Type.PRE)
-def hook_melee_start_zoom(obj: Any, args: Any, ret: Any, func: Any) -> Any:
-    return on_melee_weapon_start_zoom_pre(obj, args, ret, func)
-
-
-@hook("WillowGame.WillowWeapon:ClientStartZoom", Type.PRE)
-def hook_melee_client_start_zoom(obj: Any, args: Any, ret: Any, func: Any) -> Any:
-    # Belt-and-braces guard in case a firing path reaches the client-side FOV change directly
-    return on_melee_weapon_start_zoom_pre(obj, args, ret, func)
-
-
-@hook("WillowGame.ItemCardGFxObject:SetItemCard", Type.PRE)
-def hook_card_set_item_card_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
-    return on_set_item_card_ex_pre(obj, args, ret, func)
-
-
-@hook("WillowGame.ItemCardGFxObject:SetItemCard", Type.POST)
-def hook_card_set_item_card_post(obj: Any, args: Any, ret: Any, func: Any) -> Any:
-    return on_set_item_card_ex_post(obj, args, ret, func)
-
-
-@hook("WillowGame.ItemCardGFxObject:SetItemCardEx", Type.PRE)
-def hook_card_set_item_card_ex_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
-    return on_set_item_card_ex_pre(obj, args, ret, func)
-
-
-@hook("WillowGame.ItemCardGFxObject:SetTitle", Type.PRE)
-def hook_card_set_title_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
-    return on_set_title_pre(obj, args, ret, func)
-
-
-@hook("WillowGame.ItemCardGFxObject:SetTopStat", Type.PRE)
-def hook_card_set_top_stat_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
-    return on_set_top_stat_pre(obj, args, ret, func)
-
-
-@hook("WillowGame.ItemCardGFxObject:SetFunStats", Type.PRE)
-def hook_card_set_fun_stats_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
-    return on_set_fun_stats_pre(obj, args, ret, func)
-
-
-@hook("WillowGame.ItemCardGFxObject:SetItemCardEx", Type.POST)
-def hook_card_set_item_card_ex_post(obj: Any, args: Any, ret: Any, func: Any) -> Any:
-    return on_set_item_card_ex_post(obj, args, ret, func)
-
-
-@hook("WillowGame.WillowPlayerController:ValidateWeaponDefinition", Type.PRE)
-def hook_validate_weapon_def(obj: Any, args: Any, ret: Any, func: Any) -> Any:
-    return on_validate_weapon_definition_pre(obj, args, ret, func)
-
-
-@hook("WillowGame.WillowPlayerController:ApplyWeaponSaveGameData", Type.PRE)
-def hook_apply_weapon_save_data(obj: Any, args: Any, ret: Any, func: Any) -> Any:
-    return on_apply_weapon_save_data_pre(obj, args, ret, func)
-
-
-@hook("WillowGame.Behavior_SpawnLootAroundPoint:PlaceSpawnedItems", Type.POST)
-def hook_place_spawned_items(obj: Any, args: Any, ret: Any, func: Any) -> Any:
-    return on_place_spawned_items_post(obj, args, ret, func)
-
-
-@hook("WillowGame.WillowSaveGameManager:SaveGame", Type.PRE)
-def hook_save_game_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
-    return on_save_game_pre(obj, args, ret, func)
-
-
-# ---------------------------------------------------------------------------
 # Console Commands
-# ---------------------------------------------------------------------------
+# Console Commands
 
 @command(
     "melee_spawn",
@@ -642,44 +521,6 @@ def cmd_melee_check_pools(_args: Any) -> None:
     )
 
 
-ALL_HOOKS = [
-    hook_viewport_tick,
-    hook_player_tick,
-    hook_weapon_init_from_def,
-    hook_weapon_init_internal_pre,
-    hook_weapon_init_internal_post,
-    hook_weapon_choose_names,
-    hook_weapon_play_anim,
-    hook_weapon_init_preview,
-    hook_pawn_weapon_fired,
-    hook_weapon_consume_ammo,
-    hook_weapon_instant_fire_pre,
-    hook_weapon_firing_mode_fire_pre,
-    hook_weapon_play_fire_effects_pre,
-    hook_light_proj_add_proj,
-    hook_weapon_shared_fire_post,
-    hook_weapon_has_active_ammo,
-    hook_weapon_start_reload,
-    hook_ai_take_damage,
-    hook_player_take_damage,
-    hook_display_recent_damage,
-    hook_melee_start_zoom,
-    hook_melee_client_start_zoom,
-    on_melee_weapon_stop_zoom_pre,
-    on_melee_weapon_client_stop_zoom_pre,
-    hook_card_set_item_card_pre,
-    hook_card_set_item_card_post,
-    hook_card_set_item_card_ex_pre,
-    hook_card_set_title_pre,
-    hook_card_set_top_stat_pre,
-    hook_card_set_fun_stats_pre,
-    hook_card_set_item_card_ex_post,
-    hook_validate_weapon_def,
-    hook_apply_weapon_save_data,
-    hook_place_spawned_items,
-    hook_save_game_pre,
-]
-
 ALL_COMMANDS = [
     cmd_melee_spawn,
     cmd_melee_spawn_all,
@@ -703,6 +544,11 @@ ALL_OPTIONS = [
 ]
 
 
+@command("melee_export_asset_registry")
+def _cmd_export_asset_registry() -> None:
+    export_asset_registry_command()
+
+
 def _on_mod_disable() -> None:
     cancel_pending_spawns()
     clear_pending_restores()
@@ -712,11 +558,6 @@ def _on_mod_disable() -> None:
     clear_all_pending_crit_feedback()
     reset_secondary_state()
     clear_debug_once_cache()
-
-
-@command("melee_export_asset_registry")
-def _cmd_export_asset_registry() -> None:
-    export_asset_registry_command()
 
 
 def build_runtime_mod(version: str, author: str) -> Any:
@@ -735,7 +576,7 @@ def build_runtime_mod(version: str, author: str) -> Any:
         supported_games=Game.BL2,
         auto_enable=True,
         options=ALL_OPTIONS,
-        hooks=ALL_HOOKS,
+        hooks=HOOKS,
         commands=ALL_COMMANDS,
         on_disable=_on_mod_disable,
     )

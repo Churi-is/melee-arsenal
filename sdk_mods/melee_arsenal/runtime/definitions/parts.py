@@ -5,6 +5,7 @@ builder iterates its `core/parts/` registry, so adding a part needs no SDK edits
 `ctx` carries the packages and the donor objects shared between builders.
 """
 from __future__ import annotations
+from ..sdk import unrealsdk
 
 from typing import Any
 
@@ -12,8 +13,8 @@ from ...core.enums import Element, Manufacturer, Rarity
 from ...core.parts import ACCESSORIES, BLADES, ELEMENTS, GRIPS, MANUFACTURERS
 from ..custom_assets import setup_custom_inkblade_assets
 from ..log import obj_path
+from .. import resources
 from ..state import KEEP_ALIVE_FLAGS, STATE
-from ._sdk import unrealsdk
 from .context import BuildContext
 from .helpers import _clear_array_prop, _find, _sum_crit_bonus
 from .name_parts import _apply_crit_bonus_if_supported, _clear_part_stat_bonuses
@@ -23,7 +24,7 @@ def build_body_parts(ctx: BuildContext) -> None:
     """Body/Hilt parts (one per Manufacturer, invisible structural glue)."""
     donors = ctx.donors
     body_pkg = ctx.body_pkg
-    # 3. Build Body/Hilt parts (1 per Manufacturer)
+    # Build Body/Hilt parts (1 per Manufacturer)
     for maker, donor_body in donors["bodies"].items():
         bname = f"Part_Body_{maker.value}"
         bpart = _find("WeaponPartDefinition", f"{obj_path(body_pkg)}.{bname}")
@@ -50,7 +51,7 @@ def build_blade_parts(ctx: BuildContext) -> None:
     """Blade parts (Barrel slot) — define manufacturer, title and Gestalt fragment."""
     donors = ctx.donors
     blade_pkg = ctx.blade_pkg
-    # 4. Build Blade parts (5 Manufacturer-defining Blades in Barrel slot)
+    # Build Blade parts (5 Manufacturer-defining Blades in Barrel slot)
     crit_tpl = donors["crit_effect_template"]
     for blade_id, bspec in BLADES.items():
         maker = bspec.manufacturer
@@ -99,7 +100,7 @@ def build_grip_parts(ctx: BuildContext) -> None:
     donors = ctx.donors
     grip_pkg = ctx.grip_pkg
     crit_tpl = ctx.crit_tpl
-    # 5. Build Grip parts (5 cross-compatible Manufacturer Grips)
+    # Build Grip parts (5 cross-compatible Manufacturer Grips)
     for grip_id, gspec in GRIPS.items():
         maker = gspec.manufacturer
         donor_grip = donors["grips"].get(maker) or next(iter(donors["grips"].values()))
@@ -128,7 +129,7 @@ def build_accessory_parts(ctx: BuildContext) -> None:
     donors = ctx.donors
     acc_pkg = ctx.acc_pkg
     crit_tpl = ctx.crit_tpl
-    # 6. Build Accessory parts (Acc_None + 7 physical/tech blade mods)
+    # Build Accessory parts (Acc_None + 7 physical/tech blade mods)
     # IMPORTANT: Never clone visible accessories from `Pistol_Accessory_None`! `Pistol_Accessory_None`
     # carries UE3's hidden-part flag and suppresses Gestalt fragment rendering even when a fragment is bound.
     visible_acc_donor = (
@@ -193,7 +194,7 @@ def build_element_parts(ctx: BuildContext) -> None:
     donors = ctx.donors
     elem_pkg = ctx.elem_pkg
     visible_acc_donor = ctx.visible_acc_donor
-    # 7. Build Element parts (preserving native elemental damage type, card icon & visible Gestalt donor!)
+    # Build Element parts (preserving native elemental damage type, card icon & visible Gestalt donor!)
     # IMPORTANT: Never clone active elements (e.g. `Elem_Explosive`) from `Pistol_Elemental_None`!
     visible_elem_donor = (
         donors["elements"].get(Element.FIRE)
@@ -245,7 +246,7 @@ def build_element_parts(ctx: BuildContext) -> None:
             except Exception:
                 pass
 
-        dt = STATE.damage_types.get(espec.element)
+        dt = resources._CACHED_DEF_DMG_TYPES.get(espec.element)
         if dt is not None and hasattr(part, "CustomDamageTypeDefinition"):
             try:
                 part.CustomDamageTypeDefinition = dt
@@ -267,7 +268,7 @@ def build_material_parts(ctx: BuildContext) -> None:
     acc_pkg = ctx.acc_pkg
     mats_pkg = ctx.mats_pkg
     visible_acc_donor = ctx.visible_acc_donor
-    # 8. Cache Manufacturer Material parts per (Maker, Rarity) & activate Custom Inkblade 3D Gestalt if present
+    # Cache Manufacturer Material parts per (Maker, Rarity) & activate Custom Inkblade 3D Gestalt if present
     for (maker, rarity), mpart in donors["materials"].items():
         STATE.material_parts[(maker, rarity)] = mpart
 

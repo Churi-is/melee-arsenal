@@ -10,7 +10,6 @@ import random
 from dataclasses import dataclass
 
 from ..enums import Manufacturer, ModifierMode, StatId
-from .blades import BladePartSpec
 from .common import GestaltFragmentMeta, StatModifier, weighted_choice
 
 
@@ -29,9 +28,7 @@ class GripPartSpec:
     kit_id: str | None = None
 
 
-# ---------------------------------------------------------------------------
 # Registry: one entry per Grip
-# ---------------------------------------------------------------------------
 
 GRIPS: dict[str, GripPartSpec] = {
     "Grip_Hyperion": GripPartSpec(
@@ -119,24 +116,6 @@ GRIPS: dict[str, GripPartSpec] = {
         kit_id="grip_torgue",
     ),
 }
-
-GRIP_BY_MANUFACTURER: dict[Manufacturer, GripPartSpec] = {
-    grip.manufacturer: grip for grip in GRIPS.values()
-}
-
-GRIP_TO_KIT_ID: dict[str, str | None] = {
-    part_id: grip.kit_id for part_id, grip in GRIPS.items()
-}
-
-
-# ---------------------------------------------------------------------------
-# Grip data-side logic
-# ---------------------------------------------------------------------------
-
-def is_matching_grip(blade: BladePartSpec, grip: GripPartSpec) -> bool:
-    """True when Blade and Grip share a manufacturer (BL2 matching-grip bonus)."""
-    return grip.manufacturer == blade.manufacturer
-
 
 def roll_grip_id(rng: random.Random) -> str:
     """Weighted pick across every Grip (any Grip can spawn on any Blade)."""

@@ -1,18 +1,17 @@
 """First-person melee animation and procedural hand/weapon poses."""
 
 from __future__ import annotations
+from ..sdk import prevent_hooking_direct_calls, unrealsdk
 
 import copy
 import math
 import time
 from typing import Any
 
-import unrealsdk
-from unrealsdk.hooks import prevent_hooking_direct_calls
 
 from ...core.enums import Manufacturer, TargetingMode
 from ...core.stats import ComputedCardStats
-from ..log import log_info
+from ..log import log_debug_once, log_info
 from ..object_identity import (
     cache_key,
     deref_weak,
@@ -23,7 +22,8 @@ from ..object_identity import (
 )
 from ..resolver import get_local_player_controller, resolve_melee_weapon, unwrap_weapon_object
 from ..state import STATE
-from . import common, resources
+from .. import resources
+from . import common
 from .damage import play_camera_anim
 
 
@@ -224,12 +224,12 @@ def _write_blade_tilt(mesh: Any, tilt: float, bob: float) -> None:
     try:
         bp, by, br = rest["rot"]
         ro = copy.copy(mesh.RotOrigin)
-        ro.Pitch = common._rotator_add(bp, GUARD_BLADE_PITCH * tilt + 120.0 * bob)
-        ro.Yaw = common._rotator_add(by, GUARD_BLADE_YAW * tilt)
-        ro.Roll = common._rotator_add(br, GUARD_BLADE_ROLL * tilt + 80.0 * bob)
+        ro.Pitch = common.rotator_add(bp, GUARD_BLADE_PITCH * tilt + 120.0 * bob)
+        ro.Yaw = common.rotator_add(by, GUARD_BLADE_YAW * tilt)
+        ro.Roll = common.rotator_add(br, GUARD_BLADE_ROLL * tilt + 80.0 * bob)
         mesh.RotOrigin = ro
-    except Exception:
-        pass
+    except Exception as exc:  # pragma: no cover - engine call shape varies
+        log_debug_once("_write_blade_tilt", f"_write_blade_tilt failed: {exc!r}")
 
 
 def _restore_blade() -> None:
@@ -347,9 +347,9 @@ def update_first_person_pose(pc: Any, now: float | None = None) -> None:
     try:
         bp, by, br = entry["rot"]
         ro = copy.copy(sm.RotOrigin)
-        ro.Pitch = common._rotator_add(bp, offsets["pitch"] + 90.0 * bob)
-        ro.Yaw = common._rotator_add(by, offsets["yaw"] * tilt)
-        ro.Roll = common._rotator_add(br, offsets["roll"] * tilt + 60.0 * bob)
+        ro.Pitch = common.rotator_add(bp, offsets["pitch"] + 90.0 * bob)
+        ro.Yaw = common.rotator_add(by, offsets["yaw"] * tilt)
+        ro.Roll = common.rotator_add(br, offsets["roll"] * tilt + 60.0 * bob)
         sm.RotOrigin = ro
         loc = entry.get("loc")
         if loc is not None and hasattr(sm, "Origin"):
@@ -460,8 +460,8 @@ def _write_rest_transforms() -> None:
                 sm.Origin = origin
             if arms is not None and hasattr(arms, "ForceUpdate"):
                 arms.ForceUpdate(False)
-        except Exception:
-            pass
+        except Exception as exc:  # pragma: no cover - engine call shape varies
+            log_debug_once("_write_rest_transforms", f"_write_rest_transforms failed: {exc!r}")
 
 
 def _trigger_first_person_blade_swing(
@@ -481,7 +481,7 @@ def _trigger_first_person_blade_swing(
     eff_speed = max(0.35, card.swing_speed * max(0.25, swing_speed_scale))
     swing_interval = max(0.22, 1.0 / eff_speed)
 
-    # 1. Play real `Bladed_Melee` sequence on `Pawn.Arms` `CustomAnimSlot` (never clobbering
+    # Play real `Bladed_Melee` sequence on `Pawn.Arms` `CustomAnimSlot` (never clobbering
     # `SpecialMove_FirstPerson` on `WeaponAction`, and skipping during mid-swap `PendingWeapon`).
     played_real_anim = False
     pending_wpn = getattr(pawn, "PendingWeapon", None) if pawn is not None else None
@@ -520,7 +520,7 @@ def _trigger_first_person_blade_swing(
                     except Exception:
                         continue
 
-    # 2. Procedural `RotOrigin` + `ForceUpdate(False)` fallback ONLY if no AnimNodeSlot existed
+    # Procedural `RotOrigin` + `ForceUpdate(False)` fallback ONLY if no AnimNodeSlot existed
     if not played_real_anim and arms is not None and not is_dead(arms):
         sm = getattr(arms, "SkeletalMesh", None)
         if sm is not None and hasattr(sm, "RotOrigin"):
@@ -532,7 +532,7 @@ def _trigger_first_person_blade_swing(
             sm_info.style = card.manufacturer.value
             sm_info.swing_sign *= -1
 
-    # 3. Manufacturer-tuned CameraAnim impact feel — soft, slow and eased on purpose.
+    # Manufacturer-tuned CameraAnim impact feel — soft, slow and eased on purpose.
     #    A 2.35 swings/sec Sabre re-triggers this every ~0.42s, so a snappy shake stacked into a
     #    jarring camera flick. Playback runs at 0.60-0.68x (slower opening motion), the blend-in
     #    window is long enough to read as a ramp instead of a jump, and cadence damping scales the
@@ -558,7 +558,7 @@ def _trigger_first_person_blade_swing(
 
         play_camera_anim(pc, canim, scale, rate, CAMERA_SHAKE_BLEND_IN_SEC, CAMERA_SHAKE_BLEND_OUT_SEC)
 
-    # 4. Crisp melee slash whoosh audio
+    # Crisp melee slash whoosh audio
     if pawn is not None:
         ak_whoosh = resources._CACHED_AKEVENTS.get(resources.AK_SWING_WHOOSH)
         if ak_whoosh is not None:
@@ -585,7 +585,7 @@ def restore_all_arms_rest_transforms() -> None:
     _write_rest_transforms()
 
 
-def _update_first_person_slash_motion(pc: Any) -> None:
+def update_first_person_slash_motion(pc: Any) -> None:
     """Drive fallback `RotOrigin` + `ForceUpdate(False)` arc only when `AnimNodeSlot` was unavailable."""
     sm_state = STATE.swing_motion
     if not sm_state.active:

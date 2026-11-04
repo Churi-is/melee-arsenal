@@ -2,8 +2,7 @@
 
 The registries themselves live in the per-part modules; this module holds the
 SDK-independent representation of a rolled/saved weapon (`MeleeWeaponParts`,
-`MeleeWeaponInstance`, `PlayerMeleeContext`), a `ResolvedParts` bundle for any
-consumer that needs every spec at once, and weapon-name resolution.
+`MeleeWeaponInstance`, `PlayerMeleeContext`) and weapon-name resolution.
 """
 from __future__ import annotations
 
@@ -11,11 +10,10 @@ from dataclasses import dataclass, field
 from typing import Mapping
 
 from ..enums import Element, Rarity
-from .accessories import ACCESSORIES, NO_ACCESSORY_ID, AccessoryPartSpec
-from .blades import BladePartSpec, BLADES
-from .elements import NO_ELEMENT_ID, ELEMENTS, ElementPartSpec
-from .grips import GRIPS, GripPartSpec
-from .manufacturers import MANUFACTURERS, ManufacturerSpec
+from .accessories import ACCESSORIES, NO_ACCESSORY_ID
+from .blades import BLADES
+from .elements import NO_ELEMENT_ID, ELEMENTS
+from .grips import GRIPS
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,29 +66,6 @@ class PlayerMeleeContext:
     extra_tags: Mapping[str, float] = field(default_factory=dict)
 
 
-@dataclass(frozen=True, slots=True)
-class ResolvedParts:
-    """Every spec behind a `MeleeWeaponParts`, resolved once for math/card logic."""
-
-    blade: BladePartSpec
-    grip: GripPartSpec
-    accessory: AccessoryPartSpec
-    element: ElementPartSpec
-    manufacturer: ManufacturerSpec
-
-
-def resolve_parts(parts: MeleeWeaponParts) -> ResolvedParts:
-    """Resolve all four part ids (plus the Blade's manufacturer) into one bundle."""
-    blade = BLADES[parts.blade_id]
-    return ResolvedParts(
-        blade=blade,
-        grip=GRIPS[parts.grip_id],
-        accessory=ACCESSORIES[parts.accessory_id],
-        element=ELEMENTS[parts.element_id],
-        manufacturer=MANUFACTURERS[blade.manufacturer],
-    )
-
-
 def resolve_weapon_name(
     blade_id: str,
     grip_id: str,
@@ -105,15 +80,15 @@ def resolve_weapon_name(
     3. Empty prefix otherwise
     Title is determined by the Blade + Grip manufacturer matrix.
     """
-    resolved = resolve_parts(MeleeWeaponParts(blade_id, grip_id, accessory_id, element_id))
-    maker = resolved.blade.manufacturer
-    title = resolved.blade.title_for(resolved.grip.manufacturer)
+    blade = BLADES[blade_id]
+    maker = blade.manufacturer
+    title = blade.title_for(GRIPS[grip_id].manufacturer)
 
     prefix = ""
-    if resolved.accessory.part_id != NO_ACCESSORY_ID:
-        prefix = resolved.accessory.prefix_for(maker)
-    elif resolved.element.element not in (Element.NONE, Element.EXPLOSIVE):
-        prefix = resolved.element.prefix_for(maker)
+    if accessory_id != NO_ACCESSORY_ID:
+        prefix = ACCESSORIES[accessory_id].prefix_for(maker)
+    elif ELEMENTS[element_id].element not in (Element.NONE, Element.EXPLOSIVE):
+        prefix = ELEMENTS[element_id].prefix_for(maker)
 
     full_name = f"{prefix} {title}".strip() if prefix else title
     return prefix, title, full_name

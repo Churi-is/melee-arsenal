@@ -29,7 +29,7 @@ class TargetingMode(str, Enum):
 class SecondaryAttack(str, Enum):
     """Manufacturer-locked Right Mouse Button / Left Trigger secondary attack.
 
-    Melee Weapons deliberately suppress the donor pistol's ADS zoom, freeing RMB for a
+    Melee Weapons suppress the donor pistol's ADS zoom, freeing RMB for a
     manufacturer signature move:
 
     - `THROW` (Bandit, Torgue): hurl the blade along a weight-driven arc. It strikes with
@@ -63,19 +63,6 @@ class ElementPolicy(str, Enum):
     OPTIONAL = "optional"              # Hyperion, Bandit: physical or allowed elements
     ALWAYS_ELEMENTAL = "always_elem"   # Maliwan: always Fire / Shock / Corrosive / Slag
     ALWAYS_EXPLOSIVE = "always_expl"   # Torgue: always Explosive
-
-
-class PartSlot(str, Enum):
-    """Gameplay-visible melee part slots (3-4 parts per weapon) plus internal host slots."""
-
-    BLADE = "Blade"            # Maps to BarrelPartDefinition (defines manufacturer, archetype & targeting)
-    GRIP = "Grip"              # Maps to GripPartDefinition (handling, speed/damage tradeoff, matching bonus)
-    ACCESSORY = "Accessory"    # Maps to Accessory1PartDefinition (prefixes & specialized stat perks)
-    ELEMENT = "Element"        # Maps to ElementalPartDefinition (optional/locked per Blade's ElementPolicy)
-
-    # Internal structural slots on BL2's WeaponDefinitionData (locked to Blade manufacturer / rarity)
-    BODY_HOST = "BodyHost"     # Maps to BodyPartDefinition (supplies manufacturer logo, anim context, empty sight/stock)
-    MATERIAL = "Material"      # Maps to MaterialPartDefinition (rarity skin MIC)
 
 
 class ModifierMode(str, Enum):

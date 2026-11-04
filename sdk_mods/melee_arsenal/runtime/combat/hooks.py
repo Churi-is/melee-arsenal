@@ -1,10 +1,10 @@
 """SDK hook callbacks that route into the combat subsystems."""
 
 from __future__ import annotations
+from ..sdk import Block
 
 from typing import Any
 
-from unrealsdk.hooks import Block
 
 from ...core.enums import SecondaryAttack
 from ...core.parts.weapon import MeleeWeaponInstance
@@ -27,7 +27,7 @@ _SHOT_SEQ: int = 0
 _HANDLED_SHOT_SEQ: int = 0
 
 
-def _try_melee_secondary_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCardStats) -> bool:
+def try_melee_secondary_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCardStats) -> bool:
     """Dispatch a Melee Weapon secondary attack on RMB / Left Trigger.
 
     - `THROW` (Bandit, Torgue): hurl the blade. Returns False if it is already airborne.
@@ -44,7 +44,7 @@ def _try_melee_secondary_attack(wpn: Any, inst: MeleeWeaponInstance, card: Compu
         if started:
             # Give the throw a real arm motion + whoosh + camera bump (the blade itself leaves the
             # hand logically: state is authoritative, the 1st-person swing sells the release).
-            shooter, pc = attacks._resolve_shooter_and_pc(wpn)
+            shooter, pc = attacks.resolve_shooter_and_pc(wpn)
             if shooter is not None and not is_dead(shooter):
                 ctx = damage.read_player_melee_context(shooter, pc)
                 pose._trigger_first_person_blade_swing(pc, shooter, card, ctx.swing_speed_scale)
@@ -61,7 +61,7 @@ def on_melee_weapon_start_zoom_pre(obj: Any, args: Any, ret: Any, func: Any) -> 
         return None
     inst, card = resolved
 
-    if _try_melee_secondary_attack(obj, inst, card):
+    if try_melee_secondary_attack(obj, inst, card):
         return Block
 
     if STATE.debug_attack_log:
@@ -95,9 +95,6 @@ def on_weapon_consume_ammo_post(obj: Any, args: Any, ret: Any, func: Any) -> Any
     return None
 
 
-on_weapon_consume_ammo_pre = on_weapon_consume_ammo_post
-
-
 def on_weapon_instant_fire_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
     """Primary `LMB` melee attack intercept (`WillowWeapon:InstantFire` PRE -> `Block`)."""
     global _HANDLED_SHOT_SEQ
@@ -113,7 +110,7 @@ def on_weapon_instant_fire_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
     inst, card = resolved
     _HANDLED_SHOT_SEQ = _SHOT_SEQ
     try:
-        attacks._execute_melee_attack(obj, inst, card)
+        attacks.execute_melee_attack(obj, inst, card)
     except Exception as exc:
         log_error(f"on_weapon_instant_fire_pre error: {exc!r}")
     return Block
@@ -149,7 +146,7 @@ def on_weapon_shared_fire_post(obj: Any, args: Any, ret: Any, func: Any) -> Any:
     inst, card = resolved
     _HANDLED_SHOT_SEQ = _SHOT_SEQ
     try:
-        attacks._execute_melee_attack(obj, inst, card)
+        attacks.execute_melee_attack(obj, inst, card)
     except Exception as exc:
         log_error(f"on_weapon_shared_fire_post error: {exc!r}")
     return None
@@ -191,7 +188,7 @@ def on_weapon_reload_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
 def on_player_tick_post(obj: Any, args: Any, ret: Any, func: Any) -> Any:
     """Update active Combo Hit 2 Right->Left return slash right after `PlayerTick`."""
     if STATE.swing_motion.active:
-        pose._update_first_person_slash_motion(obj)
+        pose.update_first_person_slash_motion(obj)
     return None
 
 

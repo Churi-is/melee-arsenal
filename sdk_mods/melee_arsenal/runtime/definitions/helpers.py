@@ -6,6 +6,7 @@ and `pyunrealsdk` 1.10 (`unrealsdk` 3.2.0): never assign a Python
 a donor struct first.
 """
 from __future__ import annotations
+from ..sdk import unrealsdk
 
 import copy
 import re
@@ -14,7 +15,6 @@ from typing import Any
 from ...core.enums import StatId
 from ..log import log_debug_once, obj_path
 from ..state import KEEP_ALIVE_FLAGS, STATE
-from ._sdk import unrealsdk
 
 
 def _sum_crit_bonus(modifiers: Any) -> float:

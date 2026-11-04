@@ -91,27 +91,6 @@ class RuntimeRegistry:
     balance_drop_pools: dict[tuple[Manufacturer, Rarity], Any] = field(default_factory=dict)
     drop_spawner: Any = None
 
-    # Cached DamageTypeDefinitions, ImpactDefinitions, AkEvents, CameraAnims, Attributes
-    damage_types: dict[Element, Any] = field(default_factory=dict)
-    dmg_source_bullet_cls: Any = None
-    impact_bullet_normal: Any = None
-    impact_explosive: Any = None
-
-    ak_swing_light: Any = None
-    ak_swing_heavy: Any = None
-    ak_hit_blade: Any = None
-    ak_hit_heavy: Any = None
-
-    canim_light: Any = None
-    canim_cleave: Any = None
-    canim_heavy: Any = None
-
-    attr_melee_mult: Any = None
-    attr_melee_added_buff: Any = None
-    attr_roid_damage: Any = None
-    attr_player_crit: Any = None
-    attr_status_dmg_mult: Any = None
-
     # Runtime settings controlled via ModMenu options
     world_drops_enabled: bool = True
     world_drop_weight: float = 100.0

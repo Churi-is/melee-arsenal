@@ -1,6 +1,7 @@
 """Thrown-blade state, flight, collision, and impact handling."""
 
 from __future__ import annotations
+from ..sdk import prevent_hooking_direct_calls
 
 import math
 import time
@@ -27,7 +28,6 @@ from .. import secondary_vfx
 from ..log import log_error, log_info
 from ..object_identity import deref_weak, is_dead, same_uobject, wrap_weak
 from ..resolver import get_local_player_controller, unwrap_weapon_object
-from unrealsdk.hooks import prevent_hooking_direct_calls
 from .common import _clear_pose, _combat, _same_object
 
 
@@ -72,7 +72,7 @@ def _aim_forward(pc: Any, shooter: Any) -> tuple[float, float, float]:
     rot = getattr(pc, "Rotation", None) if pc is not None else None
     if rot is None and shooter is not None:
         rot = getattr(shooter, "Rotation", None)
-    return combat._rot_to_forward(rot) if rot is not None else (1.0, 0.0, 0.0)
+    return combat.rot_to_forward(rot) if rot is not None else (1.0, 0.0, 0.0)
 
 
 def _play_throw_sfx(shooter: Any, kind: str = "whoosh") -> None:
@@ -101,7 +101,7 @@ def begin_throw(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCardStats) ->
     if _THROW is not None:
         return False
     combat = _combat()
-    shooter, pc = combat._resolve_shooter_and_pc(wpn)
+    shooter, pc = combat.resolve_shooter_and_pc(wpn)
     if shooter is None or is_dead(shooter):
         return False
 
@@ -165,12 +165,8 @@ def is_weapon_thrown(wpn: Any) -> bool:
     return _same_object(st.wpn_ref, wpn)
 
 
-def is_any_weapon_thrown() -> bool:
-    return _THROW is not None
 
 
-def thrown_weapon() -> Any:
-    return deref_weak(_THROW.wpn_ref) if _THROW is not None else None
 
 
 def _throw_point(st: ThrowState, elapsed: float) -> tuple[float, float, float]:
@@ -188,7 +184,7 @@ def _nearest_victim_on_segment(
     """Pure-Python swept-segment check so a fast blade can never tunnel between limbs."""
     combat = _combat()
     try:
-        candidates, pawn_map = combat._snapshot_cleave_candidates(shooter)
+        candidates, pawn_map = combat.snapshot_cleave_candidates(shooter)
     except Exception:
         return None
 
@@ -338,8 +334,8 @@ def _apply_throw_impact(
         try:
             with prevent_hooking_direct_calls():
                 wpn.PlayImpactEffects(
-                    combat._make_vec_from(vec_tpl, *st.last_point),
-                    combat._make_vec_from(vec_tpl, *hit_point),
+                    combat.make_vec_from(vec_tpl, *st.last_point),
+                    combat.make_vec_from(vec_tpl, *hit_point),
                 )
         except Exception:
             pass
@@ -348,7 +344,7 @@ def _apply_throw_impact(
     if st.card.splash_radius_uu > 0.0 and breakdown.splash_hit_damage > 0 and vec_tpl is not None:
         try:
             sx, sy, sz = float(vec_tpl.X), float(vec_tpl.Y), float(vec_tpl.Z)
-            offset_vec = combat._make_vec_from(
+            offset_vec = combat.make_vec_from(
                 vec_tpl,
                 hit_point[0] - sx,
                 hit_point[1] - sy,
@@ -368,7 +364,7 @@ def _apply_throw_impact(
                     DamageCauser=wpn,
                     bSkipTraceTest=False,
                 )
-            combat._spawn_torgue_explosion_vfx_sfx(
+            combat.spawn_torgue_explosion_vfx_sfx(
                 shooter=shooter,
                 pc=pc,
                 vec_tpl=vec_tpl,
@@ -499,7 +495,7 @@ def tick_throw() -> None:
     if elapsed >= st.plan.flight_time_sec and not st.arc_probe_logged:
         st.arc_probe_logged = True
         below = (point[0], point[1], point[2] - THROW_FALL_PROBE_UU)
-        ground, ground_xyz, _g_bone = combat._run_weapon_trace(wpn, st.vec_template, point, below)
+        ground, ground_xyz, _g_bone = combat.run_weapon_trace(wpn, st.vec_template, point, below)
         where = f"ground at z={ground_xyz[2]:.0f}" if ground_xyz is not None else "no ground found"
         log_info(
             f"Throw arc ended at ({point[0]:.0f}, {point[1]:.0f}, {point[2]:.0f}) — "
@@ -509,7 +505,7 @@ def tick_throw() -> None:
         _begin_return(st, "fell out of the world")
         return
 
-    hit_actor, hit_xyz, _bone = combat._run_weapon_trace(wpn, st.vec_template, st.last_point, point)
+    hit_actor, hit_xyz, _bone = combat.run_weapon_trace(wpn, st.vec_template, st.last_point, point)
 
     if hit_actor is not None:
         hx, hy, hz = hit_xyz or point
@@ -521,7 +517,7 @@ def tick_throw() -> None:
             # The thrower's own body / arms mesh, or a non-solid volume: keep flying.
             st.last_point = point
             return
-        if combat._is_valid_melee_victim(shooter, hit_actor):
+        if combat.is_valid_melee_victim(shooter, hit_actor):
             _apply_throw_impact(st, hit_actor, hit_xyz or point)
         else:
             if not st.hit_actor_name:

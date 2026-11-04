@@ -49,9 +49,7 @@ class AccessoryPartSpec:
         return resolve_prefix(self.prefix_by_manufacturer, self.default_prefix, manufacturer)
 
 
-# ---------------------------------------------------------------------------
 # Rarity -> accessory spawn probability (BL2-inspired)
-# ---------------------------------------------------------------------------
 
 # Vanilla-inspired accessory spawn probability by rarity tier
 ACCESSORY_ROLL_CHANCE: dict[Rarity, float] = {
@@ -67,9 +65,7 @@ ACCESSORY_ROLL_CHANCE: dict[Rarity, float] = {
 }
 
 
-# ---------------------------------------------------------------------------
 # Registry: one entry per Accessory (including the empty one)
-# ---------------------------------------------------------------------------
 
 ACCESSORIES: dict[str, AccessoryPartSpec] = {
     "Acc_None": AccessoryPartSpec(
@@ -266,21 +262,7 @@ ACCESSORIES: dict[str, AccessoryPartSpec] = {
     ),
 }
 
-# Derived lookups used by throw math and the runtime asset binder.
-ACCESSORY_WEIGHT_KG: dict[str, float] = {
-    part_id: acc.throw_weight_kg for part_id, acc in ACCESSORIES.items()
-}
-ACCESSORY_GUARD_COOLDOWN_DELTA: dict[str, float] = {
-    part_id: acc.guard_cooldown_delta_sec for part_id, acc in ACCESSORIES.items()
-}
-ACCESSORY_TO_KIT_ID: dict[str, str | None] = {
-    part_id: acc.kit_id for part_id, acc in ACCESSORIES.items()
-}
-
-
-# ---------------------------------------------------------------------------
 # Accessory data-side logic
-# ---------------------------------------------------------------------------
 
 def eligible_accessories_for_roll(
     blade_id: str,

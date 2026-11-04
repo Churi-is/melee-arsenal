@@ -4,14 +4,15 @@ Fire modes are invisible, zero-extent `WillowLightProjectile` rays so every swin
 routes through `WillowLightProjectileManager:AddProj` even at point-blank range.
 """
 from __future__ import annotations
+from ..sdk import unrealsdk
 
 import copy
 from typing import Any
 
 from ...core.enums import Element
 from ..log import log_warn, obj_path
+from .. import resources
 from ..state import KEEP_ALIVE_FLAGS, STATE
-from ._sdk import unrealsdk
 from .context import BuildContext
 from .helpers import (
     MELEE_RAY_SPEED,
@@ -145,7 +146,9 @@ def build_element_firing_modes(ctx: BuildContext) -> None:
             )
             STATE.keep_alive(efm)
         _configure_melee_firing_mode(efm, 400.0)
-        dt_def = STATE.damage_types.get(elem) or STATE.damage_types.get(Element.NONE)
+        dt_def = resources._CACHED_DEF_DMG_TYPES.get(elem) or resources._CACHED_DEF_DMG_TYPES.get(
+            Element.NONE
+        )
         if dt_def is not None and hasattr(efm, "DamageTypeDefinition"):
             efm.DamageTypeDefinition = dt_def
         if elem == Element.EXPLOSIVE:

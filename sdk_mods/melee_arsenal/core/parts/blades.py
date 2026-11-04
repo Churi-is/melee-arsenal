@@ -34,9 +34,7 @@ class BladePartSpec:
         return self.grip_titles.get(grip_manufacturer, self.base_title)
 
 
-# ---------------------------------------------------------------------------
 # Registry: one entry per Blade (one per Manufacturer archetype)
-# ---------------------------------------------------------------------------
 
 BLADES: dict[str, BladePartSpec] = {
     "Blade_Hyperion_Katana": BladePartSpec(
@@ -144,21 +142,3 @@ BLADES: dict[str, BladePartSpec] = {
 BLADE_BY_MANUFACTURER: dict[Manufacturer, BladePartSpec] = {
     blade.manufacturer: blade for blade in BLADES.values()
 }
-
-BLADE_TO_KIT_ID: dict[str, str | None] = {
-    part_id: blade.kit_id for part_id, blade in BLADES.items()
-}
-
-
-# ---------------------------------------------------------------------------
-# Blade data-side logic
-# ---------------------------------------------------------------------------
-
-def blade_for_manufacturer(manufacturer: Manufacturer) -> BladePartSpec:
-    """The one Blade defined for `manufacturer`."""
-    return BLADE_BY_MANUFACTURER[manufacturer]
-
-
-def title_for_parts(blade_id: str, grip_manufacturer: Manufacturer) -> str:
-    """Weapon title for a Blade paired with a Grip of `grip_manufacturer`."""
-    return BLADES[blade_id].title_for(grip_manufacturer)

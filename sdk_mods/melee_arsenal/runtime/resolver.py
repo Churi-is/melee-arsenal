@@ -9,6 +9,7 @@ Why single-item staggered `ServerGrantMissionRewards` (`GD_Episode01.M_Ep1_Champ
   1 every 3 ticks (~50ms apart) so all 5 archetypes arrive directly in your Backpack!
 """
 from __future__ import annotations
+from .sdk import Block, unrealsdk
 
 import copy
 import math
@@ -18,13 +19,6 @@ import traceback
 from collections import deque
 from typing import Any
 
-try:
-    import unrealsdk  # type: ignore[import-not-found]
-    from unrealsdk.hooks import Block, prevent_hooking_direct_calls  # type: ignore[import-not-found]
-except ImportError:  # pragma: no cover
-    unrealsdk = None  # type: ignore[assignment]
-    Block = object()  # type: ignore[assignment]
-    prevent_hooking_direct_calls = None  # type: ignore[assignment]
 
 from ..core.parts import (
     BLADES,
@@ -79,12 +73,8 @@ def allocate_unique_id(reserved: set[int] | None = None) -> int:
     raise RuntimeError("Could not allocate a free Melee Arsenal UniqueId")
 
 
-def grant_was_stamped(unique_id: int) -> bool:
-    return int(unique_id) in _STAMPED_UIDS
 
 
-def has_pending_grants() -> bool:
-    return bool(_DEFERRED_SPAWN_QUEUE) or any(_PENDING_GRANTS.values())
 
 
 def unwrap_weapon_object(item_or_pickup: Any) -> Any:
@@ -339,8 +329,8 @@ def sync_live_weapon_properties(
             changed = True
         if changed:
             wpn.DefinitionData = dd
-    except Exception:
-        pass
+    except Exception as exc:  # pragma: no cover - engine call shape varies
+        log_debug_once("sync_live_weapon_properties", f"sync_live_weapon_properties failed: {exc!r}")
 
     fire_iv = round(1.0 / max(0.25, card.swing_speed), 4)
     elem_dps = float(max(0.0, card.elemental_dps))
@@ -709,13 +699,6 @@ def spawn_melee_weapon_batch(
         return 0
 
 
-def spawn_melee_weapon_instance(
-    inst: MeleeWeaponInstance,
-    pc: Any = None,
-    delivery: str = "drop",
-    yaw_offset_deg: float = 0.0,
-) -> int:
-    return spawn_melee_weapon_batch([inst], pc=pc, delivery=delivery)
 
 
 def on_place_spawned_items_post(obj: Any, args: Any, ret: Any, func: Any) -> Any:
@@ -744,9 +727,7 @@ def on_place_spawned_items_post(obj: Any, args: Any, ret: Any, func: Any) -> Any
     return None
 
 
-# ---------------------------------------------------------------------------
 # Engine Hook Callbacks for Initialization, Naming & 1st-Person Animations
-# ---------------------------------------------------------------------------
 
 def _try_stamp_pending_grant(dd: Any) -> bool:
     if dd is None or not is_melee_definition_data(dd):

@@ -25,22 +25,16 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from .parts.accessories import ACCESSORIES, ACCESSORY_GUARD_COOLDOWN_DELTA, ACCESSORY_WEIGHT_KG
+from .parts.accessories import ACCESSORIES
 from .parts.blades import BLADES
 from .parts.grips import GRIPS
-from .parts.manufacturers import (
-    GUARD_COOLDOWN_BY_MANUFACTURER,
-    GUARD_COOLDOWN_DEFAULT_SEC,
-    MANUFACTURERS,
-)
+from .parts.manufacturers import MANUFACTURERS
 from .parts.weapon import MeleeWeaponInstance
 
 UU_PER_METER: float = 100.0
 
 
-# ---------------------------------------------------------------------------
 # Throw: weapon mass, ballistic arc & hit budget
-# ---------------------------------------------------------------------------
 
 # A thrown blade deals exactly the same damage as the normal LMB melee hit. (It started at 200%
 # as a "thrown hits harder" pitch, but in play that made a single RMB the strongest attack in the
@@ -112,9 +106,6 @@ THROW_HIT_PADDING_UU: float = 22.0
 THROW_BLADE_MASS_FRACTION: float = 0.72
 THROW_GRIP_MASS_FRACTION: float = 0.28
 
-# `ACCESSORY_WEIGHT_KG` is derived from `AccessoryPartSpec.throw_weight_kg` in
-# `core/parts/accessories.py` — add-on mass (kg) per accessory is part data, so it
-# lives with the accessory entry instead of being repeated here.
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,7 +163,7 @@ def compute_throw_weight_kg(weapon: MeleeWeaponInstance) -> float:
     weight = (
         blade_kg * THROW_BLADE_MASS_FRACTION
         + grip_kg * THROW_GRIP_MASS_FRACTION
-        + ACCESSORY_WEIGHT_KG.get(weapon.parts.accessory_id, 0.0)
+        + ACCESSORIES[weapon.parts.accessory_id].throw_weight_kg
     )
     return round(max(0.5, weight), 3)
 
@@ -240,11 +231,6 @@ def build_throw_flight_plan(
     )
 
 
-def compute_throw_damage_scale() -> float:
-    """Multiplier applied to the normal LMB breakdown for a thrown hit (100%, i.e. a normal hit)."""
-    return THROW_DAMAGE_MULTIPLIER
-
-
 def point_segment_distance_uu(
     point: tuple[float, float, float],
     start: tuple[float, float, float],
@@ -264,9 +250,7 @@ def point_segment_distance_uu(
     return math.sqrt((px - cx) ** 2 + (py - cy) ** 2 + (pz - cz) ** 2)
 
 
-# ---------------------------------------------------------------------------
 # Guard: braced damage reduction, parry window & part-driven cooldown
-# ---------------------------------------------------------------------------
 
 # A hit inside this window after raising the guard is a perfect parry: zero damage taken and the
 # melee damage is returned to the attacker as a forced critical hit.
@@ -277,10 +261,6 @@ GUARD_PARRY_WINDOW_SEC: float = 0.33
 # player can never legitimately re-guard this fast).
 GUARD_RELEASE_DEBOUNCE_SEC: float = 0.05
 
-# The guard applies the blade's rolled card Damage Reduction this many times
-# (`(damage * card DR) * card DR`).
-GUARD_DAMAGE_REDUCTION_APPLICATIONS: int = 2
-
 # A parried blow is reflected as a forced critical: BL2's base 2.0x crit multiplier amplified by
 # the blade's own card crit bonus (a Jakobs Sabre's +100% turns a parried hit into 4x reflected).
 PARRY_REFLECT_BASE_CRIT_MULT: float = 2.0
@@ -289,8 +269,6 @@ PARRY_REFLECT_BASE_CRIT_MULT: float = 2.0
 # still drops after this long so the player can never be stuck bracing forever.
 GUARD_MAX_HOLD_SEC: float = 6.0
 
-# `GUARD_COOLDOWN_BY_MANUFACTURER` / `GUARD_COOLDOWN_DEFAULT_SEC` come from
-# `core/parts/manufacturers.py` (per-manufacturer `guard_cooldown_sec` field).
 GUARD_COOLDOWN_MIN_SEC: float = 1.00
 GUARD_COOLDOWN_MAX_SEC: float = 4.00
 # Heavier builds take longer to reset the stance.
@@ -298,8 +276,6 @@ GUARD_COOLDOWN_WEIGHT_REFERENCE_KG: float = 2.40
 GUARD_COOLDOWN_WEIGHT_SPAN: float = 0.25
 # A matching-manufacturer grip balances the weapon, shortening the recovery.
 GUARD_COOLDOWN_MATCHING_GRIP_SCALE: float = 0.85
-# `ACCESSORY_GUARD_COOLDOWN_DELTA` is derived from
-# `AccessoryPartSpec.guard_cooldown_delta_sec` in `core/parts/accessories.py`.
 
 
 def compute_guard_cooldown_sec(weapon: MeleeWeaponInstance) -> float:
@@ -313,7 +289,7 @@ def compute_guard_cooldown_sec(weapon: MeleeWeaponInstance) -> float:
     grip = GRIPS[weapon.parts.grip_id]
     accessory = ACCESSORIES[weapon.parts.accessory_id]
 
-    base = GUARD_COOLDOWN_BY_MANUFACTURER.get(blade.manufacturer, GUARD_COOLDOWN_DEFAULT_SEC)
+    base = MANUFACTURERS[blade.manufacturer].guard_cooldown_sec
     weight = compute_throw_weight_kg(weapon)
     cooldown = base * (
         1.0 - GUARD_COOLDOWN_WEIGHT_SPAN
@@ -321,7 +297,7 @@ def compute_guard_cooldown_sec(weapon: MeleeWeaponInstance) -> float:
     )
     if grip.manufacturer == blade.manufacturer:
         cooldown *= GUARD_COOLDOWN_MATCHING_GRIP_SCALE
-    cooldown += ACCESSORY_GUARD_COOLDOWN_DELTA.get(accessory.part_id, 0.0)
+    cooldown += accessory.guard_cooldown_delta_sec
     return round(min(GUARD_COOLDOWN_MAX_SEC, max(GUARD_COOLDOWN_MIN_SEC, cooldown)), 2)
 
 

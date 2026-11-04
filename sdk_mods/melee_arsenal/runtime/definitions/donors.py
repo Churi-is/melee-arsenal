@@ -4,13 +4,13 @@ Everything built in this package is cloned from these donors, so their paths and
 per-rarity balance suffixes live here rather than being scattered through builders.
 """
 from __future__ import annotations
+from ..sdk import unrealsdk
 
 from typing import Any
 
 from ...core.enums import Element, Manufacturer, Rarity
 from ..log import log_debug, obj_path
 from ..state import STATE
-from ._sdk import unrealsdk
 from .helpers import _find, _inherited_plc
 
 
