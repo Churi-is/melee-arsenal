@@ -1,7 +1,7 @@
 {
   "schema": "melee_arsenal.compiled_inkblade/1.0",
   "kit_revision": "r6_staged",
-  "kit_fingerprint": "91e985a1ef38c7f618f47f2fd4a714e2",
+  "kit_fingerprint": "6dd6a4cf785e04936cf2569f1c87fce5",
   "meshes_package": "MeleeArsenalMeshes",
   "mesh_export": "InkbladeGestaltMesh",
   "textures_package": "MeleeArsenalTextures",

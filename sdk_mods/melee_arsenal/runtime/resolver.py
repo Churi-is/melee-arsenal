@@ -47,12 +47,9 @@ from .custom_assets import (
     set_part_rarity,
     sync_definition_data_visual_parts,
 )
-from .definitions import (
-    MELEE_CLIP_SIZE,
-    ensure_definitions_built,
-    get_or_create_prefix_part,
-    get_or_create_title_part,
-)
+from .definitions import ensure_definitions_built
+from .definitions.helpers import MELEE_CLIP_SIZE
+from .definitions.name_parts import get_or_create_prefix_part, get_or_create_title_part
 from .log import log_debug_once, log_error, log_info, log_warn, obj_path
 from .state import STATE
 

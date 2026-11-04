@@ -1,26 +1,7 @@
-"""Melee Arsenal part catalog — the SDK-independent **data layer**.
+"""SDK-independent part specifications, registries, and lookup helpers.
 
-One module per part type; each owns its spec dataclass, its full registry, derived
-indexes (including InkBlade kit ids), and all pure-Python logic for that part:
-
-===========================  ==========================================================
-``manufacturers.py``          Archetypes: damage/cadence, element policy, cleave
-                              profile, secondary attack, mass, guard recovery
-``blades.py``                 Blade specs, title matrix, Blade->Manufacturer index
-``grips.py``                  Grip specs, matching-grip check, grip roll
-``accessories.py``            Accessory specs, rarity gates, compatibility, rolls,
-                              throw mass and guard cooldown deltas
-``elements.py``               Element specs, ElementPolicy eligibility, element roll
-``weapon.py``                 Composed weapon value types + name resolution
-``common.py``                 Shared dataclasses and helpers
-``validation.py``             Registry invariants (`validate_catalog()`)
-===========================  ==========================================================
-
-Nothing here imports ``unrealsdk`` — the package is fully testable in plain
-CPython. To add a part, add ONE `Spec(...)` entry to the matching registry; the
-derived indexes and eligibility/roll logic pick it up automatically. Run
-``validate_catalog()`` (or the unit tests) afterwards. See ``docs/DEVELOPER.md``
-for the full checklist, including the SDK-side and InkBlade kit steps.
+Each part type is defined in its own module. The package exports the registries,
+composed weapon types, and lookup helpers used by core math and the runtime.
 """
 from __future__ import annotations
 
@@ -74,7 +55,6 @@ from .manufacturers import (
     manufacturer_spec,
     secondary_attack_for,
 )
-from .validation import PART_REGISTRIES, validate_catalog
 from .weapon import (
     MeleeWeaponInstance,
     MeleeWeaponParts,
@@ -110,7 +90,6 @@ __all__ = [
     "MeleeWeaponParts",
     "NO_ACCESSORY_ID",
     "NO_ELEMENT_ID",
-    "PART_REGISTRIES",
     "PlayerMeleeContext",
     "ResolvedParts",
     "StatModifier",
@@ -134,6 +113,5 @@ __all__ = [
     "roll_grip_id",
     "secondary_attack_for",
     "title_for_parts",
-    "validate_catalog",
     "weighted_choice",
 ]

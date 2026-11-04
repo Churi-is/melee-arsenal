@@ -1,7 +1,7 @@
 """UE3 object/struct helpers shared by every definition builder.
 
-Property names and struct layouts here are verified against `melee_probe_report.json`,
-`ribs_arsenal`, and `pyunrealsdk` 1.10 (`unrealsdk` 3.2.0): never assign a Python
+Property names and struct layouts here are verified against Borderlands 2, `ribs_arsenal`,
+and `pyunrealsdk` 1.10 (`unrealsdk` 3.2.0): never assign a Python
 `float`/`dict` to a `WrappedStruct` property — mutate sub-fields or `copy.copy()`
 a donor struct first.
 """

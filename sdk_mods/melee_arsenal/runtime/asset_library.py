@@ -1,10 +1,7 @@
-"""AssetLibraryManager registration so runtime melee definitions serialize cleanly in memory.
+"""Register runtime assets with BL2's `AssetLibraryManager`.
 
-Follows the exact verified BL2 `AssLibMan` structure:
-- `library.Sublibraries` is an array of `str` sublibrary paths (`"MeleeArsenalDev.MeleeSublib_..."`).
-- `library.SublibraryLinks` is an array of `PackageAssetSublibrary` UObjects.
-- Each `PackageAssetSublibrary` holds `LibraryType`, `CachedPackageName`, and `AssetPaths`
-  (`NameBasedObjectPath` structs).
+`Sublibraries` contains package paths. `SublibraryLinks` contains `PackageAssetSublibrary`
+objects with a library type, cached package name, and `NameBasedObjectPath` entries.
 """
 from __future__ import annotations
 
@@ -28,11 +25,7 @@ _LAST_REGISTERED_PATHS: dict[str, list[str]] = {}
 
 
 def _load_asset_order() -> dict[str, list[str]]:
-    """Frozen registration order for bank/save compatibility.
-
-    New assets are appended after the frozen prefix; existing entries are never reordered.
-    Missing manifest falls back to deterministic path order (still stable, but not certified).
-    """
+    """Return assets in the manifest order used for save-stable registration."""
     global _ASSET_ORDER_CACHE
     if _ASSET_ORDER_CACHE is not None:
         return _ASSET_ORDER_CACHE
@@ -179,7 +172,7 @@ def register_assets_in_library(class_name: str, assets: Iterable[Any], set_id: i
             sub.LibraryType = target_lib.LibraryType
             sub.CachedPackageName = pkg_name
 
-            # Merge any previously registered paths with the new assets (append-only order)
+            # Preserve registered paths and append unseen assets.
             existing_paths = list(getattr(sub, "AssetPaths", []) or [])
             seen_keys: set[tuple[str, ...]] = {
                 tuple(str(x) for x in getattr(ep, "PathComponentNames", []))

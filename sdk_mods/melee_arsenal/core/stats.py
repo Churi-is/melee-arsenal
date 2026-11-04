@@ -31,15 +31,12 @@ MELEE_WEAPON_TYPE_DAMAGE_SCALAR: float = 2.65
 UU_PER_METER: float = 100.0
 ROID_REFERENCE_SWING_SPEED: float = 1.50  # Normalizes flat Roid shield bonuses across fast/slow blades
 
-# Swing-speed / per-hit damage budget.
-# Fast blades (Jakobs Sabre 2.35/s) used to out-DPS everything while also being the safest to whiff,
-# so per-hit damage now trades against the blade's *final* swing speed. The exponent stays below 1.0
-# on purpose: fast blades still win slightly on sustained DPS, just no longer by a landslide.
+# Per-hit damage is normalized at 1.5 swings/s. An exponent below 1 preserves a small sustained-DPS
+# advantage for faster blades.
 SWING_SPEED_DAMAGE_REFERENCE: float = 1.50  # swings/sec that keeps 100% of its card damage
-SWING_SPEED_DAMAGE_EXPONENT: float = 0.55   # 0 = no speed penalty (old behaviour), 1 = flat DPS
+SWING_SPEED_DAMAGE_EXPONENT: float = 0.55
 
-# Every Melee Arsenal weapon rolls a flat incoming-damage reduction (Blade Guard) while equipped.
-# It now scales with the weapon's level/stage AND its parts:
+# Equipped weapons grant level- and part-scaled incoming-damage reduction.
 #   * Lv 1 (no OP levels)  -> 30% floor, ~30-34% with parts
 #   * Lv 80 + OP10         -> 61% floor, up to the 70% cap with good parts
 #   * Unique rarities (Legendary / Seraph / Pearlescent / Effervescent) may pass the 70% cap.
@@ -177,12 +174,7 @@ def damage_reduction_level_scale(game_stage: int) -> float:
 
 
 def compute_swing_speed_damage_scale(swing_speed: float) -> float:
-    """Per-hit damage multiplier that trades raw damage against cadence.
-
-    At `SWING_SPEED_DAMAGE_REFERENCE` (1.50 swings/sec) this is exactly 1.0. Faster blades lose a
-    little card damage per hit, slower blades gain a little — so a Jakobs Sabre (2.35/s) no longer
-    out-DPSes a Torgue Blast-Cleaver (0.92/s) by a wide margin while also being the easiest to land.
-    """
+    """Return the per-hit multiplier normalized at `SWING_SPEED_DAMAGE_REFERENCE`."""
     speed = max(0.05, float(swing_speed))
     scale = (SWING_SPEED_DAMAGE_REFERENCE / speed) ** SWING_SPEED_DAMAGE_EXPONENT
     return min(1.35, max(0.60, scale))

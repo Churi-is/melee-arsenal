@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Compare a repository/build payload against an installed Melee Arsenal copy.
-
-Used by `./melee status` so a partially installed mod (old Python, missing UPK, stale manifest)
-is reported as out-of-sync instead of "installed & in sync".
-"""
+"""Compare a repository/build payload with an installed Melee Arsenal copy."""
 from __future__ import annotations
 
 import argparse

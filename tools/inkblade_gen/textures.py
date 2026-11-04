@@ -1,11 +1,7 @@
-"""Texture stage helpers: flat colours, mottling, bold linework and decals.
+"""Pillow helpers for painting deterministic texture layers onto part atlases.
 
-Each helper paints *one layer* onto an existing atlas and is deliberately independent of the others,
-so the pipeline can stack, reorder, cache or extend them (a decals/stencil/grime pass is just another
-function with the same shape).
-
-Everything is Pillow-only and deterministic: all randomness comes from `random.Random` seeded from the
-part id plus a stage salt, never from global state.
+The generator applies flat colours, mottling, linework, and decals to each atlas. Randomized details
+use local `random.Random` instances seeded from the part id and stage salt, never global state.
 """
 from __future__ import annotations
 
@@ -40,8 +36,7 @@ def stage_rng(part_id: str, salt: str) -> random.Random:
 def role_colours(part: Part, layout: PartLayout, cfg_seed: str) -> dict[int, RGB]:
     """Resolve the flat base colour of every owned island.
 
-    Tags address the manufacturer palette exactly like R3 did (`paint` / `metal` / `dark` / `trim` /
-    `edge` / `accent`), with the per-island brightness jitter and the 25%-toward-white `edge` rule.
+    Island tags select manufacturer palette roles; edge islands are blended 25% toward white.
     """
     palette = PALETTE.get(part.manufacturer, PALETTE["Universal"])
     element_hex = str(part.meta.get("element") or "")
@@ -127,7 +122,7 @@ def _unit_field(size: tuple[int, int], cells: float, rng: random.Random) -> Imag
 
 
 def _signed_field(size: tuple[int, int], rng: random.Random) -> Image.Image:
-    """R3's three-octave mottle: 5.2% broad wash + 3.0% broken mid + 0.7% fine tooth."""
+    """Three-octave mottle: 5.2% broad wash, 3.0% broken mid, and 0.7% fine tooth."""
 
     def scaled(field: Image.Image, weight: float) -> Image.Image:
         return field.point([max(0, min(255, int(round(128 + (v - 128) * weight)))) for v in range(256)])
@@ -174,7 +169,7 @@ def paint_flat_colours(
 
 
 # ---------------------------------------------------------------------------
-# Stage: mottling / deposits / wear (R3 painter's detail pass)
+# Stage: mottling, deposits, and wear
 # ---------------------------------------------------------------------------
 def paint_mottle(part: Part, layout: PartLayout, canvas: Image.Image) -> Image.Image:
     """Broad paint wash, deposits, scratches, chipped paint, gouges and micro ink marks."""
@@ -394,7 +389,7 @@ def paint_surface_detail(part: Part, layout: PartLayout, canvas: Image.Image) ->
 
 
 # ---------------------------------------------------------------------------
-# Stage: bold linework (R5 / Bold ink pass)
+# Stage: linework
 # ---------------------------------------------------------------------------
 def _polygon_area(poly: Sequence[Vec2]) -> float:
     area = 0.0
@@ -474,11 +469,7 @@ def _paint_face_ink(
 def linework_layers(
     part_id: str, layout: PartLayout, seed_salt: str = ""
 ) -> tuple[Image.Image, Image.Image]:
-    """The ink overlay as `(shade, ink)`: translucent shadow planes beneath, ink on top, both clipped.
-
-    Split out of `paint_linework` so the port can be compared layer-for-layer with the reference
-    implementation in the tests.
-    """
+    """Build the clipped shadow and ink overlays for one part."""
     width, height = layout.atlas_size
     shade = Image.new("RGBA", (width, height))
     ink = Image.new("RGBA", (width, height))
@@ -644,7 +635,7 @@ def linework_layers(
 
 
 # ---------------------------------------------------------------------------
-# Stage: decals (extension point)
+# Stage: decals
 # ---------------------------------------------------------------------------
 def paint_decals(
     part: Part,
@@ -653,10 +644,9 @@ def paint_decals(
     decal_dir: Path,
     fit: float = 0.62,
 ) -> int:
-    """Stamp `<decal_dir>/<part_id>/*.png` onto paint islands. Returns the number of decals applied.
+    """Center and clip `<decal_dir>/<part_id>/*.png` onto paint islands; return the count applied.
 
-    This stage is the template for future art passes: it consumes the same layout, respects the same
-    island masks, and stays a no-op when no art is supplied, so the stack keeps its shape.
+    Missing decal directories or empty folders leave the atlas unchanged.
     """
     folder = Path(decal_dir) / part.part_id
     if not folder.is_dir():

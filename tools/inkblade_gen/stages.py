@@ -1,18 +1,4 @@
-"""The stage stack: small, independently runnable and cacheable generation steps.
-
-Every stage declares what it does, how to persist its output to the work directory and how to reload
-it. That is what makes the pipeline modular:
-
-* adding an art pass (decals, stencils, grime, ...) = add a `Stage` entry between `mottle` and
-  `textures`; nothing else changes,
-* marking art is painted *before* the ink pass, so contours and hatching sit on top of the prints,
-* editing one stage only invalidates that stage and the ones downstream of it,
-* each stage leaves inspectable artifacts on disk (`--work`).
-
-Ordering note: an atlas cannot be *painted* before the island layout exists, so the texture stages
-follow the UV stage. What *is* decoupled — and what the flat/mottle/linework split buys — is that
-every painting pass is independent, re-runnable and stackable on the same UV layout.
-"""
+"""Generation stages, cache serialization, and kit manifest export."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -30,17 +16,8 @@ from . import textures
 from .config import ELEMENTS, RunConfig
 from .geometry import (
     ACCESSORIES,
-    ACCESSORY_FACE_CLIP_M,
-    ACCESSORY_LENGTH_SCALE,
-    BLADE_CORE_DEPTH_MULTIPLIER,
-    BLADE_LENGTH_BOOST,
-    BLADE_LENGTH_SCALE,
-    BLADE_SPINE_SCALE,
     BLADES,
     COMBINATIONS,
-    ELEMENT_RECEIVER_X,
-    ELEMENT_RECEIVER_X_SHIFT,
-    HEAVY_SPINE_DEPTH_DIVISOR,
     PART_ORDER,
     Face,
     Part,
@@ -483,21 +460,6 @@ def build_manifest(state: KitState) -> dict[str, Any]:
             "seed": cfg.seed,
             "stages": [report.to_json() for report in state.reports],
         },
-        "revision_notes": {
-            "blade_core_depth_multiplier": BLADE_CORE_DEPTH_MULTIPLIER,
-            "blade_spine_scale": BLADE_SPINE_SCALE,
-            "blade_length_scale": BLADE_LENGTH_SCALE,
-            "blade_length_boost_r8": BLADE_LENGTH_BOOST,
-            "accessory_length_scale": ACCESSORY_LENGTH_SCALE,
-            "jakobs_blade": "frontier sabre: straight full-width run, subtle late curve, small clipped tip taper",
-            "flared_cleave_guard": "end caps seated into the continuous plate",
-            "accessory_clip_m": ACCESSORY_FACE_CLIP_M,
-            "element_center_x_m": round(ELEMENT_RECEIVER_X + ELEMENT_RECEIVER_X_SHIFT, 6),
-            "heavy_spine_depth_multiplier": 1.0 / HEAVY_SPINE_DEPTH_DIVISOR,
-            "torgue_grip": "hexagonal shell with four continuous six-sided ribs",
-            "textures": TEXTURE_NOTES,
-            "stages": [report.name for report in state.reports],
-        },
         "parts": parts,
         "elements": dict(ELEMENTS),
         "combinations": [],
@@ -553,7 +515,7 @@ def _png_bytes(image: Image.Image) -> bytes:
 
 
 def _atlas_for_element(state: KitState, part_id: str, element: str | None) -> Image.Image:
-    """Atlas for a combination: accent islands baked to the element tint (R3 behaviour)."""
+    """Return the atlas with accent islands tinted for the selected element."""
     atlas = state.finals[part_id]
     if not element:
         return atlas
@@ -684,21 +646,6 @@ def _kit_readme(state: KitState) -> str:
     ]
     for report in state.reports:
         lines.append(f"1. **{report.name}** — {report.title} ({report.status}, {report.seconds:.2f}s)")
-    lines += [
-        "",
-        "## Notes",
-        "",
-        "- Blade-slot depth is halved and front-only detail is mirrored onto the rear face.",
-        "- Bifacial accessories/elements export `FACE_FRONT` / `FACE_BACK` instances; the baked",
-        "  combinations already push them out by the blade's `accessory_face_gap_m` /",
-        "  `element_face_gap_m`, so their plates sit on the blade skin instead of inside it.",
-        "- The Torgue grip is a hexagonal shell with four continuous wraparound ribs.",
-        "- Textures are painted as a stack of independent layers (flat colours -> mottle/wear ->",
-        "  surface detail -> manufacturer decals -> bold ink -> optional external decals), so new art",
-        "  passes can be inserted without touching older ones. The decals stage runs *before*",
-        "  `linework`, so contours and hatching are drawn over the prints rather than under them.",
-        "",
-    ]
     return "\n".join(lines)
 
 
@@ -725,7 +672,7 @@ def _run_render(state: KitState) -> None:
 # Stage catalogue
 # ---------------------------------------------------------------------------
 def default_stages() -> list[Stage]:
-    """The ordered stack. Insert new art passes anywhere between `mottle` and `textures`."""
+    """Return the ordered generation stages."""
     return [
         Stage(
             "geometry", "Build final part geometry", _run_geometry, _save_geometry, _load_geometry,

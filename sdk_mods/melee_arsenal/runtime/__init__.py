@@ -41,7 +41,8 @@ from .commands import (
     spawn_single_command,
     tune_ui_preview_command,
 )
-from .definitions import ensure_combat_resources_cached, ensure_definitions_built
+from .definitions import ensure_definitions_built
+from .definitions.resources import ensure_combat_resources_cached
 from .log import clear_debug_once_cache, log_info
 from .loot_pools import inspect_loot_pools, refresh_vending_machines, remove_melee_loot_entries, sync_loot_pools
 from .persistence_bridge import (
@@ -53,10 +54,12 @@ from .persistence_bridge import (
     restore_player_melee_inventory,
     snapshot_player_melee_inventory,
 )
-from .secondary import (
-    describe_secondary_state,
+from .secondary.guard import (
     on_melee_weapon_client_stop_zoom_pre,
     on_melee_weapon_stop_zoom_pre,
+)
+from .secondary.lifecycle import (
+    describe_secondary_state,
     reset_secondary_state,
     tick_secondary_attacks,
 )
@@ -193,7 +196,7 @@ opt_camera_shake = SliderOption(
     True,
     description=(
         "Strength of the slow, eased camera bump layered on each blade swing (0% disables it "
-        "entirely). 50% matches the old soft curve's 10% feel; up to 150% for a heavier thump."
+        "entirely). 50% is the default camera-shake strength; increase it for a heavier impact."
     ),
     on_change_anytime=_on_camera_shake_changed,
 )
@@ -310,7 +313,7 @@ def _run_frame_tick() -> None:
             return
 
         # Key the pawn by its stable UObject path, not Python wrapper identity. A new pawn/map
-        # cancels any old throw/guard before sidecar restoration; wrapper churn on the same pawn
+        # cancels pending throws and guards before sidecar restoration; wrapper churn on the same pawn
         # must not re-run inventory grants.
         pawn_key = cache_key(pawn)
         if not pawn_key:
@@ -562,14 +565,6 @@ def cmd_melee_dump_held(args: Any) -> None:
 
 
 @command(
-    "melee_debug_swing",
-    description="Alias for melee_dump_held: inspect held Melee Weapon + live player melee/Roid scaling.",
-)
-def cmd_melee_debug_swing(args: Any) -> None:
-    cmd_melee_dump_held(args)
-
-
-@command(
     "melee_secondary",
     description="Inspect live secondary-attack state: held throw arc / guard window & cooldown.",
 )
@@ -689,7 +684,6 @@ ALL_COMMANDS = [
     cmd_melee_spawn,
     cmd_melee_spawn_all,
     cmd_melee_dump_held,
-    cmd_melee_debug_swing,
     cmd_melee_secondary,
     cmd_melee_save_now,
     cmd_melee_preview,
@@ -720,7 +714,7 @@ def _on_mod_disable() -> None:
     clear_debug_once_cache()
 
 
-@command("melee_export_asset_registry", game=Game.BL2)
+@command("melee_export_asset_registry")
 def _cmd_export_asset_registry() -> None:
     export_asset_registry_command()
 

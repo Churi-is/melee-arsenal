@@ -47,11 +47,7 @@ class BuildOutputTests(unittest.TestCase):
             self.assertEqual((game / "WillowGame/CookedPCConsole/MeleeArsenalTextures.upk").read_bytes(), b"textures")
 
     def test_install_recompiles_the_upks_when_the_kit_changed(self):
-        """`./melee dev` after `./melee generate` must ship the new textures, not the old packages.
-
-        Regression: install used to reuse whatever UPKs happened to exist, so a repainted kit kept
-        its old, valid-looking packages and the game showed the previous art.
-        """
+        """Rebuild the packages when their recorded kit fingerprint differs from the current kit."""
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / "repo"
             (repo / "tools").mkdir(parents=True)
@@ -80,7 +76,7 @@ class BuildOutputTests(unittest.TestCase):
                 "json.dumps({'kit_fingerprint': 'fresh-kit'}))\n"
             )
 
-            # Packages that exist, look fine, and were built from an older kit.
+            # Packages whose recorded fingerprint differs from the current kit.
             cooked = repo / "build/WillowGame/CookedPCConsole"
             cooked.mkdir(parents=True)
             (cooked / "MeleeArsenalMeshes.upk").write_bytes(b"old-mesh")

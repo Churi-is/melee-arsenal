@@ -1,21 +1,7 @@
-"""World-drop, chest, container, and vendor `ItemPoolDefinition` injection (`GD_Itempools` & `GD_ItemPools_Shop`).
+"""Inject Melee Arsenal into world, enemy, chest, container, and vendor loot pools.
 
-Root causes resolved in v0.3.3:
-1. Clears inherited `MinGameStageRequirement` (`Gamestage_02` / `Gamestage_07`) and `MaxGameStageRequirement`
-   from donor pistol sub-pools on all `Pool_Weapons_Melee_*` pools so `SpawnBalancedInventoryFromPool` never
-   zeros out melee drop weights at early levels or in hub maps.
-2. Uses in-place `WrappedArray` mutation (`assign_struct_array`: `.clear()` + `.append()`) with read-back
-   verification instead of raw Python list assignment, and supports idempotent re-sync on every map load so
-   `SparkLevelPatchEntry` hotfixes / BLCMM / UCP pool patches never wipe out Melee Arsenal entries.
-3. Scales melee weights proportionally (`weapon_sum * active_weight / 520.0`) across `Pool_Weapons_All_*`,
-   `EnemyDropPools.Pool_GunsAndGear_*` (the tiered pools a dying enemy rolls) plus the class-biased
-   `Pool_GunsAndGear_Weighted*` variants, `Treasure_ChestPools.*`, `LootablePools.*`, and
-   `GD_ItemPools_Shop.WeaponPools.*` while never touching `GD_ItempoolsEnemyUse.*` (preventing AI weapon bugs).
-4. Resolves pools by exact path, then by case-insensitive live-object name, then through alternate
-   pistol / SMG / AR / shotgun donor pools, so patch / DLC / BLCMM-UCP naming drift never silently
-   disables every injection (a missing *donor* used to abort all 7 sub-pools at once).
-5. Re-rolls already-stocked `WillowVendingMachine` shelves once after the first successful injection:
-   vendors build their stock during map load, which can happen before the mod's pools exist.
+Pools are updated idempotently on map loads. Melee weights scale against the vanilla weapon-class
+weight total, and vendor shelves are refreshed after injection.
 """
 from __future__ import annotations
 

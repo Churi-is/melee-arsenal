@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CLI compiler turning an `Inkblade_Modular_Kit` (`r3`, `r4`, ...) into cooked Borderlands 2 `.upk` packages."""
+"""Compile an InkBlade kit into Borderlands 2 UE3 package files."""
 from __future__ import annotations
 
 import argparse
@@ -28,7 +28,7 @@ def main() -> int:
     parser.add_argument(
         "--donor",
         default=str(REPO_ROOT / "tools" / "inkblade_upk" / "donors" / "weap_pistol_donor.upk"),
-        help="Path to stripped Weap_Pistol donor SkeletalMesh .upk extracted by melee_arsenal_probe",
+        help="Path to a stripped Weap_Pistol donor SkeletalMesh .upk",
     )
     parser.add_argument(
         "--out-cooked-dir",

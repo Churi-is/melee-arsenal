@@ -1,7 +1,7 @@
 """Focused regressions for lifecycle, identity, persistence, and shared attack policy.
 
-These reuse the strict BL2 mock from `test_runtime_mock` but keep each scenario small enough to
-fail with a precise assertion instead of burying the regression in the full-lifecycle test.
+These reuse the strict BL2 fixtures in `runtime_mock_support` and keep each scenario small enough
+to fail with a precise assertion instead of burying the regression in the full-lifecycle test.
 """
 from __future__ import annotations
 
@@ -19,10 +19,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 SDK_MODS_DIR = ROOT_DIR / "sdk_mods"
 if str(SDK_MODS_DIR) not in sys.path:
     sys.path.insert(0, str(SDK_MODS_DIR))
-if str(ROOT_DIR / "tests") not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR / "tests"))
-
-from test_runtime_mock import MockBL2World  # noqa: E402
+from tests.runtime_mock_support import MockBL2World  # noqa: E402
 
 
 @contextmanager
@@ -78,7 +75,7 @@ class RuntimeRegressionTests(unittest.TestCase):
             self.assertEqual(persistence_bridge.restore_player_melee_inventory(pc=world.pc), 0)
             self.assertEqual(len(world.backpack), 2)
 
-    def test_legacy_zero_sidecar_migrates_without_dropping_other_records(self):
+    def test_zero_id_sidecar_migrates_without_dropping_other_records(self):
         with runtime_env() as world:
             from melee_arsenal.core.persistence import read_save_records, save_record_path, serialize_weapon
             from melee_arsenal.core.loot_roller import roll_melee_weapon
@@ -86,10 +83,10 @@ class RuntimeRegressionTests(unittest.TestCase):
             from melee_arsenal.core.persistence import write_save_records_atomic
             from melee_arsenal.runtime import persistence_bridge, resolver
 
-            legacy = roll_melee_weapon(game_stage=30, rarity=Rarity.RARE, manufacturer=Manufacturer.HYPERION, seed="legacy", unique_id=1)
+            zero_id_weapon = roll_melee_weapon(game_stage=30, rarity=Rarity.RARE, manufacturer=Manufacturer.HYPERION, seed="zero-id", unique_id=1)
             other = roll_melee_weapon(game_stage=30, rarity=Rarity.RARE, manufacturer=Manufacturer.JAKOBS, seed="other", unique_id=424242)
             target = save_record_path(persistence_bridge.SAVES_DIR, "Save0002")
-            rec0 = serialize_weapon(legacy)
+            rec0 = serialize_weapon(zero_id_weapon)
             rec0["unique_id"] = 0
             rec0["carried_slot"] = "backpack"
             rec1 = serialize_weapon(other)
@@ -170,7 +167,7 @@ class RuntimeRegressionTests(unittest.TestCase):
         with runtime_env():
             from melee_arsenal.core.enums import Element
             from melee_arsenal.core.stats import compute_attack_damage, compute_card_stats
-            from melee_arsenal.core.schemas import PlayerMeleeContext
+            from melee_arsenal.core.parts.weapon import PlayerMeleeContext
             from melee_arsenal.runtime import combat
 
             # Force an elemental Maliwan card for the proc test.
@@ -178,8 +175,8 @@ class RuntimeRegressionTests(unittest.TestCase):
             from melee_arsenal.core.enums import Manufacturer, Rarity
             inst = roll_melee_weapon(game_stage=30, rarity=Rarity.VERY_RARE, manufacturer=Manufacturer.MALIWAN, seed="status-fire")
             # Pick a fire variant deterministically by rebuilding parts if needed.
-            from melee_arsenal.core.catalog import ELEMENT_PART_BY_TYPE
-            from melee_arsenal.core.schemas import MeleeWeaponParts
+            from melee_arsenal.core.parts.elements import ELEMENT_PART_BY_TYPE
+            from melee_arsenal.core.parts.weapon import MeleeWeaponParts
             inst = replace(inst, parts=MeleeWeaponParts(
                 blade_id=inst.parts.blade_id, grip_id=inst.parts.grip_id,
                 accessory_id=inst.parts.accessory_id, element_id=ELEMENT_PART_BY_TYPE[Element.FIRE].part_id,
@@ -188,7 +185,7 @@ class RuntimeRegressionTests(unittest.TestCase):
             ctx = PlayerMeleeContext(melee_damage_scale=2.0, status_chance_scale=2.0, status_damage_scale=2.0)
             breakdown = compute_attack_damage(card, ctx)
             wpn = types.SimpleNamespace()
-            with mock.patch.object(combat.random, "random", return_value=0.0):
+            with mock.patch.object(combat.damage.random, "random", return_value=0.0):
                 dt, proc = combat.select_attack_damage_type(wpn, card, breakdown)
             self.assertTrue(proc)
             self.assertEqual(wpn.BaseStatusEffectChanceModifier, 50.0)
@@ -206,7 +203,9 @@ class RuntimeRegressionTests(unittest.TestCase):
 
     def test_guard_toggle_disables_mitigation_but_not_pose(self):
         with runtime_env() as world:
-            from melee_arsenal.runtime import secondary, state
+            from melee_arsenal.runtime import state
+            from melee_arsenal.runtime.secondary import guard as secondary_guard
+            from melee_arsenal.runtime.secondary import lifecycle as secondary_lifecycle
             from melee_arsenal.core.loot_roller import roll_melee_weapon
             from melee_arsenal.core.enums import Manufacturer, Rarity
             from melee_arsenal.core.stats import compute_card_stats
@@ -217,15 +216,15 @@ class RuntimeRegressionTests(unittest.TestCase):
             commands.spawn_single_command("hyperion", "purple", "")
             wpn = world.ground_pickups[-1].Inventory
             world.pawn.Weapon = wpn
-            self.assertTrue(secondary.try_begin_guard(wpn, inst, card))
+            self.assertTrue(secondary_guard.try_begin_guard(wpn, inst, card))
             args = types.SimpleNamespace(Damage=1000.0, DamageType=None, InstigatedBy=None, DamageCauser=None)
             state.STATE.guard_damage_reduction_enabled = True
-            self.assertTrue(secondary.handle_guard_incoming_damage(world.pawn, args, None))
+            self.assertTrue(secondary_guard.handle_guard_incoming_damage(world.pawn, args, None))
             state.STATE.guard_damage_reduction_enabled = False
             args.Damage = 1000.0
-            self.assertFalse(secondary.handle_guard_incoming_damage(world.pawn, args, None))
+            self.assertFalse(secondary_guard.handle_guard_incoming_damage(world.pawn, args, None))
             self.assertEqual(args.Damage, 1000.0)
-            secondary.reset_secondary_state()
+            secondary_lifecycle.reset_secondary_state()
 
     def test_asset_library_registration_matches_frozen_manifest(self):
         with runtime_env(custom=True):
@@ -237,7 +236,7 @@ class RuntimeRegressionTests(unittest.TestCase):
                 captured.setdefault(class_name, []).extend(asset_library.obj_path(a) for a in assets if a is not None)
                 return real(class_name, assets, set_id)
             # Definitions are already built; re-register through the same path to capture order.
-            definitions.register_assets_in_library = cap
+            asset_library.register_assets_in_library = cap
             state.STATE.initialized = False
             self.assertTrue(definitions.ensure_definitions_built())
             manifest = json.loads((SDK_MODS_DIR / "melee_arsenal" / "data" / "asset_library_manifest.json").read_text(encoding="utf-8"))

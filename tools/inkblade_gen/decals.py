@@ -1233,8 +1233,7 @@ MIN_ART_AREA = 1800
 #: Grip facets at least this wide (in art pixels, i.e. physically) can carry the branded plate - the
 #: badge, escutcheon or (Hyperion only) the wordmark.  Narrower facets receive only pattern and grime.
 GRIP_LETTER_MIN_PX = 85
-#: ... and no longer than this (metres) along the handle, which excludes the wrap strips: those are
-#: several modelled faces sharing one island, so any plate laid across one would be cut by the seams.
+#: Maximum decal length along the handle; wrap strips span multiple faces and would split a plate.
 GRIP_LETTER_MAX_LENGTH_M = 0.22
 
 

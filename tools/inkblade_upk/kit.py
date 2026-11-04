@@ -1,4 +1,4 @@
-"""Reusable `Inkblade_Modular_Kit` (`r3` -> `r4` -> `r5` Bold) loader, socket deduplicator, and unified-atlas UPK compiler."""
+"""InkBlade kit loader, socket deduplicator, and UE3 UPK compiler."""
 from __future__ import annotations
 
 from collections import defaultdict, deque
@@ -62,7 +62,7 @@ class WeaponFrameCalibration:
     """
 
     scale_uu_per_meter: float = 34.0
-    # Calibrated from live Phase-3 probe (`Weap_Pistol` grip center `(0, +6.7, -5.5)` & `Arms` `"Weapon"` socket):
+    # Calibrated from observed BL2 `Weap_Pistol` grip center `(0, +6.7, -5.5)` and the `Arms` `"Weapon"` socket:
     # Places `gy = 0` (`SOCKET_BLADE`) at `(0, +3.2, +2.3)`, `gy = -0.25` palm center at `(0, +6.66, -5.46)`,
     # and `gy = -0.50` pommel at `(0, +10.11, -13.23)`, keeping 100% of blade + tip inside 90-deg 1P FOV.
     grip_origin_uu: tuple[float, float, float] = (0.0, 3.2, 2.3)
@@ -277,13 +277,7 @@ def _is_compiler_input(name: str) -> bool:
 
 
 def kit_fingerprint(kit_path: str | Path) -> str:
-    """Content hash of a kit's compiled inputs.
-
-    The compiler is deterministic, so "has the kit changed since the last build?" is exactly "does
-    this hash still match the one the last build recorded?".  `melee install`/`dev` use it to notice
-    that the generator has repainted the atlases, which is otherwise invisible: the UPKs on disk stay
-    valid files, they just hold the *old* textures, and the game quietly shows them.
-    """
+    """Return a deterministic hash of the mesh, texture, and manifest inputs."""
     reader = _KitReader(kit_path)
     try:
         hasher = hashlib.sha256()
@@ -409,14 +403,7 @@ def _repair_outward_manifold_winding(
     list[tuple[int, int, int]],
     list[str],
 ]:
-    """Ensure every connected watertight 2-manifold shell winds strictly outward (`signed_volume > 0`).
-
-    `Inkblade_Modular_Kit` (`r3`/`r4`) exports `.glb` materials with `doubleSided: true`, masking
-    inward-wound rear bevels (`Geo.profile` `sign=+1`), Y-axis cylinders (`Geo.cyl(..., axis='y')`),
-    and reflected 2D UV ear-clipping triangles (`r4_builder.py` `triangulate(coords)`). Because BL2's
-    `Master_ClassMod` weapon/item shader uses single-sided D3D9 backface culling (`TwoSided=False`),
-    inward-wound faces vanish on the back side of blades and rear of accessories unless repaired here.
-    """
+    """Orient closed mesh components outward for BL2's single-sided weapon material."""
     if not triangles:
         return positions, normals, uvs, face_sides, triangles, tri_channels
 
@@ -711,7 +698,7 @@ def parse_glb_part_bytes(
     )
     all_tan = _compute_fallback_tangents(all_pos, all_nrm, all_uv, all_tris)
 
-    # Lossless vertex weld for non-indexed triangle soups (cuts r4 GPU vertices by ~35% while keeping flat normals & UV seams)
+    # Weld vertices with matching position, normal, UV, and face-side attributes.
     weld_map: dict[tuple[Any, ...], int] = {}
     w_pos: list[tuple[float, float, float]] = []
     w_nrm: list[tuple[float, float, float]] = []
@@ -763,7 +750,7 @@ def parse_glb_part_bytes(
 
 
 class InkbladeModularKit:
-    """Loaded representation of `Inkblade_Modular_Kit` (`r3`, `r4`, or later revisions)."""
+    """Load the part meshes, textures, sockets, and metadata from a kit."""
 
     def __init__(self, kit_path: str | Path) -> None:
         self._reader = _KitReader(kit_path)
@@ -1165,7 +1152,7 @@ def compile_inkblade_kit_to_upks(
     atlas_size: int = 2048,
     calibration: WeaponFrameCalibration | None = None,
 ) -> dict[str, Any]:
-    """End-to-end `r3`/`r4` compiler: `.glb` + `.png` + `socket_manifest.json` -> cooked BL2 `.upk`s + runtime JSON."""
+    """Compile a generated kit into mesh and texture UPKs plus a runtime manifest."""
     cal = calibration or WeaponFrameCalibration()
     kit = InkbladeModularKit(kit_path)
     placements, atlases = kit.build_element_atlases(atlas_size=atlas_size)
@@ -1226,8 +1213,7 @@ def compile_inkblade_kit_to_upks(
     compiled_manifest: dict[str, Any] = {
         "schema": "melee_arsenal.compiled_inkblade/1.0",
         "kit_revision": kit.revision,
-        # What the packages were built from.  `melee install` compares this against a fresh
-        # `kit_fingerprint()` and recompiles when the generator has repainted the atlases.
+        # Identify the kit content used to build these packages.
         "kit_fingerprint": kit_fingerprint(kit_path),
         "meshes_package": Path(out_meshes_upk).stem,
         "mesh_export": mesh_export_name,

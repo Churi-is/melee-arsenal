@@ -18,8 +18,7 @@ from .common import GestaltFragmentMeta, StatModifier, resolve_prefix, weighted_
 from .elements import ELEMENTS
 from .manufacturers import MANUFACTURERS
 
-# The empty accessory: present on every 3-part weapon. Kept as a real catalog entry
-# so the SDK side can bind BL2's `Pistol_Accessory_None` like any other part.
+# BL2 donor part used when a weapon has no accessory.
 NO_ACCESSORY_ID: str = "Acc_None"
 
 
@@ -267,8 +266,7 @@ ACCESSORIES: dict[str, AccessoryPartSpec] = {
     ),
 }
 
-# Derived views consumed by `core.secondary` and the SDK asset binder. These are
-# generated from the specs above so a new accessory only needs ONE catalog entry.
+# Derived lookups used by throw math and the runtime asset binder.
 ACCESSORY_WEIGHT_KG: dict[str, float] = {
     part_id: acc.throw_weight_kg for part_id, acc in ACCESSORIES.items()
 }

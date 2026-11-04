@@ -49,7 +49,6 @@ from .parts import (
     MANUFACTURERS,
     NO_ACCESSORY_ID,
     NO_ELEMENT_ID,
-    PART_REGISTRIES,
     AccessoryPartSpec,
     BladePartSpec,
     CleaveProfile,
@@ -76,7 +75,6 @@ from .parts import (
     roll_grip_id,
     secondary_attack_for,
     title_for_parts,
-    validate_catalog,
 )
 from .persistence import (
     PACKAGE_ROOT,
@@ -159,7 +157,6 @@ __all__ = [
     "NO_ACCESSORY_ID",
     "NO_ELEMENT_ID",
     "PACKAGE_ROOT",
-    "PART_REGISTRIES",
     "SAVE_SCHEMA",
     "SWING_SPEED_DAMAGE_EXPONENT",
     "SWING_SPEED_DAMAGE_REFERENCE",
@@ -240,7 +237,6 @@ __all__ = [
     "save_record_path",
     "serialize_weapon",
     "title_for_parts",
-    "validate_catalog",
     "validate_weapon_parts",
     "write_save_records_atomic",
 ]

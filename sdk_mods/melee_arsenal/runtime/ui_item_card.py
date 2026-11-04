@@ -1,19 +1,9 @@
-"""Custom Scaleform GFx Item Card hooks for Melee Arsenal weapons.
+"""Scaleform item-card hooks for Melee Arsenal weapons.
 
-Rewrites `WillowGame.ItemCardGFxObject` for Melee Arsenal weapons (on ground pickups, in backpack,
-equipped slots, comparison view, HUD swap mini-card, and vending machines) so cards display:
-  - Damage        (flat gun-scaled integer, comparable against guns & other melee weapons)
-  - Range         (reach in meters, e.g. '3.40m')
-  - Swing Speed   (attacks per second, e.g. '1.85 /s')
-  - Optional Elemental Damage/s & Effect Chance (or Torgue Splash Dmg & Blast Radius)
-  - Archetype FunStats (rolled `Damage Reduction NN% (Equipped)` first, then Single-Target vs Cleave Arc,
-    Blade Crit, and elemental flavour text). Kept short and ordered so no line ever clips into the
-    manufacturer logo — the old trailing green "Stacks with Player Melee & Roid Bonuses" line is gone.
-while completely hiding irrelevant gun stats (Accuracy, Reload Speed, Magazine Size).
+Cards show melee damage, range, swing speed, elemental or splash stats, and the equipped weapon's
+Damage Reduction. Standard gun-only stats are hidden.
 
-IMPORTANT: NEVER call `gfx_obj.AdjustHeight()`! In BL2, `AdjustHeight()` moves & shrinks an
-`ItemCardGFxObject` to the bottom-right HUD equipped-weapon mini-card transform, which permanently
-shrinks the Inventory Menu's shared item card MovieClip!
+Do not call `gfx_obj.AdjustHeight()`: in BL2 it moves and shrinks the shared item-card movie clip.
 """
 from __future__ import annotations
 

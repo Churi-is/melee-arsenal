@@ -50,7 +50,7 @@ class RuntimeRegistry:
     element_parts: dict[str, Any] = field(default_factory=dict)      # elem_id -> WeaponPartDefinition (Elemental slot)
     material_parts: dict[tuple[Manufacturer, Rarity], Any] = field(default_factory=dict)
 
-    # Custom Inkblade 3D Gestalt & unified-atlas material state (`v0.3.0+`)
+    # Custom InkBlade Gestalt mesh and atlas materials
     custom_assets_active: bool = False
     custom_kit_revision: str = ""
     custom_gestalt_def: Any = None

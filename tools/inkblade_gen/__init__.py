@@ -2,7 +2,7 @@
 
 The kit is produced by a stack of independent, individually cacheable stages (see `stages.py`):
 
-1. `geometry`  — final part meshes (R3 parametric shapes with the R4 revisions applied inline)
+1. `geometry`  — part meshes and sockets
 2. `uv`        — shared-density face projection, padded island packing, template reuse
 3. `flat`      — flat palette colour per UV island (saved as PNG atlases)
 4. `mottle`    — paint wash, deposits, wear, chips

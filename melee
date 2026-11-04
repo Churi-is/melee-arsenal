@@ -7,7 +7,6 @@ DEFAULT_KIT="$REPO_ROOT/build/inkblade_kit"
 COOKED_REL="build/WillowGame/CookedPCConsole"
 BUILD_MANIFEST="$REPO_ROOT/build/inkblade_compiled_manifest.json"
 MOD_REL="sdk_mods/melee_arsenal"
-PROBE_REL="sdk_mods/melee_arsenal_probe"
 BL2_CACHE_FILE="$REPO_ROOT/.bl2_dir"
 
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -156,11 +155,7 @@ cmd_setup() {
     "$sys_py" -m venv "$REPO_ROOT/.venv"
   fi
   "$REPO_ROOT/.venv/bin/python" -m pip install --upgrade pip
-  if [ -f "$REPO_ROOT/requirements.txt" ]; then
-    "$REPO_ROOT/.venv/bin/python" -m pip install -r "$REPO_ROOT/requirements.txt"
-  else
-    "$REPO_ROOT/.venv/bin/python" -m pip install "Pillow>=10.1,<14"
-  fi
+  "$REPO_ROOT/.venv/bin/python" -m pip install -r "$REPO_ROOT/requirements.txt"
   ensure_gitignored ".venv/"
   ok "Environment ready at .venv (Pillow installed from requirements.txt)."
 }
@@ -173,7 +168,7 @@ kit_fingerprint() {
 }
 
 compiled_kit_fingerprint() {
-  # The fingerprint the current UPKs were built from (empty for packages built before it existed).
+  # Fingerprint recorded when the UPKs were compiled.
   local py
   py="$(pick_python)"
   "$py" -c 'import json, sys
@@ -251,7 +246,6 @@ cmd_test() {
   else
     "$py" -m unittest discover -s "$REPO_ROOT/tests" -v
   fi
-  rm -rf "$REPO_ROOT/$PROBE_REL/reports"
 }
 
 cmd_preview() {
@@ -410,15 +404,13 @@ PY
 
 cmd_install() {
   local bl2_arg=""
-  local with_probe=0
   local no_rebuild=0
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --bl2-dir)   [ "$#" -ge 2 ] || die "--bl2-dir requires a path argument."; bl2_arg="$2"; shift 2 ;;
       --bl2-dir=*) bl2_arg="${1#*=}"; shift ;;
-      --probe)     with_probe=1; shift ;;
       --no-rebuild) no_rebuild=1; shift ;;
-      *)           die "Unknown install flag: $1 (supported: --bl2-dir <path>, --probe, --no-rebuild)" ;;
+      *)           die "Unknown install flag: $1 (supported: --bl2-dir <path>, --no-rebuild)" ;;
     esac
   done
 
@@ -427,9 +419,7 @@ cmd_install() {
 
   local meshes_upk="$REPO_ROOT/$COOKED_REL/MeleeArsenalMeshes.upk"
   local tex_upk="$REPO_ROOT/$COOKED_REL/MeleeArsenalTextures.upk"
-  # A regenerated kit leaves perfectly valid, perfectly stale UPKs behind: same file names, same
-  # texture names, old pixels.  Compare the kit fingerprint the packages were built from against a
-  # fresh one, so `./melee dev` after `./melee generate` actually ships the new art.
+  # Rebuild the packages when their recorded kit fingerprint differs from the current kit.
   if [ ! -f "$meshes_upk" ] || [ ! -f "$tex_upk" ] || [ ! -f "$BUILD_MANIFEST" ]; then
     die "Missing cooked UPKs or manifest in $COOKED_REL. Run './melee build' first (or drop --no-rebuild)."
   fi
@@ -467,10 +457,6 @@ cmd_install() {
   cp -f "$BUILD_MANIFEST" "$sdk_dir/melee_arsenal/data/inkblade_compiled_manifest.json"
   ok "Synced mod -> $sdk_dir/melee_arsenal/ (sidecar saves in _melee_arsenal_saves preserved)"
 
-  if [ "$with_probe" -eq 1 ]; then
-    sync_python_mod_dir "$REPO_ROOT/$PROBE_REL" "$sdk_dir/melee_arsenal_probe"
-    ok "Synced probe mod -> $sdk_dir/melee_arsenal_probe/"
-  fi
 }
 
 cmd_uninstall() {
@@ -492,7 +478,7 @@ cmd_uninstall() {
   local cooked_dst="$bl2/WillowGame/CookedPCConsole"
 
   info "Uninstalling Melee Arsenal from $bl2"
-  rm -rf "$sdk_dir/melee_arsenal" "$sdk_dir/melee_arsenal_probe"
+  rm -rf "$sdk_dir/melee_arsenal"
   rm -f "$cooked_dst/MeleeArsenalMeshes.upk" "$cooked_dst/MeleeArsenalTextures.upk"
   if [ "$purge_saves" -eq 1 ]; then
     rm -rf "$sdk_dir/_melee_arsenal_saves"
@@ -604,7 +590,7 @@ cmd_clean() {
   info "Cleaning bytecode caches & build artifacts"
   find "$REPO_ROOT" \( -name "__pycache__" -o -name ".pytest_cache" \) -type d -prune -exec rm -rf {} +
   find "$REPO_ROOT" \( -name "*.pyc" -o -name "*.pyo" -o -name ".DS_Store" \) -type f -delete
-  rm -rf "$REPO_ROOT/$PROBE_REL/reports" "$REPO_ROOT/build"
+  rm -rf "$REPO_ROOT/build"
   ok "Workspace cleaned."
 }
 
@@ -664,13 +650,13 @@ ${C_BOLD}Commands:${C_RESET}
                             (recompiles the UPKs first if the kit has changed since the last build)
   ${C_CYAN}install${C_RESET} [options]         Install UPKs + sdk_mods/melee_arsenal into Borderlands 2
                             Recompiles the UPKs automatically when the kit has been regenerated.
-                            Options: --bl2-dir <path> (cached in .bl2_dir), --probe, --no-rebuild
+                            Options: --bl2-dir <path> (cached in .bl2_dir), --no-rebuild
   ${C_CYAN}dev${C_RESET} [install-options]     Quick iterate: run quiet tests, then install to Borderlands 2
                             (safe after './melee generate': stale UPKs are recompiled, not shipped)
   ${C_CYAN}uninstall${C_RESET} [options]       Remove mod & UPKs from Borderlands 2 (--purge-saves to wipe saves)
   ${C_CYAN}status${C_RESET}                    Show repo, kit, UPK, Borderlands 2 sync, and sidecar save status
   ${C_CYAN}logs${C_RESET} [-f] [-n <lines>]    View or follow live in-game melee_arsenal.log
-  ${C_CYAN}clean${C_RESET}                     Remove __pycache__, .pyc, probe scratch reports, and build/
+  ${C_CYAN}clean${C_RESET}                     Remove __pycache__, .pyc, and build/
   ${C_CYAN}all${C_RESET} [install-options]     Full pipeline: build -> test -> package -> install (if BL2 found)
 
 ${C_BOLD}Environment:${C_RESET}

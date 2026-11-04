@@ -13,7 +13,6 @@ import random
 from .enums import Manufacturer, Rarity
 from .parts.accessories import (
     ACCESSORIES,
-    ACCESSORY_ROLL_CHANCE,  # re-exported for older callers (runtime/definitions/balances.py, tools)
     NO_ACCESSORY_ID,
     eligible_accessories_for_roll,
     roll_accessory_id,
@@ -24,7 +23,6 @@ from .parts.grips import GRIPS, roll_grip_id
 from .parts.weapon import MeleeWeaponInstance, MeleeWeaponParts
 
 __all__ = [
-    "ACCESSORY_ROLL_CHANCE",
     "eligible_accessories_for_roll",
     "eligible_elements_for_blade",
     "roll_melee_weapon",
@@ -79,9 +77,7 @@ def roll_melee_weapon(
 ) -> MeleeWeaponInstance:
     """Roll a complete procedural `MeleeWeaponInstance` with 3-4 parts.
 
-    The RNG call order is part of the format: manufacturer -> Grip -> Element ->
-    optional Accessory -> UniqueId. Keeping those picks in the per-part modules does
-    not change it, so seeded rolls (tests, debug spawns, previews) stay reproducible.
+    RNG order is manufacturer -> Grip -> Element -> optional Accessory -> UniqueId.
     """
     rng = random.Random(seed) if seed is not None else random.Random()
 

@@ -160,11 +160,8 @@ def set_part_gestalt_fragment(part: Any, fragment_name: str) -> None:
 def set_part_rarity(part: Any, rarity: Rarity | int | float) -> None:
     """Pin `WeaponPartDefinition.Rarity` to an exact BL2 rarity level (`1` White … `4` Purple).
 
-    BL2 no longer sums rarity from every part: one specific part — the **Material** part — decides
-    the rarity of the finished item. That single float drives the item-card title colour, the ground
-    loot-beam colour (`WillowPickup.InventoryRarityLevel` via `GlobalsDefinition.GetRarityColorForLevel`)
-    and the rarity-scaled sell value. A clone whose `Rarity` was inherited from a Common donor (or left
-    at `0`) renders every Melee Weapon white no matter which tier rolled, so we stamp it explicitly.
+    BL2 derives finished-item rarity from the **Material** part. Its value controls the item-card
+    title, loot-beam colour, and sell value, so each generated material part is assigned its rolled tier.
     """
     if part is None or not hasattr(part, "Rarity"):
         return
