@@ -7,7 +7,8 @@ DEFAULT_KIT="$REPO_ROOT/build/inkblade_kit"
 COOKED_REL="build/WillowGame/CookedPCConsole"
 BUILD_MANIFEST="$REPO_ROOT/build/inkblade_compiled_manifest.json"
 MOD_REL="sdk_mods/melee_arsenal"
-PROBE_REL="sdk_mods/melee_arsenal_probe"
+# Keep cleanup for ignored reports left by the retired in-game probe.
+LEGACY_PROBE_REL="sdk_mods/melee_arsenal_probe"
 BL2_CACHE_FILE="$REPO_ROOT/.bl2_dir"
 
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -247,7 +248,6 @@ cmd_test() {
   else
     "$py" -m unittest discover -s "$REPO_ROOT/tests" -v
   fi
-  rm -rf "$REPO_ROOT/$PROBE_REL/reports"
 }
 
 cmd_preview() {
@@ -406,15 +406,13 @@ PY
 
 cmd_install() {
   local bl2_arg=""
-  local with_probe=0
   local no_rebuild=0
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --bl2-dir)   [ "$#" -ge 2 ] || die "--bl2-dir requires a path argument."; bl2_arg="$2"; shift 2 ;;
       --bl2-dir=*) bl2_arg="${1#*=}"; shift ;;
-      --probe)     with_probe=1; shift ;;
       --no-rebuild) no_rebuild=1; shift ;;
-      *)           die "Unknown install flag: $1 (supported: --bl2-dir <path>, --probe, --no-rebuild)" ;;
+      *)           die "Unknown install flag: $1 (supported: --bl2-dir <path>, --no-rebuild)" ;;
     esac
   done
 
@@ -461,10 +459,6 @@ cmd_install() {
   cp -f "$BUILD_MANIFEST" "$sdk_dir/melee_arsenal/data/inkblade_compiled_manifest.json"
   ok "Synced mod -> $sdk_dir/melee_arsenal/ (sidecar saves in _melee_arsenal_saves preserved)"
 
-  if [ "$with_probe" -eq 1 ]; then
-    sync_python_mod_dir "$REPO_ROOT/$PROBE_REL" "$sdk_dir/melee_arsenal_probe"
-    ok "Synced probe mod -> $sdk_dir/melee_arsenal_probe/"
-  fi
 }
 
 cmd_uninstall() {
@@ -598,7 +592,7 @@ cmd_clean() {
   info "Cleaning bytecode caches & build artifacts"
   find "$REPO_ROOT" \( -name "__pycache__" -o -name ".pytest_cache" \) -type d -prune -exec rm -rf {} +
   find "$REPO_ROOT" \( -name "*.pyc" -o -name "*.pyo" -o -name ".DS_Store" \) -type f -delete
-  rm -rf "$REPO_ROOT/$PROBE_REL/reports" "$REPO_ROOT/build"
+  rm -rf "$REPO_ROOT/$LEGACY_PROBE_REL/reports" "$REPO_ROOT/build"
   ok "Workspace cleaned."
 }
 
@@ -658,13 +652,13 @@ ${C_BOLD}Commands:${C_RESET}
                             (recompiles the UPKs first if the kit has changed since the last build)
   ${C_CYAN}install${C_RESET} [options]         Install UPKs + sdk_mods/melee_arsenal into Borderlands 2
                             Recompiles the UPKs automatically when the kit has been regenerated.
-                            Options: --bl2-dir <path> (cached in .bl2_dir), --probe, --no-rebuild
+                            Options: --bl2-dir <path> (cached in .bl2_dir), --no-rebuild
   ${C_CYAN}dev${C_RESET} [install-options]     Quick iterate: run quiet tests, then install to Borderlands 2
                             (safe after './melee generate': stale UPKs are recompiled, not shipped)
   ${C_CYAN}uninstall${C_RESET} [options]       Remove mod & UPKs from Borderlands 2 (--purge-saves to wipe saves)
   ${C_CYAN}status${C_RESET}                    Show repo, kit, UPK, Borderlands 2 sync, and sidecar save status
   ${C_CYAN}logs${C_RESET} [-f] [-n <lines>]    View or follow live in-game melee_arsenal.log
-  ${C_CYAN}clean${C_RESET}                     Remove __pycache__, .pyc, probe scratch reports, and build/
+  ${C_CYAN}clean${C_RESET}                     Remove __pycache__, .pyc, ignored scratch reports, and build/
   ${C_CYAN}all${C_RESET} [install-options]     Full pipeline: build -> test -> package -> install (if BL2 found)
 
 ${C_BOLD}Environment:${C_RESET}

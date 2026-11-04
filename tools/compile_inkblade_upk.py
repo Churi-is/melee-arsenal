@@ -28,7 +28,7 @@ def main() -> int:
     parser.add_argument(
         "--donor",
         default=str(REPO_ROOT / "tools" / "inkblade_upk" / "donors" / "weap_pistol_donor.upk"),
-        help="Path to stripped Weap_Pistol donor SkeletalMesh .upk extracted by melee_arsenal_probe",
+        help="Path to a stripped Weap_Pistol donor SkeletalMesh .upk",
     )
     parser.add_argument(
         "--out-cooked-dir",
