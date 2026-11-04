@@ -1,7 +1,7 @@
 """SDK-independent part specifications, registries, and lookup helpers.
 
 Each part type is defined in its own module. The package exports the registries,
-composed weapon types, and validation helpers used by core math and the runtime.
+composed weapon types, and lookup helpers used by core math and the runtime.
 """
 from __future__ import annotations
 
@@ -55,7 +55,6 @@ from .manufacturers import (
     manufacturer_spec,
     secondary_attack_for,
 )
-from .validation import PART_REGISTRIES, validate_catalog
 from .weapon import (
     MeleeWeaponInstance,
     MeleeWeaponParts,
@@ -91,7 +90,6 @@ __all__ = [
     "MeleeWeaponParts",
     "NO_ACCESSORY_ID",
     "NO_ELEMENT_ID",
-    "PART_REGISTRIES",
     "PlayerMeleeContext",
     "ResolvedParts",
     "StatModifier",
@@ -115,6 +113,5 @@ __all__ = [
     "roll_grip_id",
     "secondary_attack_for",
     "title_for_parts",
-    "validate_catalog",
     "weighted_choice",
 ]

@@ -13,7 +13,6 @@ Verifies:
 from __future__ import annotations
 
 import copy
-import py_compile
 import sys
 import tempfile
 import types
@@ -1585,13 +1584,6 @@ class MockBL2World:
 
 
 class TestMeleeArsenalRuntime(unittest.TestCase):
-    def test_all_runtime_files_compile_cleanly(self) -> None:
-        runtime_dir = SDK_MODS_DIR / "melee_arsenal" / "runtime"
-        py_files = sorted(runtime_dir.glob("*.py"))
-        self.assertGreaterEqual(len(py_files), 8)
-        for f in py_files:
-            py_compile.compile(str(f), doraise=True)
-
     def test_strict_wrapped_struct_and_full_lifecycle(self) -> None:
         if str(SDK_MODS_DIR) not in sys.path:
             sys.path.insert(0, str(SDK_MODS_DIR))

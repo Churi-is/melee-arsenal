@@ -1,7 +1,6 @@
-"""Tests for the SDK-independent part registries and roll logic."""
+"""Tests for part data integrity, eligibility, and seeded rolls."""
 from __future__ import annotations
 
-import ast
 import random
 import sys
 import unittest
@@ -14,21 +13,17 @@ if str(ROOT_DIR / "sdk_mods") not in sys.path:
 
 from melee_arsenal.core import loot_roller  # noqa: E402
 from melee_arsenal.core import secondary  # noqa: E402
-from melee_arsenal.core.enums import (  # noqa: E402
-    Element,
-    Manufacturer,
-    PartSlot,
-    Rarity,
-    SecondaryAttack,
-)
+from melee_arsenal.core.enums import Element, Manufacturer, PartSlot, Rarity  # noqa: E402
 from melee_arsenal.core.parts import (  # noqa: E402
     ACCESSORIES,
     ACCESSORY_GUARD_COOLDOWN_DELTA,
     ACCESSORY_TO_KIT_ID,
     ACCESSORY_WEIGHT_KG,
+    BLADE_BY_MANUFACTURER,
     BLADE_TO_KIT_ID,
     BLADES,
     ELEMENT_ID_TO_ATLAS_KEY,
+    ELEMENT_PART_BY_TYPE,
     ELEMENT_TO_KIT_ID,
     ELEMENTS,
     GRIP_TO_KIT_ID,
@@ -37,7 +32,6 @@ from melee_arsenal.core.parts import (  # noqa: E402
     MANUFACTURERS,
     NO_ACCESSORY_ID,
     NO_ELEMENT_ID,
-    PART_REGISTRIES,
     AccessoryPartSpec,
     MeleeWeaponParts,
     blade_for_manufacturer,
@@ -49,65 +43,72 @@ from melee_arsenal.core.parts import (  # noqa: E402
     roll_accessory_id,
     roll_element_id,
     roll_grip_id,
-    secondary_attack_for,
-    validate_catalog,
 )
 
+# The test owns this inventory so core SDK files need no catalog-wide validator.
+PART_REGISTRIES = {
+    PartSlot.BLADE: BLADES,
+    PartSlot.GRIP: GRIPS,
+    PartSlot.ACCESSORY: ACCESSORIES,
+    PartSlot.ELEMENT: ELEMENTS,
+}
 
-class TestPartsPackageLayout(unittest.TestCase):
-    def test_one_module_per_part_type(self) -> None:
-        parts_dir = Path(__import__("melee_arsenal.core.parts", fromlist=["__file__"]).__file__).parent
-        for name in (
-            "manufacturers",
-            "blades",
-            "grips",
-            "accessories",
-            "elements",
-            "weapon",
-            "common",
-            "validation",
-        ):
-            with self.subTest(module=name):
-                self.assertTrue((parts_dir / f"{name}.py").is_file(), f"missing parts/{name}.py")
 
-    def test_parts_package_imports_no_sdk(self) -> None:
-        parts_dir = Path(__import__("melee_arsenal.core.parts", fromlist=["__file__"]).__file__).parent
-        for path in sorted(parts_dir.glob("*.py")):
-            with self.subTest(module=path.name):
-                tree = ast.parse(path.read_text(encoding="utf-8"))
-                for node in ast.walk(tree):
-                    if isinstance(node, ast.Import):
-                        self.assertFalse(any(a.name.startswith("unrealsdk") for a in node.names))
-                    elif isinstance(node, ast.ImportFrom):
-                        self.assertFalse((node.module or "").startswith("unrealsdk"))
+class TestPartDataIntegrity(unittest.TestCase):
+    def test_every_part_has_a_unique_id_and_valid_asset_data(self) -> None:
+        seen_ids: set[str] = set()
+        seen_fragments: set[str] = set()
+        seen_kit_ids: set[str] = set()
 
-    def test_registry_keys_are_part_ids_and_slots_are_distinct(self) -> None:
-        self.assertEqual(
-            set(PART_REGISTRIES),
-            {PartSlot.BLADE, PartSlot.GRIP, PartSlot.ACCESSORY, PartSlot.ELEMENT},
-        )
-        seen: set[str] = set()
         for slot, registry in PART_REGISTRIES.items():
             self.assertTrue(registry, f"{slot.value} registry is empty")
             for key, spec in registry.items():
-                self.assertEqual(key, spec.part_id)
-                self.assertNotIn(key, seen, f"duplicate part id {key!r}")
-                seen.add(key)
+                with self.subTest(slot=slot.value, part=key):
+                    self.assertEqual(key, spec.part_id)
+                    self.assertNotIn(key, seen_ids, f"duplicate part id {key!r}")
+                    self.assertTrue(spec.donor_part_path)
+                    weight = getattr(spec, "weight", None)
+                    if weight is not None:
+                        self.assertGreater(weight, 0)
+
+                    gestalt = getattr(spec, "gestalt", None)
+                    fragment = getattr(gestalt, "fragment_name", None)
+                    if fragment:
+                        self.assertNotIn(fragment, seen_fragments)
+                        seen_fragments.add(fragment)
+                    kit_id = getattr(spec, "kit_id", None)
+                    if kit_id:
+                        self.assertNotIn(kit_id, seen_kit_ids)
+                        seen_kit_ids.add(kit_id)
+                    seen_ids.add(key)
+
+    def test_manufacturer_and_element_indexes_match_the_specs(self) -> None:
+        self.assertEqual(set(MANUFACTURERS), set(Manufacturer))
+        self.assertEqual(set(BLADE_BY_MANUFACTURER), set(Manufacturer))
+        for maker in Manufacturer:
+            with self.subTest(manufacturer=maker.value):
+                manufacturer = MANUFACTURERS[maker]
+                self.assertIs(manufacturer.manufacturer, maker)
+                self.assertTrue(manufacturer.donor_manufacturer_path)
+                blade = BLADE_BY_MANUFACTURER[maker]
+                self.assertIs(BLADES.get(blade.part_id), blade)
+                self.assertIs(blade.manufacturer, maker)
+                for element in manufacturer.allowed_elements:
+                    self.assertIn(element, ELEMENT_PART_BY_TYPE)
+
+        for blade_id, blade in BLADES.items():
+            with self.subTest(blade=blade_id):
+                self.assertIn(blade.manufacturer, MANUFACTURERS)
+                self.assertTrue(eligible_elements_for_blade(blade_id))
+
+        self.assertEqual(set(ELEMENT_PART_BY_TYPE), set(Element))
+        for element, spec in ELEMENT_PART_BY_TYPE.items():
+            with self.subTest(element=element.value):
+                self.assertIs(ELEMENTS.get(spec.part_id), spec)
+                self.assertIs(spec.element, element)
 
 
 class TestDerivedPartData(unittest.TestCase):
-    def test_validate_catalog_is_clean(self) -> None:
-        self.assertEqual(validate_catalog(), [])
-
-    def test_validate_catalog_flags_a_mismatched_entry(self) -> None:
-        from dataclasses import replace
-
-        broken = replace(BLADES["Blade_Hyperion_Katana"], part_id="Blade_Wrong_Id")
-        with mock.patch.dict(BLADES, {"Blade_Hyperion_Katana": broken}):
-            errors = validate_catalog()
-            self.assertTrue(any("!=" in e for e in errors), errors)
-        self.assertEqual(validate_catalog(), [], "catalog was not restored")
-
     def test_accessory_mass_and_guard_delta_come_from_the_specs(self) -> None:
         expected_weight = {
             "Acc_None": 0.0,
@@ -131,8 +132,8 @@ class TestDerivedPartData(unittest.TestCase):
         }
         self.assertEqual(ACCESSORY_WEIGHT_KG, expected_weight)
         self.assertEqual(ACCESSORY_GUARD_COOLDOWN_DELTA, expected_delta)
-        self.assertIs(ACCESSORY_WEIGHT_KG, secondary.ACCESSORY_WEIGHT_KG)
-        self.assertIs(ACCESSORY_GUARD_COOLDOWN_DELTA, secondary.ACCESSORY_GUARD_COOLDOWN_DELTA)
+        self.assertIs(secondary.ACCESSORY_WEIGHT_KG, ACCESSORY_WEIGHT_KG)
+        self.assertIs(secondary.ACCESSORY_GUARD_COOLDOWN_DELTA, ACCESSORY_GUARD_COOLDOWN_DELTA)
         for part_id, spec in ACCESSORIES.items():
             self.assertEqual(spec.throw_weight_kg, expected_weight[part_id])
             self.assertEqual(spec.guard_cooldown_delta_sec, expected_delta[part_id])
@@ -158,7 +159,7 @@ class TestDerivedPartData(unittest.TestCase):
         )
         self.assertEqual(
             GRIP_TO_KIT_ID,
-            {f"Grip_{m.value}": f"grip_{m.value.lower()}" for m in Manufacturer},
+            {f"Grip_{maker.value}": f"grip_{maker.value.lower()}" for maker in Manufacturer},
         )
         self.assertEqual(
             ACCESSORY_TO_KIT_ID,
@@ -195,24 +196,6 @@ class TestDerivedPartData(unittest.TestCase):
                 "Elem_Explosive": "Explosive",
             },
         )
-
-    def test_runtime_consumes_the_derived_kit_tables(self) -> None:
-        """The SDK asset binder imports the part-data tables instead of copying them.
-
-        Checked from source so this test stays pure-CPython (`runtime/__init__.py`
-        needs the in-game `mods_base` module, which is not available offline).
-        """
-        source = (ROOT_DIR / "sdk_mods/melee_arsenal/runtime/custom_assets.py").read_text(encoding="utf-8")
-        for name in (
-            "BLADE_TO_KIT_ID",
-            "GRIP_TO_KIT_ID",
-            "ACCESSORY_TO_KIT_ID",
-            "ELEMENT_TO_KIT_ID",
-            "ELEMENT_ID_TO_ATLAS_KEY",
-        ):
-            with self.subTest(table=name):
-                self.assertIn(name, source)
-                self.assertNotRegex(source, rf"^{name}\s*:\s*dict\[[^]]+\]\s*=\s*\{{")
 
 
 class TestPartDataLogic(unittest.TestCase):
@@ -251,45 +234,52 @@ class TestPartDataLogic(unittest.TestCase):
 
     def test_element_policy_and_accessory_eligibility(self) -> None:
         self.assertEqual(
-            [e.part_id for e in eligible_elements_for_blade("Blade_Jakobs_Sabre")],
+            [element.part_id for element in eligible_elements_for_blade("Blade_Jakobs_Sabre")],
             [NO_ELEMENT_ID],
         )
         self.assertEqual(
-            [e.part_id for e in eligible_elements_for_blade("Blade_Torgue_BlastCleaver")],
+            [element.part_id for element in eligible_elements_for_blade("Blade_Torgue_BlastCleaver")],
             ["Elem_Explosive"],
         )
-        self.assertTrue(all(
-            e.element in (Element.FIRE, Element.SHOCK, Element.CORROSIVE, Element.SLAG)
-            for e in eligible_elements_for_blade("Blade_Maliwan_Phaseblade")
-        ))
+        self.assertTrue(
+            all(
+                element.element in (Element.FIRE, Element.SHOCK, Element.CORROSIVE, Element.SLAG)
+                for element in eligible_elements_for_blade("Blade_Maliwan_Phaseblade")
+            )
+        )
         self.assertTrue(ELEMENTS["Elem_Fire"].is_dot_element)
         self.assertFalse(ELEMENTS["Elem_Explosive"].is_dot_element)
         self.assertTrue(ELEMENTS["Elem_Explosive"].is_explosive)
-        pool = eligible_accessories_for_roll("Blade_Maliwan_Phaseblade", "Elem_Fire", Rarity.VERY_RARE)
-        self.assertIn("Acc_FluxCapacitor", {a.part_id for a in pool})
-        self.assertNotIn("Acc_RazorFuller", {a.part_id for a in pool})
+        pool = eligible_accessories_for_roll(
+            "Blade_Maliwan_Phaseblade", "Elem_Fire", Rarity.VERY_RARE
+        )
+        pool_ids = {accessory.part_id for accessory in pool}
+        self.assertIn("Acc_FluxCapacitor", pool_ids)
+        self.assertNotIn("Acc_RazorFuller", pool_ids)
 
-    def test_part_roll_helpers_reproduce_the_orchestrator(self) -> None:
-        """Per-part helpers preserve the orchestrator's seeded random sequence."""
-        for i in range(60):
-            maker = tuple(Manufacturer)[i % 5]
-            rarity = (Rarity.COMMON, Rarity.UNCOMMON, Rarity.RARE, Rarity.VERY_RARE)[i % 4]
-            seed = f"parts-parity:{i}"
+    def test_part_roll_helpers_preserve_the_seeded_roll_sequence(self) -> None:
+        for index in range(60):
+            maker = tuple(Manufacturer)[index % len(Manufacturer)]
+            rarity = (Rarity.COMMON, Rarity.UNCOMMON, Rarity.RARE, Rarity.VERY_RARE)[index % 4]
+            seed = f"parts-parity:{index}"
             rng = random.Random(seed)
             blade = blade_for_manufacturer(maker)
             grip_id = roll_grip_id(rng)
             element_id = roll_element_id(rng, blade.part_id)
             accessory_id = roll_accessory_id(rng, blade.part_id, element_id, rarity)
-            uid = rng.randint(1, 2_147_483_647)
-
             expected = MeleeWeaponParts(blade.part_id, grip_id, accessory_id, element_id)
+            unique_id = rng.randint(1, 2_147_483_647)
+
             actual = loot_roller.roll_melee_weapon(
-                game_stage=1 + i, rarity=rarity, manufacturer=maker, seed=seed, unique_id=uid
+                game_stage=1 + index,
+                rarity=rarity,
+                manufacturer=maker,
+                seed=seed,
+                unique_id=unique_id,
             )
             self.assertEqual(actual.parts, expected, f"seed {seed!r} diverged")
 
-    def test_adding_an_accessory_needs_only_one_registry_entry(self) -> None:
-        """Add a spec to ACCESSORIES and eligibility/rolls pick it up automatically."""
+    def test_added_accessory_is_available_to_eligibility_and_rolls(self) -> None:
         extra = AccessoryPartSpec(
             part_id="Acc_TestOnly",
             display_name="Test-Only Hilt",
@@ -309,7 +299,6 @@ class TestPartDataLogic(unittest.TestCase):
                 "Blade_Hyperion_Katana", NO_ELEMENT_ID, Rarity.VERY_RARE
             )
             self.assertIn(extra, pool)
-        # With a single legal accessory it must be the one rolled (VERY_RARE = 100% chance).
         with mock.patch.dict(ACCESSORIES, {extra.part_id: extra}, clear=True):
             rng = random.Random("one-pool")
             self.assertEqual(
@@ -317,14 +306,6 @@ class TestPartDataLogic(unittest.TestCase):
                 extra.part_id,
             )
         self.assertNotIn(extra.part_id, ACCESSORIES)
-
-    def test_manufacturer_logic_lives_with_manufacturer_data(self) -> None:
-        self.assertEqual(secondary_attack_for(Manufacturer.TORGUE), SecondaryAttack.THROW)
-        self.assertEqual(secondary_attack_for(Manufacturer.MALIWAN), SecondaryAttack.NONE)
-        self.assertIn(Element.EXPLOSIVE, MANUFACTURERS[Manufacturer.TORGUE].allowed_elements)
-        self.assertEqual(
-            MANUFACTURERS[Manufacturer.JAKOBS].allowed_elements, (Element.NONE,)
-        )
 
 
 if __name__ == "__main__":

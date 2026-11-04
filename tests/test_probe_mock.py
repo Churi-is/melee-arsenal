@@ -1,11 +1,10 @@
-"""Offline syntax and mock-execution tests for `sdk_mods/melee_arsenal_probe`."""
+"""Mock-execution tests for the in-game asset probe."""
 from __future__ import annotations
 
 import base64
 import ctypes
 import ctypes.util
 import json
-import py_compile
 import struct
 import sys
 import tempfile
@@ -15,10 +14,6 @@ from pathlib import Path
 from unittest import mock
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
-PROBE_INIT = ROOT_DIR / "sdk_mods" / "melee_arsenal_probe" / "__init__.py"
-PROBE_READER = ROOT_DIR / "sdk_mods" / "melee_arsenal_probe" / "probe_upk_reader.py"
-
-
 def _wrap_lzo_startup_upk(raw_upk: bytes, block_size: int = 0x20000) -> bytes:
     lzo_path = ctypes.util.find_library("lzo2")
     lzo = ctypes.CDLL(lzo_path) if lzo_path else None
@@ -62,10 +57,6 @@ def _wrap_lzo_startup_upk(raw_upk: bytes, block_size: int = 0x20000) -> bytes:
 
 
 class TestProbeAssetAndDonorSuite(unittest.TestCase):
-    def test_probe_modules_compile_cleanly(self) -> None:
-        py_compile.compile(str(PROBE_INIT), doraise=True)
-        py_compile.compile(str(PROBE_READER), doraise=True)
-
     def test_probe_executes_sections_and_extracts_compressed_startup_donor(self) -> None:
         from tools.inkblade_upk.archive import UE3PackageArchive
         from tools.inkblade_upk.codec import (

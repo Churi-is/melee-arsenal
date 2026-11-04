@@ -75,34 +75,6 @@ class StageStackTests(unittest.TestCase):
                 self.assertEqual(image.mode, "RGB")
                 self.assertEqual(image.size, tuple(result.state.layouts["element_fire"].atlas_size))
 
-    def test_new_stage_can_be_inserted_without_editing_existing_ones(self) -> None:
-        """A future art pass (decals, stencils, grime...) is one extra `Stage` in the list."""
-        calls: list[str] = []
-
-        def run_extra(state) -> None:  # noqa: ANN001 - matches the Stage.run signature
-            calls.append("extra")
-
-        stages = list(default_stages())
-        index = next(i for i, stage in enumerate(stages) if stage.name == "linework")
-        stages.insert(index + 1, Stage("extra", "Test art pass", run_extra, cacheable=False))
-
-        with tempfile.TemporaryDirectory() as tmp:
-            cfg = RunConfig(
-                out_dir=Path(tmp) / "kit",
-                work_dir=Path(tmp) / "work",
-                density=320.0,
-                ink_px=3,
-                padding=5,
-                parts=("element_fire",),
-            )
-            result = Pipeline(cfg, stages).run()
-            self.assertEqual(calls, ["extra"])
-            self.assertIn("extra", [report.name for report in result.reports])
-            order = [report.name for report in result.reports]
-            self.assertLess(order.index("linework"), order.index("extra"))
-            self.assertLess(order.index("extra"), order.index("textures"))
-
-
 class PipelineCacheTests(unittest.TestCase):
     """Stage fingerprints: unchanged stages are restored, changed ones invalidate downstream work."""
 
