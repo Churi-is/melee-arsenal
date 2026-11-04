@@ -714,7 +714,7 @@ def _on_mod_disable() -> None:
     clear_debug_once_cache()
 
 
-@command("melee_export_asset_registry", game=Game.BL2)
+@command("melee_export_asset_registry")
 def _cmd_export_asset_registry() -> None:
     export_asset_registry_command()
 

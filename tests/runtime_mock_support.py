@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import copy
 import types
 from pathlib import Path
@@ -1461,8 +1462,10 @@ class MockBL2World:
             return deco
 
         def fake_command(*_a, **_kw):
+            parser = argparse.ArgumentParser(**_kw)
+
             def deco(fn):
-                fn.add_argument = lambda *a, **kw: None
+                fn.add_argument = parser.add_argument
                 return fn
 
             return deco
