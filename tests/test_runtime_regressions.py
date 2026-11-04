@@ -1,7 +1,7 @@
 """Focused regressions for lifecycle, identity, persistence, and shared attack policy.
 
-These reuse the strict BL2 mock from `test_runtime_mock` but keep each scenario small enough to
-fail with a precise assertion instead of burying the regression in the full-lifecycle test.
+These reuse the strict BL2 fixtures in `runtime_mock_support` and keep each scenario small enough
+to fail with a precise assertion instead of burying the regression in the full-lifecycle test.
 """
 from __future__ import annotations
 
@@ -19,10 +19,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 SDK_MODS_DIR = ROOT_DIR / "sdk_mods"
 if str(SDK_MODS_DIR) not in sys.path:
     sys.path.insert(0, str(SDK_MODS_DIR))
-if str(ROOT_DIR / "tests") not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR / "tests"))
-
-from test_runtime_mock import MockBL2World  # noqa: E402
+from tests.runtime_mock_support import MockBL2World  # noqa: E402
 
 
 @contextmanager
@@ -206,7 +203,9 @@ class RuntimeRegressionTests(unittest.TestCase):
 
     def test_guard_toggle_disables_mitigation_but_not_pose(self):
         with runtime_env() as world:
-            from melee_arsenal.runtime import secondary, state
+            from melee_arsenal.runtime import state
+            from melee_arsenal.runtime.secondary import guard as secondary_guard
+            from melee_arsenal.runtime.secondary import lifecycle as secondary_lifecycle
             from melee_arsenal.core.loot_roller import roll_melee_weapon
             from melee_arsenal.core.enums import Manufacturer, Rarity
             from melee_arsenal.core.stats import compute_card_stats
@@ -217,15 +216,15 @@ class RuntimeRegressionTests(unittest.TestCase):
             commands.spawn_single_command("hyperion", "purple", "")
             wpn = world.ground_pickups[-1].Inventory
             world.pawn.Weapon = wpn
-            self.assertTrue(secondary.try_begin_guard(wpn, inst, card))
+            self.assertTrue(secondary_guard.try_begin_guard(wpn, inst, card))
             args = types.SimpleNamespace(Damage=1000.0, DamageType=None, InstigatedBy=None, DamageCauser=None)
             state.STATE.guard_damage_reduction_enabled = True
-            self.assertTrue(secondary.handle_guard_incoming_damage(world.pawn, args, None))
+            self.assertTrue(secondary_guard.handle_guard_incoming_damage(world.pawn, args, None))
             state.STATE.guard_damage_reduction_enabled = False
             args.Damage = 1000.0
-            self.assertFalse(secondary.handle_guard_incoming_damage(world.pawn, args, None))
+            self.assertFalse(secondary_guard.handle_guard_incoming_damage(world.pawn, args, None))
             self.assertEqual(args.Damage, 1000.0)
-            secondary.reset_secondary_state()
+            secondary_lifecycle.reset_secondary_state()
 
     def test_asset_library_registration_matches_frozen_manifest(self):
         with runtime_env(custom=True):

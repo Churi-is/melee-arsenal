@@ -1,11 +1,7 @@
-"""Texture stage helpers: flat colours, mottling, bold linework and decals.
+"""Pillow helpers for painting deterministic texture layers onto part atlases.
 
-Each helper paints *one layer* onto an existing atlas and is deliberately independent of the others,
-so the pipeline can stack, reorder, cache or extend them (a decals/stencil/grime pass is just another
-function with the same shape).
-
-Everything is Pillow-only and deterministic: all randomness comes from `random.Random` seeded from the
-part id plus a stage salt, never from global state.
+The generator applies flat colours, mottling, linework, and decals to each atlas. Randomized details
+use local `random.Random` instances seeded from the part id and stage salt, never global state.
 """
 from __future__ import annotations
 
@@ -639,7 +635,7 @@ def linework_layers(
 
 
 # ---------------------------------------------------------------------------
-# Stage: decals (extension point)
+# Stage: decals
 # ---------------------------------------------------------------------------
 def paint_decals(
     part: Part,
@@ -648,10 +644,9 @@ def paint_decals(
     decal_dir: Path,
     fit: float = 0.62,
 ) -> int:
-    """Stamp `<decal_dir>/<part_id>/*.png` onto paint islands. Returns the number of decals applied.
+    """Center and clip `<decal_dir>/<part_id>/*.png` onto paint islands; return the count applied.
 
-    This stage is the template for future art passes: it consumes the same layout, respects the same
-    island masks, and stays a no-op when no art is supplied, so the stack keeps its shape.
+    Missing decal directories or empty folders leave the atlas unchanged.
     """
     folder = Path(decal_dir) / part.part_id
     if not folder.is_dir():

@@ -54,10 +54,12 @@ from .persistence_bridge import (
     restore_player_melee_inventory,
     snapshot_player_melee_inventory,
 )
-from .secondary import (
-    describe_secondary_state,
+from .secondary.guard import (
     on_melee_weapon_client_stop_zoom_pre,
     on_melee_weapon_stop_zoom_pre,
+)
+from .secondary.lifecycle import (
+    describe_secondary_state,
     reset_secondary_state,
     tick_secondary_attacks,
 )

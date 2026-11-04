@@ -14,7 +14,7 @@ from ...core.stats import ComputedCardStats, apply_incoming_damage_reduction
 from ..log import log_debug_once, log_error, log_info
 from ..object_identity import cache_key, same_uobject
 from ..resolver import get_local_player_controller, resolve_melee_weapon
-from ..secondary import handle_guard_incoming_damage
+from ..secondary.guard import handle_guard_incoming_damage
 from ..state import STATE
 from . import resources
 

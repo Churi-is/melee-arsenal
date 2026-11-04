@@ -12,7 +12,8 @@ from ...core.stats import ComputedCardStats
 from ..log import log_error, log_info
 from ..object_identity import is_dead
 from ..resolver import resolve_melee_weapon
-from .. import secondary
+from ..secondary.guard import try_begin_guard
+from ..secondary.throw import begin_throw, is_weapon_thrown
 from ..state import STATE
 from . import attacks, damage, pose
 
@@ -39,7 +40,7 @@ def _try_melee_secondary_attack(wpn: Any, inst: MeleeWeaponInstance, card: Compu
     if not MELEE_SECONDARY_ATTACK_ENABLED:
         return False
     if card.secondary_attack == SecondaryAttack.THROW:
-        started = secondary.begin_throw(wpn, inst, card)
+        started = begin_throw(wpn, inst, card)
         if started:
             # Give the throw a real arm motion + whoosh + camera bump (the blade itself leaves the
             # hand logically: state is authoritative, the 1st-person swing sells the release).
@@ -49,7 +50,7 @@ def _try_melee_secondary_attack(wpn: Any, inst: MeleeWeaponInstance, card: Compu
                 pose._trigger_first_person_blade_swing(pc, shooter, card, ctx.swing_speed_scale)
         return started
     if card.secondary_attack == SecondaryAttack.GUARD:
-        return secondary.try_begin_guard(wpn, inst, card)
+        return try_begin_guard(wpn, inst, card)
     return False
 
 
@@ -72,7 +73,7 @@ def on_melee_weapon_start_zoom_pre(obj: Any, args: Any, ret: Any, func: Any) -> 
 
 
 def on_weapon_consume_ammo_post(obj: Any, args: Any, ret: Any, func: Any) -> Any:
-    """Keep melee magazine full, enforce semi-auto on Jakobs Sabre (Gotcha #24), & arm swing."""
+    """Track shots, keep melee magazines full, and clear pending fire for semi-auto blades."""
     global _SHOT_SEQ
     resolved = resolve_melee_weapon(obj, sync_weapon_props=True)
     if resolved is None:
@@ -106,7 +107,7 @@ def on_weapon_instant_fire_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
     # The blade is in the air (Bandit / Torgue throw): Primary Fire is locked until it rebounds.
     # Consume the shot sequence too, so the `SharedFireAmmunition` backup never fires a delayed
     # swing once the blade comes back.
-    if secondary.is_weapon_thrown(obj):
+    if is_weapon_thrown(obj):
         _HANDLED_SHOT_SEQ = _SHOT_SEQ
         return Block
     inst, card = resolved
@@ -142,7 +143,7 @@ def on_weapon_shared_fire_post(obj: Any, args: Any, ret: Any, func: Any) -> Any:
         return None
     # Swallow any backup `SharedFireAmmunition` path while the thrown blade is still airborne,
     # consuming the shot sequence so no delayed swing fires after the blade comes back.
-    if secondary.is_weapon_thrown(obj):
+    if is_weapon_thrown(obj):
         _HANDLED_SHOT_SEQ = _SHOT_SEQ
         return None
     inst, card = resolved

@@ -101,7 +101,7 @@ def _is_weakspot_bone(bone_name: str) -> bool:
 
 
 def _snapshot_cleave_candidates(shooter: Any) -> tuple[list[TargetCandidate], dict[str, Any]]:
-    """Snapshot living hostile pawns + Target Dummies (seen-set + 800-step cap, Gotcha #13)."""
+    """Collect living hostile pawns and target dummies with cycle detection and a scan cap."""
     candidates: list[TargetCandidate] = []
     pawn_map: dict[str, Any] = {}
     if shooter is None or is_dead(shooter):
