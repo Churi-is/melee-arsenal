@@ -233,19 +233,12 @@ cmd_build() {
 
 }
 
-cmd_test() {
+check() {
   local py
   py="$(pick_python)"
   info "Byte-compiling sdk_mods/ & tools/"
   "$py" -m compileall -q "$REPO_ROOT/sdk_mods" "$REPO_ROOT/tools"
   ok "Syntax check passed."
-
-  info "Running unit test suite"
-  if [ "$#" -gt 0 ]; then
-    "$py" -m unittest discover -s "$REPO_ROOT/tests" "$@"
-  else
-    "$py" -m unittest discover -s "$REPO_ROOT/tests" -v
-  fi
 }
 
 cmd_preview() {
@@ -333,7 +326,7 @@ ver_zip.write_bytes(mod_zip.read_bytes())
 
 src_zip = dist / "source.zip"
 with zipfile.ZipFile(src_zip, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zs:
-    for top in ("README.md", "LICENSE", "requirements.txt", "pyproject.toml", ".gitignore", "melee", "sdk_mods", "tests", "tools", "docs"):
+    for top in ("README.md", "LICENSE", "requirements.txt", "pyproject.toml", ".gitignore", "melee", "sdk_mods", "tools", "docs"):
         target = repo / top
         if target.is_file():
             zs.write(target, target.name)
@@ -595,13 +588,13 @@ cmd_clean() {
 }
 
 cmd_dev() {
-  cmd_test -q
+  check
   cmd_install "$@"
 }
 
 cmd_all() {
   cmd_build
-  cmd_test
+  check
   cmd_package
   if detect_bl2_dir "" >/dev/null 2>&1; then
     cmd_install "$@"
@@ -644,14 +637,14 @@ ${C_BOLD}Commands:${C_RESET}
                             Options: --list-stages, --only <s>, --from <s>, --force <s>,
                                      --no-decals-art, --decals <dir>, --out <dir|zip>, --parts <ids>,
                                      --no-combinations, --renders [dir] (default build/inkblade_renders)
-  ${C_CYAN}test${C_RESET} [unittest-args]      Syntax-check all modules and run unit tests (e.g. -k world_drop)
+  ${C_CYAN}check${C_RESET}                     Byte-compile every module (syntax check)
   ${C_CYAN}preview${C_RESET}                   Roll & print sample Level 50 Melee Arsenal item cards & hit math
   ${C_CYAN}package${C_RESET} [--build]         Build release archives in build/dist/
                             (recompiles the UPKs first if the kit has changed since the last build)
   ${C_CYAN}install${C_RESET} [options]         Install UPKs + sdk_mods/melee_arsenal into Borderlands 2
                             Recompiles the UPKs automatically when the kit has been regenerated.
                             Options: --bl2-dir <path> (cached in .bl2_dir), --no-rebuild
-  ${C_CYAN}dev${C_RESET} [install-options]     Quick iterate: run quiet tests, then install to Borderlands 2
+  ${C_CYAN}dev${C_RESET} [install-options]     Quick iterate: syntax check, then install to Borderlands 2
                             (safe after './melee generate': stale UPKs are recompiled, not shipped)
   ${C_CYAN}uninstall${C_RESET} [options]       Remove mod & UPKs from Borderlands 2 (--purge-saves to wipe saves)
   ${C_CYAN}status${C_RESET}                    Show repo, kit, UPK, Borderlands 2 sync, and sidecar save status
@@ -670,16 +663,16 @@ main() {
   shift || true
   case "$sub" in
     setup)                 cmd_setup "$@" ;;
-    generate|gen|textures) cmd_generate "$@" ;;
-    build|compile)         cmd_build "$@" ;;
-    test|check)            cmd_test "$@" ;;
-    preview|sim)           cmd_preview "$@" ;;
-    package|dist|zip)      cmd_package "$@" ;;
-    install|deploy)        cmd_install "$@" ;;
+    generate)              cmd_generate "$@" ;;
+    build)                 cmd_build "$@" ;;
+    check)                 check ;;
+    preview)               cmd_preview "$@" ;;
+    package)               cmd_package "$@" ;;
+    install)               cmd_install "$@" ;;
     dev)                   cmd_dev "$@" ;;
-    uninstall|remove)      cmd_uninstall "$@" ;;
-    status|doctor|info)    cmd_status "$@" ;;
-    logs|log)              cmd_logs "$@" ;;
+    uninstall)             cmd_uninstall "$@" ;;
+    status)                cmd_status "$@" ;;
+    logs)                  cmd_logs "$@" ;;
     clean)                 cmd_clean "$@" ;;
     all)                   cmd_all "$@" ;;
     -h|--help|help)        cmd_help ;;

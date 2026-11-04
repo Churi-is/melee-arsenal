@@ -25,7 +25,7 @@ DAMAGE_EVENT_FLAG_CRIT = 1
 CRIT_FEEDBACK_WINDOW_SEC = 0.75
 
 
-_PENDING_CRIT_FEEDBACK: dict[str, float] = {}
+PENDING_CRIT_FEEDBACK: dict[str, float] = {}
 
 
 _STATUS_CHANCE_FIELDS = (
@@ -149,7 +149,7 @@ def read_player_melee_context(pawn: Any, pc: Any = None) -> PlayerMeleeContext:
 _TAKE_DAMAGE_AMOUNT_FIELDS = ("Damage", "DamageAmount", "InDamage", "RawDamage", "BaseDamage")
 
 
-def _read_take_damage_amount(args: Any) -> tuple[str, float] | None:
+def read_take_damage_amount(args: Any) -> tuple[str, float] | None:
     """Locate and read the incoming-damage float field off a `TakeDamage` args struct."""
     if args is None:
         return None
@@ -198,7 +198,7 @@ def on_player_take_damage_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
         if pct <= 0:
             return None
 
-        found = _read_take_damage_amount(args)
+        found = read_take_damage_amount(args)
         if found is None:
             return None
         field_name, damage = found
@@ -228,25 +228,25 @@ def on_player_take_damage_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
         return None
 
 
-def _mark_pending_crit_feedback(victim: Any) -> None:
+def mark_pending_crit_feedback(victim: Any) -> None:
     """Tag a victim we just critically struck so its vanilla damage popup shows as a crit."""
     if victim is None:
         return
     now = time.monotonic()
-    for stale_id, expires_at in list(_PENDING_CRIT_FEEDBACK.items()):
+    for stale_id, expires_at in list(PENDING_CRIT_FEEDBACK.items()):
         if expires_at < now:
-            _PENDING_CRIT_FEEDBACK.pop(stale_id, None)
-    _PENDING_CRIT_FEEDBACK[cache_key(victim)] = now + CRIT_FEEDBACK_WINDOW_SEC
+            PENDING_CRIT_FEEDBACK.pop(stale_id, None)
+    PENDING_CRIT_FEEDBACK[cache_key(victim)] = now + CRIT_FEEDBACK_WINDOW_SEC
 
 
-def _clear_pending_crit_feedback(victim: Any) -> None:
+def clear_pending_crit_feedback(victim: Any) -> None:
     if victim is not None:
-        _PENDING_CRIT_FEEDBACK.pop(cache_key(victim), None)
+        PENDING_CRIT_FEEDBACK.pop(cache_key(victim), None)
 
 
 def clear_all_pending_crit_feedback() -> None:
     """Drop every pending crit-feedback tag (map change / mod disable hygiene)."""
-    _PENDING_CRIT_FEEDBACK.clear()
+    PENDING_CRIT_FEEDBACK.clear()
 
 
 def on_display_recent_damage_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
@@ -263,7 +263,7 @@ def on_display_recent_damage_pre(obj: Any, args: Any, ret: Any, func: Any) -> An
     bit OR-ed in, exactly the block-and-recall pattern the damage-reduction hook already uses.
     Any unexpected state falls through to the untouched vanilla call.
     """
-    if not _PENDING_CRIT_FEEDBACK:
+    if not PENDING_CRIT_FEEDBACK:
         return None
 
     try:
@@ -272,11 +272,11 @@ def on_display_recent_damage_pre(obj: Any, args: Any, ret: Any, func: Any) -> An
         if actor is None:
             return None
 
-        expires_at = _PENDING_CRIT_FEEDBACK.get(cache_key(actor))
+        expires_at = PENDING_CRIT_FEEDBACK.get(cache_key(actor))
         if expires_at is None:
             return None
         if time.monotonic() > expires_at:
-            _PENDING_CRIT_FEEDBACK.pop(cache_key(actor), None)
+            PENDING_CRIT_FEEDBACK.pop(cache_key(actor), None)
             return None
 
         # Only ever touch the local player's own client-side numbers (co-op safe).
@@ -287,7 +287,7 @@ def on_display_recent_damage_pre(obj: Any, args: Any, ret: Any, func: Any) -> An
 
         flags = int(getattr(data, "DamageEventFlags", 0) or 0)
         if flags & DAMAGE_EVENT_FLAG_CRIT:
-            _PENDING_CRIT_FEEDBACK.pop(cache_key(actor), None)
+            PENDING_CRIT_FEEDBACK.pop(cache_key(actor), None)
             return None
 
         try:
@@ -296,7 +296,7 @@ def on_display_recent_damage_pre(obj: Any, args: Any, ret: Any, func: Any) -> An
             return None
 
         # Consume the tag so later DoT ticks / follow-up hits never inherit a stale crit flag.
-        _PENDING_CRIT_FEEDBACK.pop(cache_key(actor), None)
+        PENDING_CRIT_FEEDBACK.pop(cache_key(actor), None)
         try:
             with prevent_hooking_direct_calls():
                 func(args)

@@ -79,12 +79,8 @@ def allocate_unique_id(reserved: set[int] | None = None) -> int:
     raise RuntimeError("Could not allocate a free Melee Arsenal UniqueId")
 
 
-def grant_was_stamped(unique_id: int) -> bool:
-    return int(unique_id) in _STAMPED_UIDS
 
 
-def has_pending_grants() -> bool:
-    return bool(_DEFERRED_SPAWN_QUEUE) or any(_PENDING_GRANTS.values())
 
 
 def unwrap_weapon_object(item_or_pickup: Any) -> Any:
@@ -709,13 +705,6 @@ def spawn_melee_weapon_batch(
         return 0
 
 
-def spawn_melee_weapon_instance(
-    inst: MeleeWeaponInstance,
-    pc: Any = None,
-    delivery: str = "drop",
-    yaw_offset_deg: float = 0.0,
-) -> int:
-    return spawn_melee_weapon_batch([inst], pc=pc, delivery=delivery)
 
 
 def on_place_spawned_items_post(obj: Any, args: Any, ret: Any, func: Any) -> Any:

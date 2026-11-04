@@ -246,36 +246,3 @@ MANUFACTURERS: dict[Manufacturer, ManufacturerSpec] = {
         part_weight_kg=3.80,
     ),
 }
-
-# Only GUARD manufacturers have hand-tuned recovery values. `core.secondary` reads this
-# table (and `GUARD_COOLDOWN_DEFAULT_SEC`) when it solves a weapon's guard cooldown.
-GUARD_COOLDOWN_BY_MANUFACTURER: dict[Manufacturer, float] = {
-    maker: spec.guard_cooldown_sec
-    for maker, spec in MANUFACTURERS.items()
-    if spec.secondary_attack is SecondaryAttack.GUARD
-}
-
-
-# ---------------------------------------------------------------------------
-# Manufacturer data-side logic
-# ---------------------------------------------------------------------------
-
-def manufacturer_spec(manufacturer: Manufacturer) -> ManufacturerSpec:
-    """Look up the identity for `manufacturer` (KeyError on an unknown maker)."""
-    return MANUFACTURERS[manufacturer]
-
-
-def allowed_elements_for(manufacturer: Manufacturer) -> tuple[Element, ...]:
-    """The element types this manufacturer's blades are allowed to roll."""
-    return MANUFACTURERS[manufacturer].allowed_elements
-
-
-def secondary_attack_for(manufacturer: Manufacturer) -> SecondaryAttack:
-    """The manufacturer's RMB attack identity (`NONE` for Maliwan)."""
-    spec = MANUFACTURERS.get(manufacturer)
-    return spec.secondary_attack if spec is not None else SecondaryAttack.NONE
-
-
-def guard_cooldown_base_sec(manufacturer: Manufacturer) -> float:
-    """Base Guard recovery for a blade of this manufacturer."""
-    return GUARD_COOLDOWN_BY_MANUFACTURER.get(manufacturer, GUARD_COOLDOWN_DEFAULT_SEC)

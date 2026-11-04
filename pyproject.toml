@@ -8,9 +8,6 @@ requires-python = ">=3.11"
 dependencies = ["Pillow==13.0.0"]
 authors = [{ name = "MeleeArsenal" }]
 
-[tool.pytest.pytest_plugins]
-# tests are plain unittest; no pytest config needed
-
 [project.urls]
 Homepage = "https://github.com/Churi-is/melee-arsenal"
 Repository = "https://github.com/Churi-is/melee-arsenal"

@@ -43,4 +43,4 @@ Decals are painted before linework. The final PNG atlases, GLBs, manifest, and i
 - `glb.py` writes the exported mesh files.
 - `render.py` renders previews without Blender.
 
-Run `./melee test` to execute the generator and compiler tests. Build-time dependencies are in `requirements.txt`.
+Run `./melee generate` and `./melee build` to regenerate and compile the kit. Build-time dependencies are in `requirements.txt`.

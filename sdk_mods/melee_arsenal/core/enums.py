@@ -65,19 +65,6 @@ class ElementPolicy(str, Enum):
     ALWAYS_EXPLOSIVE = "always_expl"   # Torgue: always Explosive
 
 
-class PartSlot(str, Enum):
-    """Gameplay-visible melee part slots (3-4 parts per weapon) plus internal host slots."""
-
-    BLADE = "Blade"            # Maps to BarrelPartDefinition (defines manufacturer, archetype & targeting)
-    GRIP = "Grip"              # Maps to GripPartDefinition (handling, speed/damage tradeoff, matching bonus)
-    ACCESSORY = "Accessory"    # Maps to Accessory1PartDefinition (prefixes & specialized stat perks)
-    ELEMENT = "Element"        # Maps to ElementalPartDefinition (optional/locked per Blade's ElementPolicy)
-
-    # Internal structural slots on BL2's WeaponDefinitionData (locked to Blade manufacturer / rarity)
-    BODY_HOST = "BodyHost"     # Maps to BodyPartDefinition (supplies manufacturer logo, anim context, empty sight/stock)
-    MATERIAL = "Material"      # Maps to MaterialPartDefinition (rarity skin MIC)
-
-
 class ModifierMode(str, Enum):
     """Mirrors Gearbox's EModifierType attribute evaluation stages in BL2."""
 

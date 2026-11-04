@@ -266,18 +266,6 @@ ACCESSORIES: dict[str, AccessoryPartSpec] = {
     ),
 }
 
-# Derived lookups used by throw math and the runtime asset binder.
-ACCESSORY_WEIGHT_KG: dict[str, float] = {
-    part_id: acc.throw_weight_kg for part_id, acc in ACCESSORIES.items()
-}
-ACCESSORY_GUARD_COOLDOWN_DELTA: dict[str, float] = {
-    part_id: acc.guard_cooldown_delta_sec for part_id, acc in ACCESSORIES.items()
-}
-ACCESSORY_TO_KIT_ID: dict[str, str | None] = {
-    part_id: acc.kit_id for part_id, acc in ACCESSORIES.items()
-}
-
-
 # ---------------------------------------------------------------------------
 # Accessory data-side logic
 # ---------------------------------------------------------------------------

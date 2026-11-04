@@ -224,9 +224,9 @@ def _write_blade_tilt(mesh: Any, tilt: float, bob: float) -> None:
     try:
         bp, by, br = rest["rot"]
         ro = copy.copy(mesh.RotOrigin)
-        ro.Pitch = common._rotator_add(bp, GUARD_BLADE_PITCH * tilt + 120.0 * bob)
-        ro.Yaw = common._rotator_add(by, GUARD_BLADE_YAW * tilt)
-        ro.Roll = common._rotator_add(br, GUARD_BLADE_ROLL * tilt + 80.0 * bob)
+        ro.Pitch = common.rotator_add(bp, GUARD_BLADE_PITCH * tilt + 120.0 * bob)
+        ro.Yaw = common.rotator_add(by, GUARD_BLADE_YAW * tilt)
+        ro.Roll = common.rotator_add(br, GUARD_BLADE_ROLL * tilt + 80.0 * bob)
         mesh.RotOrigin = ro
     except Exception:
         pass
@@ -347,9 +347,9 @@ def update_first_person_pose(pc: Any, now: float | None = None) -> None:
     try:
         bp, by, br = entry["rot"]
         ro = copy.copy(sm.RotOrigin)
-        ro.Pitch = common._rotator_add(bp, offsets["pitch"] + 90.0 * bob)
-        ro.Yaw = common._rotator_add(by, offsets["yaw"] * tilt)
-        ro.Roll = common._rotator_add(br, offsets["roll"] * tilt + 60.0 * bob)
+        ro.Pitch = common.rotator_add(bp, offsets["pitch"] + 90.0 * bob)
+        ro.Yaw = common.rotator_add(by, offsets["yaw"] * tilt)
+        ro.Roll = common.rotator_add(br, offsets["roll"] * tilt + 60.0 * bob)
         sm.RotOrigin = ro
         loc = entry.get("loc")
         if loc is not None and hasattr(sm, "Origin"):
@@ -585,7 +585,7 @@ def restore_all_arms_rest_transforms() -> None:
     _write_rest_transforms()
 
 
-def _update_first_person_slash_motion(pc: Any) -> None:
+def update_first_person_slash_motion(pc: Any) -> None:
     """Drive fallback `RotOrigin` + `ForceUpdate(False)` arc only when `AnimNodeSlot` was unavailable."""
     sm_state = STATE.swing_motion
     if not sm_state.active:

@@ -17,7 +17,7 @@ from .parts.accessories import (
     eligible_accessories_for_roll,
     roll_accessory_id,
 )
-from .parts.blades import BLADES, blade_for_manufacturer
+from .parts.blades import BLADE_BY_MANUFACTURER, BLADES
 from .parts.elements import ELEMENTS, eligible_elements_for_blade, roll_element_id
 from .parts.grips import GRIPS, roll_grip_id
 from .parts.weapon import MeleeWeaponInstance, MeleeWeaponParts
@@ -82,7 +82,7 @@ def roll_melee_weapon(
     rng = random.Random(seed) if seed is not None else random.Random()
 
     maker = rng.choice(tuple(Manufacturer)) if manufacturer is None else manufacturer
-    blade = blade_for_manufacturer(maker)
+    blade = BLADE_BY_MANUFACTURER[maker]
 
     grip_id = roll_grip_id(rng)
     element_id = roll_element_id(rng, blade.part_id)

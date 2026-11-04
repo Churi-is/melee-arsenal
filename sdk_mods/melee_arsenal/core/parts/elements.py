@@ -14,15 +14,9 @@ from typing import Mapping
 from ..enums import Element, ElementPolicy, Manufacturer, ModifierMode, StatId
 from .blades import BLADES
 from .common import StatModifier, resolve_prefix, weighted_choice
-from .manufacturers import MANUFACTURERS, allowed_elements_for
+from .manufacturers import MANUFACTURERS
 
 NO_ELEMENT_ID: str = "Elem_None"
-
-# Elements that show Damage-over-Time + status chance rows on the item card.
-DOT_ELEMENTS: frozenset[Element] = frozenset(
-    {Element.FIRE, Element.SHOCK, Element.CORROSIVE, Element.SLAG}
-)
-
 
 @dataclass(frozen=True, slots=True)
 class ElementPartSpec:
@@ -50,7 +44,7 @@ class ElementPartSpec:
     @property
     def is_dot_element(self) -> bool:
         """True for Fire / Shock / Corrosive / Slag (show DoT + chance card rows)."""
-        return self.element in DOT_ELEMENTS
+        return self.element in (Element.FIRE, Element.SHOCK, Element.CORROSIVE, Element.SLAG)
 
     @property
     def is_explosive(self) -> bool:
@@ -186,15 +180,6 @@ ELEMENT_PART_BY_TYPE: dict[Element, ElementPartSpec] = {
     ep.element: ep for ep in ELEMENTS.values()
 }
 
-ELEMENT_TO_KIT_ID: dict[str, str | None] = {
-    part_id: ep.kit_id for part_id, ep in ELEMENTS.items()
-}
-
-ELEMENT_ID_TO_ATLAS_KEY: dict[str, str] = {
-    part_id: ep.atlas_key for part_id, ep in ELEMENTS.items()
-}
-
-
 # ---------------------------------------------------------------------------
 # Element data-side logic
 # ---------------------------------------------------------------------------
@@ -216,7 +201,7 @@ def eligible_elements_for_blade(blade_id: str) -> list[ElementPartSpec]:
         ]
 
     # OPTIONAL: includes Elem_None plus allowed elements
-    return [ELEMENT_PART_BY_TYPE[el] for el in allowed_elements_for(blade.manufacturer)]
+    return [ELEMENT_PART_BY_TYPE[el] for el in maker.allowed_elements]
 
 
 def roll_element_id(rng: random.Random, blade_id: str) -> str:

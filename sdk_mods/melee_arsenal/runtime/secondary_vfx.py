@@ -310,12 +310,3 @@ def thrown_blade_debug_info() -> dict[str, Any]:
     }
 
 
-def lerp_xyz(
-    start: tuple[float, float, float], end: tuple[float, float, float], u: float
-) -> tuple[float, float, float]:
-    u = max(0.0, min(1.0, float(u)))
-    return (
-        start[0] + (end[0] - start[0]) * u,
-        start[1] + (end[1] - start[1]) * u,
-        start[2] + (end[2] - start[2]) * u,
-    )

@@ -18,8 +18,8 @@ from ..object_identity import cache_key, is_dead
 from ..state import STATE
 from . import common, resources
 from .damage import (
-    _clear_pending_crit_feedback,
-    _mark_pending_crit_feedback,
+    clear_pending_crit_feedback,
+    mark_pending_crit_feedback,
     play_camera_anim,
     read_player_melee_context,
     select_attack_damage_type,
@@ -49,7 +49,7 @@ WEAKSPOT_BONE_KEYWORDS = (
 _FIRST_SWING_LOGGED: bool = False
 
 
-def _is_target_dummy(actor: Any) -> bool:
+def is_target_dummy(actor: Any) -> bool:
     if actor is None:
         return False
     try:
@@ -67,7 +67,7 @@ def _is_target_dummy(actor: Any) -> bool:
     return False
 
 
-def _is_valid_melee_victim(shooter: Any, actor: Any) -> bool:
+def is_valid_melee_victim(shooter: Any, actor: Any) -> bool:
     """Return True for hostile `WillowAIPawn`s, Sanctuary Target Dummies, and destructible props."""
     if actor is None or actor == shooter or is_dead(actor):
         return False
@@ -76,7 +76,7 @@ def _is_valid_melee_victim(shooter: Any, actor: Any) -> bool:
         return False
     if "InteractiveObject" in cls_name or "Destructible" in cls_name or "KActor" in cls_name:
         return True
-    if _is_target_dummy(actor):
+    if is_target_dummy(actor):
         return True
     if "Pawn" in cls_name:
         try:
@@ -91,7 +91,7 @@ def _is_valid_melee_victim(shooter: Any, actor: Any) -> bool:
     return False
 
 
-def _is_weakspot_bone(bone_name: str) -> bool:
+def is_weakspot_bone(bone_name: str) -> bool:
     if not bone_name:
         return False
     low = bone_name.lower()
@@ -100,7 +100,7 @@ def _is_weakspot_bone(bone_name: str) -> bool:
     return any(kw in low for kw in WEAKSPOT_BONE_KEYWORDS)
 
 
-def _snapshot_cleave_candidates(shooter: Any) -> tuple[list[TargetCandidate], dict[str, Any]]:
+def snapshot_cleave_candidates(shooter: Any) -> tuple[list[TargetCandidate], dict[str, Any]]:
     """Collect living hostile pawns and target dummies with cycle detection and a scan cap."""
     candidates: list[TargetCandidate] = []
     pawn_map: dict[str, Any] = {}
@@ -122,7 +122,7 @@ def _snapshot_cleave_candidates(shooter: Any) -> tuple[list[TargetCandidate], di
         nxt = getattr(cur, "NextPawn", None)
 
         if cur != shooter and not is_dead(cur):
-            is_dummy = _is_target_dummy(cur)
+            is_dummy = is_target_dummy(cur)
             hostile = False
             try:
                 hostile = bool(shooter.IsEnemy(cur))
@@ -159,16 +159,16 @@ def _snapshot_cleave_candidates(shooter: Any) -> tuple[list[TargetCandidate], di
     return candidates, pawn_map
 
 
-def _run_weapon_trace(
+def run_weapon_trace(
     wpn: Any,
     vec_tpl: Any,
     start_xyz: tuple[float, float, float],
     end_xyz: tuple[float, float, float],
 ) -> tuple[Any, tuple[float, float, float] | None, str]:
     """Run native `WillowWeapon.CalcWeaponFire` and unpack `(HitActor, HitLocationXYZ, BoneName)`."""
-    start_v = common._make_vec_from(vec_tpl, *start_xyz)
-    end_v = common._make_vec_from(vec_tpl, *end_xyz)
-    zero_v = common._make_vec_from(vec_tpl, 0.0, 0.0, 0.0)
+    start_v = common.make_vec_from(vec_tpl, *start_xyz)
+    end_v = common.make_vec_from(vec_tpl, *end_xyz)
+    zero_v = common.make_vec_from(vec_tpl, 0.0, 0.0, 0.0)
     try:
         with prevent_hooking_direct_calls():
             ret = wpn.CalcWeaponFire(
@@ -211,7 +211,7 @@ def _candidate_has_clear_los(
     # Extend ray 35 UU through the skeleton so Hips/Spine/Chest bones intersect cleanly
     ux, uy, uz = dx / dist, dy / dist, dz / dist
     end_xyz = (chest[0] + ux * 35.0, chest[1] + uy * 35.0, chest[2] + uz * 35.0)
-    hit_actor, hit_xyz, bone = _run_weapon_trace(wpn, vec_tpl, eye_xyz, end_xyz)
+    hit_actor, hit_xyz, bone = run_weapon_trace(wpn, vec_tpl, eye_xyz, end_xyz)
 
     if hit_actor is None:
         return True, chest, ""
@@ -231,7 +231,7 @@ def _candidate_has_clear_los(
     return True, chest, ""
 
 
-def _resolve_shooter_and_pc(wpn: Any) -> tuple[Any, Any]:
+def resolve_shooter_and_pc(wpn: Any) -> tuple[Any, Any]:
     pc = None
     try:
         pc = get_pc()
@@ -246,17 +246,17 @@ def _resolve_shooter_and_pc(wpn: Any) -> tuple[Any, Any]:
     return shooter, pc
 
 
-def _combat_breadcrumb(stage: str) -> None:
+def combat_breadcrumb(stage: str) -> None:
     """Persist opt-in checkpoints before native calls that may not return on a crash."""
     if STATE.debug_attack_log:
         log_info(f"Combat checkpoint: {stage}")
 
 
-def _execute_melee_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCardStats) -> int:
+def execute_melee_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCardStats) -> int:
     """Perform full blade swing animation + synchronous wall-occluded single-target/cleave damage."""
     global _FIRST_SWING_LOGGED
-    _combat_breadcrumb(f"swing start: {card.manufacturer.value} {card.archetype_name}")
-    shooter, pc = _resolve_shooter_and_pc(wpn)
+    combat_breadcrumb(f"swing start: {card.manufacturer.value} {card.archetype_name}")
+    shooter, pc = resolve_shooter_and_pc(wpn)
     if shooter is None or is_dead(shooter):
         return 0
 
@@ -264,9 +264,9 @@ def _execute_melee_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCar
     ctx = read_player_melee_context(shooter, pc)
 
     # 1. Trigger 1st-person `Bladed_Melee` slash + CameraAnim + melee whoosh audio
-    _combat_breadcrumb("before swing animation")
+    combat_breadcrumb("before swing animation")
     _trigger_first_person_blade_swing(pc, shooter, card, ctx.swing_speed_scale)
-    _combat_breadcrumb("after swing animation")
+    combat_breadcrumb("after swing animation")
 
     # 2. Compute camera/eye ray origin and aim vector
     vec_tpl = getattr(shooter, "Location", None)
@@ -286,7 +286,7 @@ def _execute_melee_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCar
         pass
 
     rot_src = getattr(pc, "Rotation", None) or getattr(shooter, "Rotation", None)
-    aim_dir = common._rot_to_forward(rot_src) if rot_src is not None else (1.0, 0.0, 0.0)
+    aim_dir = common.rot_to_forward(rot_src) if rot_src is not None else (1.0, 0.0, 0.0)
 
     # Step 4 UU back inside shooter's ignored capsule so 0.0m point-blank targets always intersect
     start_xyz = (
@@ -308,25 +308,25 @@ def _execute_melee_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCar
     sync_weapon_status_damage(wpn, dmg_normal)
 
     # 4. Primary 0-width crosshair trace (detects headshots, Target Dummies, barrels, or ground/walls)
-    _combat_breadcrumb("before center trace")
-    center_actor, center_hit_xyz, center_bone = _run_weapon_trace(wpn, vec_tpl, start_xyz, center_end_xyz)
+    combat_breadcrumb("before center trace")
+    center_actor, center_hit_xyz, center_bone = run_weapon_trace(wpn, vec_tpl, start_xyz, center_end_xyz)
 
-    _combat_breadcrumb("after center trace")
+    combat_breadcrumb("after center trace")
 
     # List of `(actor, hit_xyz, bone_name)` to strike
     targets_to_strike: list[tuple[Any, tuple[float, float, float], str]] = []
     seen_ids: set[str] = set()
 
-    if _is_valid_melee_victim(shooter, center_actor):
+    if is_valid_melee_victim(shooter, center_actor):
         seen_ids.add(cache_key(center_actor))
         targets_to_strike.append((center_actor, center_hit_xyz or center_end_xyz, center_bone))
 
     # 5. Cone acquisition (`SINGLE_TARGET` 22.5° assist vs `FRONTAL_CLEAVE` full arc)
     need_cone = card.targeting_mode == TargetingMode.FRONTAL_CLEAVE or len(targets_to_strike) == 0
     if need_cone:
-        _combat_breadcrumb("before candidate snapshot")
-        candidates, pawn_map = _snapshot_cleave_candidates(shooter)
-        _combat_breadcrumb(f"after candidate snapshot: {len(candidates)} candidates")
+        combat_breadcrumb("before candidate snapshot")
+        candidates, pawn_map = snapshot_cleave_candidates(shooter)
+        combat_breadcrumb(f"after candidate snapshot: {len(candidates)} candidates")
         if card.targeting_mode == TargetingMode.FRONTAL_CLEAVE:
             half_arc_deg = max(8.0, card.cleave_arc_degrees * 0.5)
             max_extra = max(1, card.max_targets)
@@ -368,9 +368,9 @@ def _execute_melee_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCar
         for _sc, cand, cpawn in scored:
             if len(targets_to_strike) >= max_extra:
                 break
-            _combat_breadcrumb("before candidate LOS trace")
+            combat_breadcrumb("before candidate LOS trace")
             clear, hit_pt, bone = _candidate_has_clear_los(wpn, vec_tpl, start_xyz, cand, cpawn)
-            _combat_breadcrumb("after candidate LOS trace")
+            combat_breadcrumb("after candidate LOS trace")
             if clear:
                 seen_ids.add(cache_key(cpawn))
                 targets_to_strike.append((cpawn, hit_pt, bone))
@@ -392,7 +392,7 @@ def _execute_melee_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCar
     primary_blast_xyz: tuple[float, float, float] | None = None
 
     for victim, hit_xyz, bone_name in targets_to_strike:
-        is_crit = bool(card.can_weakspot_crit and _is_weakspot_bone(bone_name))
+        is_crit = bool(card.can_weakspot_crit and is_weakspot_bone(bone_name))
         if is_crit:
             any_crit = True
         hit_amount = float(dmg_crit.final_hit_damage if is_crit else dmg_normal.final_hit_damage)
@@ -405,9 +405,9 @@ def _execute_melee_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCar
         # Tag the victim BEFORE the call: `Behavior_CauseDamage` can synchronously feed BL2's recent
         # damage tracker, which is what produces the floating number (and needs the crit bit already set).
         if is_crit:
-            _mark_pending_crit_feedback(victim)
+            mark_pending_crit_feedback(victim)
 
-        _combat_breadcrumb(f"before direct damage: {getattr(victim, 'Name', 'unknown')}")
+        combat_breadcrumb(f"before direct damage: {getattr(victim, 'Name', 'unknown')}")
         try:
             with prevent_hooking_direct_calls():
                 shooter.Behavior_CauseDamage(
@@ -420,25 +420,25 @@ def _execute_melee_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCar
                     bCanDamageFriendlies=False,
                     DamageCauser=wpn,
                 )
-            _combat_breadcrumb("after direct damage")
+            combat_breadcrumb("after direct damage")
             hits_dealt += 1
             if primary_blast_xyz is None:
                 primary_blast_xyz = hit_xyz
         except Exception as exc:
             if is_crit:
-                _clear_pending_crit_feedback(victim)
+                clear_pending_crit_feedback(victim)
             log_error(f"Behavior_CauseDamage failed on {victim}: {exc!r}")
 
         # Spawn surface/blood/spark impact FX at the strike point
         if vec_tpl is not None and hit_xyz is not None:
             try:
-                _combat_breadcrumb("before impact effects")
+                combat_breadcrumb("before impact effects")
                 with prevent_hooking_direct_calls():
                     wpn.PlayImpactEffects(
-                        common._make_vec_from(vec_tpl, *start_xyz),
-                        common._make_vec_from(vec_tpl, *hit_xyz),
+                        common.make_vec_from(vec_tpl, *start_xyz),
+                        common.make_vec_from(vec_tpl, *hit_xyz),
                     )
-                _combat_breadcrumb("after impact effects")
+                combat_breadcrumb("after impact effects")
             except Exception:
                 pass
 
@@ -454,14 +454,14 @@ def _execute_melee_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCar
 
         if primary_blast_xyz is not None and vec_tpl is not None:
             sx, sy, sz = float(vec_tpl.X), float(vec_tpl.Y), float(vec_tpl.Z)
-            offset_vec = common._make_vec_from(
+            offset_vec = common.make_vec_from(
                 vec_tpl,
                 primary_blast_xyz[0] - sx,
                 primary_blast_xyz[1] - sy,
                 primary_blast_xyz[2] - sz,
             )
             exp_dt = resources._CACHED_DMG_TYPES_PROC.get(Element.EXPLOSIVE)
-            _combat_breadcrumb("before radius damage")
+            combat_breadcrumb("before radius damage")
             try:
                 with prevent_hooking_direct_calls():
                     shooter.Behavior_CauseRadiusDamage(
@@ -477,21 +477,21 @@ def _execute_melee_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCar
                         DamageCauser=wpn,
                         bSkipTraceTest=False,
                     )
-                _combat_breadcrumb("after radius damage")
+                combat_breadcrumb("after radius damage")
                 splash_triggered = True
             except Exception as exc:
                 log_error(f"Behavior_CauseRadiusDamage failed: {exc!r}")
 
             if splash_triggered:
-                _combat_breadcrumb("before explosion effects")
-                _spawn_torgue_explosion_vfx_sfx(
+                combat_breadcrumb("before explosion effects")
+                spawn_torgue_explosion_vfx_sfx(
                     shooter=shooter,
                     pc=pc,
                     vec_tpl=vec_tpl,
                     eye_xyz=(eye_x, eye_y, eye_z),
                     blast_xyz=primary_blast_xyz,
                 )
-                _combat_breadcrumb("after explosion effects")
+                combat_breadcrumb("after explosion effects")
 
     # 8. Meaty blade-hit audio when connecting with at least one enemy / prop
     if hits_dealt > 0 or splash_triggered:
@@ -518,7 +518,7 @@ def _execute_melee_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCar
     return hits_dealt
 
 
-def _spawn_torgue_explosion_vfx_sfx(
+def spawn_torgue_explosion_vfx_sfx(
     shooter: Any,
     pc: Any,
     vec_tpl: Any,
@@ -547,7 +547,7 @@ def _spawn_torgue_explosion_vfx_sfx(
         world_info = getattr(shooter, "WorldInfo", None)
         emitter_pool = getattr(world_info, "MyEmitterPool", None) if world_info is not None else None
         if emitter_pool is not None and not is_dead(emitter_pool):
-            loc_v = common._make_vec_from(vec_tpl, *fx_xyz)
+            loc_v = common.make_vec_from(vec_tpl, *fx_xyz)
             rot_tpl = getattr(shooter, "Rotation", None)
             zero_rot = None
             if rot_tpl is not None:

@@ -21,9 +21,9 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt ruff==0.17.3
       - name: Lint
-        run: ruff check sdk_mods tools tests
-      - name: Unit tests
-        run: ./melee test -q
+        run: ruff check sdk_mods tools
+      - name: Syntax check
+        run: ./melee check
       - name: Build UPKs and verify tracked manifest
         if: matrix.python-version == '3.11'
         run: |

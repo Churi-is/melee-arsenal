@@ -209,7 +209,7 @@ def _reflect_parry(pawn: Any, st: GuardState, args: Any, incoming_damage: float)
     try:
         combat.ensure_combat_resources_cached()
         # Tag first: the reflected hit is a crit, so BL2's floating number must say CRITICAL.
-        combat._mark_pending_crit_feedback(attacker)
+        combat.mark_pending_crit_feedback(attacker)
         dt_def = combat.resources._CACHED_DMG_TYPES_PROC.get(st.card.element)
         with prevent_hooking_direct_calls():
             pawn.Behavior_CauseDamage(
@@ -227,13 +227,13 @@ def _reflect_parry(pawn: Any, st: GuardState, args: Any, incoming_damage: float)
                 pawn_loc = getattr(pawn, "Location", None)
                 att_loc = getattr(attacker, "Location", None)
                 wpn.PlayImpactEffects(
-                    combat._make_vec_from(
+                    combat.make_vec_from(
                         pawn_loc,
                         float(getattr(pawn_loc, "X", 0.0)),
                         float(getattr(pawn_loc, "Y", 0.0)),
                         float(getattr(pawn_loc, "Z", 0.0)) + float(getattr(pawn, "EyeHeight", 64.0)),
                     ),
-                    combat._make_vec_from(
+                    combat.make_vec_from(
                         pawn_loc,
                         float(getattr(att_loc, "X", 0.0)),
                         float(getattr(att_loc, "Y", 0.0)),
@@ -290,7 +290,7 @@ def handle_guard_incoming_damage(pawn: Any, args: Any, func: Any) -> bool:
 
     combat = _combat()
     try:
-        found = combat._read_take_damage_amount(args)
+        found = combat.read_take_damage_amount(args)
     except Exception:
         found = None
     if found is None:

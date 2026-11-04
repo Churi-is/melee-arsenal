@@ -16,7 +16,7 @@ from mods_base import (  # type: ignore[import-not-found]
 from unrealsdk.hooks import Block, Type  # type: ignore[import-not-found]
 
 from .combat import (
-    _update_first_person_slash_motion,
+    update_first_person_slash_motion,
     capture_first_person_rest_transform,
     clear_all_pending_crit_feedback,
     ensure_combat_resources_cached as ensure_live_combat_cached,
@@ -292,7 +292,7 @@ def _run_frame_tick() -> None:
     if STATE.swing_motion.active:
         pc = get_local_player_controller()
         if pc is not None:
-            _update_first_person_slash_motion(pc)
+            update_first_person_slash_motion(pc)
 
     # 4. Build definitions & inject loot pools once base packages finish loading
     if not STATE.initialized and _tick_counter >= 90 and (_tick_counter % 60 == 0):
@@ -703,6 +703,11 @@ ALL_OPTIONS = [
 ]
 
 
+@command("melee_export_asset_registry")
+def _cmd_export_asset_registry() -> None:
+    export_asset_registry_command()
+
+
 def _on_mod_disable() -> None:
     cancel_pending_spawns()
     clear_pending_restores()
@@ -712,11 +717,6 @@ def _on_mod_disable() -> None:
     clear_all_pending_crit_feedback()
     reset_secondary_state()
     clear_debug_once_cache()
-
-
-@command("melee_export_asset_registry")
-def _cmd_export_asset_registry() -> None:
-    export_asset_registry_command()
 
 
 def build_runtime_mod(version: str, author: str) -> Any:

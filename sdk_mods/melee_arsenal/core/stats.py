@@ -7,11 +7,14 @@ from typing import Iterable
 
 from .enums import Element, Manufacturer, ModifierMode, Rarity, SecondaryAttack, StatId, TargetingMode
 from .parts import (
+    ACCESSORIES,
+    BLADES,
+    ELEMENTS,
+    GRIPS,
+    MANUFACTURERS,
     MeleeWeaponInstance,
     PlayerMeleeContext,
     StatModifier,
-    is_matching_grip,
-    resolve_parts,
     resolve_weapon_name,
 )
 from .secondary import (
@@ -245,12 +248,11 @@ def apply_guard_damage_reduction(damage: float, damage_reduction_pct: float) -> 
 
 def compute_card_stats(weapon: MeleeWeaponInstance) -> ComputedCardStats:
     """Compute exact item card and runtime combat stats for a `MeleeWeaponInstance`."""
-    resolved = resolve_parts(weapon.parts)
-    blade = resolved.blade
-    grip = resolved.grip
-    accessory = resolved.accessory
-    element_part = resolved.element
-    maker_spec = resolved.manufacturer
+    blade = BLADES[weapon.parts.blade_id]
+    grip = GRIPS[weapon.parts.grip_id]
+    accessory = ACCESSORIES[weapon.parts.accessory_id]
+    element_part = ELEMENTS[weapon.parts.element_id]
+    maker_spec = MANUFACTURERS[blade.manufacturer]
 
     prefix, title, full_name = resolve_weapon_name(
         weapon.parts.blade_id,
@@ -259,7 +261,7 @@ def compute_card_stats(weapon: MeleeWeaponInstance) -> ComputedCardStats:
         weapon.parts.element_id,
     )
 
-    matching_grip = is_matching_grip(blade, grip)
+    matching_grip = grip.manufacturer == blade.manufacturer
 
     all_mods: list[StatModifier] = [
         *maker_spec.intrinsic_modifiers,

@@ -21,15 +21,15 @@ except ImportError:  # pragma: no cover
     unrealsdk = None  # type: ignore[assignment]
 
 from ..core.parts import (
+    ACCESSORIES,
     BLADES,
     BLADE_BY_MANUFACTURER,
-    BLADE_TO_KIT_ID,
+    ELEMENTS,
     ELEMENT_PART_BY_TYPE,
-    GRIP_TO_KIT_ID,
+    GRIPS,
     MANUFACTURERS,
 )
-from ..core.parts.accessories import ACCESSORY_TO_KIT_ID, NO_ACCESSORY_ID
-from ..core.parts.elements import ELEMENT_ID_TO_ATLAS_KEY, ELEMENT_TO_KIT_ID
+from ..core.parts.accessories import NO_ACCESSORY_ID
 from ..core.enums import Manufacturer, Rarity
 from .log import log_debug_once, log_error, log_info, log_warn, obj_path
 from .state import KEEP_ALIVE_FLAGS, STATE
@@ -484,7 +484,8 @@ def _build_element_materials(
     built_base: dict[str, Any] = {}
     built_by_rarity: dict[tuple[str, Rarity], Any] = {}
 
-    for elem_id, atlas_key in ELEMENT_ID_TO_ATLAS_KEY.items():
+    for elem_id, elem_spec in ELEMENTS.items():
+        atlas_key = elem_spec.atlas_key
         tex_obj_name = elem_tex_map.get(atlas_key, f"T_Inkblade_Atlas_{atlas_key}")
         diffuse_tex = _find("Texture2D", f"{tex_pkg_name}.{tex_obj_name}")
         if diffuse_tex is None:
@@ -549,14 +550,15 @@ def _build_element_materials(
 
 def _register_variants_for_slot(
     parts_pkg: Any,
-    catalog_to_kit: dict[str, str | None],
+    catalog: dict[str, Any],
     base_parts: dict[str, Any],
     frags_by_kit_id: dict[str, list[dict[str, Any]]],
     variant_map: dict[tuple[str, str], Any],
     reverse_path_map: dict[str, str] | None,
 ) -> None:
     """Bind variant 0 onto `base_parts[cat_id]` and construct `__s1..__sN` twin parts for multi-socket/gap fits."""
-    for cat_id, kit_id in catalog_to_kit.items():
+    for cat_id, cat_spec in catalog.items():
+        kit_id = cat_spec.kit_id
         base_part = base_parts.get(cat_id)
         if base_part is None:
             continue
@@ -644,9 +646,9 @@ def setup_custom_inkblade_assets(
             donor_mat_part,
             donor_mats_by_rarity=donor_mats_by_rarity,
         )
-        if len(elem_mats) < len(ELEMENT_ID_TO_ATLAS_KEY):
+        if len(elem_mats) < len(ELEMENTS):
             log_warn(
-                f"Only built {len(elem_mats)}/{len(ELEMENT_ID_TO_ATLAS_KEY)} Inkblade element materials; aborting custom swap."
+                f"Only built {len(elem_mats)}/{len(ELEMENTS)} Inkblade element materials; aborting custom swap."
             )
             return False
 
@@ -671,15 +673,15 @@ def setup_custom_inkblade_assets(
         STATE.element_variant_parts.clear()
         STATE.all_extra_part_objects.clear()
 
-        for blade_id, kit_id in BLADE_TO_KIT_ID.items():
+        for blade_id, blade_spec in BLADES.items():
             bp = STATE.blade_parts.get(blade_id)
-            variants = frags_by_kit_id.get(kit_id) or []
+            variants = frags_by_kit_id.get(blade_spec.kit_id) or []
             if bp is not None and variants:
                 set_part_gestalt_fragment(bp, str(variants[0]["fragment_name"]))
 
         _register_variants_for_slot(
             parts_pkg=parts_pkg,
-            catalog_to_kit=GRIP_TO_KIT_ID,
+            catalog=GRIPS,
             base_parts=STATE.grip_parts,
             frags_by_kit_id=frags_by_kit_id,
             variant_map=STATE.grip_variant_parts,
@@ -687,7 +689,7 @@ def setup_custom_inkblade_assets(
         )
         _register_variants_for_slot(
             parts_pkg=parts_pkg,
-            catalog_to_kit=ACCESSORY_TO_KIT_ID,
+            catalog=ACCESSORIES,
             base_parts=STATE.accessory_parts,
             frags_by_kit_id=frags_by_kit_id,
             variant_map=STATE.accessory_variant_parts,
@@ -695,7 +697,7 @@ def setup_custom_inkblade_assets(
         )
         _register_variants_for_slot(
             parts_pkg=parts_pkg,
-            catalog_to_kit=ELEMENT_TO_KIT_ID,
+            catalog=ELEMENTS,
             base_parts=STATE.element_parts,
             frags_by_kit_id=frags_by_kit_id,
             variant_map=STATE.element_variant_parts,
@@ -723,7 +725,7 @@ def setup_custom_inkblade_assets(
 
 def resolve_fitted_grip_part(grip_id: str, blade_id: str | None = None) -> Any:
     if STATE.custom_assets_active and blade_id:
-        blade_kid = BLADE_TO_KIT_ID.get(blade_id, "")
+        blade_kid = BLADES[blade_id].kit_id or ""
         hit = STATE.grip_variant_parts.get((grip_id, blade_kid))
         if hit is not None:
             return hit
@@ -737,12 +739,12 @@ def resolve_fitted_accessory_part(
 ) -> Any:
     if STATE.custom_assets_active:
         if blade_id:
-            blade_kid = BLADE_TO_KIT_ID.get(blade_id, "")
+            blade_kid = BLADES[blade_id].kit_id or ""
             hit = STATE.accessory_variant_parts.get((acc_id, blade_kid))
             if hit is not None:
                 return hit
         if grip_id:
-            grip_kid = GRIP_TO_KIT_ID.get(grip_id, "")
+            grip_kid = GRIPS[grip_id].kit_id or ""
             hit = STATE.accessory_variant_parts.get((acc_id, grip_kid))
             if hit is not None:
                 return hit
@@ -751,7 +753,7 @@ def resolve_fitted_accessory_part(
 
 def resolve_fitted_element_part(elem_id: str, blade_id: str | None = None) -> Any:
     if STATE.custom_assets_active and blade_id:
-        blade_kid = BLADE_TO_KIT_ID.get(blade_id, "")
+        blade_kid = BLADES[blade_id].kit_id or ""
         hit = STATE.element_variant_parts.get((elem_id, blade_kid))
         if hit is not None:
             return hit
