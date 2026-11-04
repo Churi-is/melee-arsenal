@@ -1714,7 +1714,7 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 world.caused_damages.clear()
                 world.played_custom_anims.clear()
                 world.stopped_slots.clear()
-                combat._LAST_SWING_AT = 0.0
+                combat.pose._LAST_SWING_AT = 0.0
 
                 _, sabre_card = resolver.resolve_melee_weapon(sabre)
                 expected_sabre_crit = compute_attack_damage(
@@ -1749,7 +1749,7 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 # Mid-swap guard: if `pawn.PendingWeapon` is active, swing must NOT touch `Arms` anim slots!
                 world.pawn.PendingWeapon = phaseblade
                 try:
-                    combat._LAST_SWING_AT -= 0.35
+                    combat.pose._LAST_SWING_AT -= 0.35
                     combat.on_weapon_consume_ammo_post(sabre, None, None, None)
                     combat.on_weapon_instant_fire_pre(sabre, None, None, None)
                     self.assertEqual(len(world.played_custom_anims), 1)
@@ -1757,7 +1757,7 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                     world.pawn.PendingWeapon = None
 
                 # 4A-2. Consecutive Swing 2 ALSO plays `Bladed_Melee` cleanly without touching `Origin` / `RotOrigin`:
-                combat._LAST_SWING_AT -= 0.35
+                combat.pose._LAST_SWING_AT -= 0.35
                 combat.on_weapon_consume_ammo_post(sabre, None, None, None)
                 combat.on_weapon_instant_fire_pre(sabre, None, None, None)
                 self.assertFalse(combat.STATE.swing_motion.active)
@@ -1808,7 +1808,7 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 # Sanctuary_Citizen, and Far_Bandit are all excluded!
                 world.pawn.Weapon = phaseblade
                 world.caused_damages.clear()
-                combat._LAST_SWING_AT = 0.0
+                combat.pose._LAST_SWING_AT = 0.0
                 combat.on_weapon_consume_ammo_post(phaseblade, None, None, None)
                 combat.on_weapon_instant_fire_pre(phaseblade, None, None, None)
                 hit_names = {d["Target"].Name for d in world.caused_damages}
@@ -1840,10 +1840,10 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
                 world.caused_damages.clear()
                 world.caused_radius_damages.clear()
                 world.spawned_emitters.clear()
-                combat._LAST_SWING_AT = 0.0
+                combat.pose._LAST_SWING_AT = 0.0
                 combat.on_weapon_consume_ammo_post(cleaver, None, None, None)
                 with mock.patch.object(combat.STATE, "debug_attack_log", True), mock.patch.object(
-                    combat, "log_info"
+                    combat.attacks, "log_info"
                 ) as combat_log:
                     combat.on_weapon_shared_fire_post(cleaver, None, None, None)
                 checkpoints = [call.args[0] for call in combat_log.call_args_list]
@@ -2052,7 +2052,7 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
 
                 def _swing_shake() -> list:
                     world.camera_anim_calls.clear()
-                    combat._LAST_SWING_AT = 0.0
+                    combat.pose._LAST_SWING_AT = 0.0
                     combat.on_weapon_consume_ammo_post(sabre, None, None, None)
                     combat.on_weapon_instant_fire_pre(sabre, None, None, None)
                     return world.camera_anim_calls
@@ -2323,7 +2323,7 @@ class TestMeleeArsenalRuntime(unittest.TestCase):
 
                 world.caused_damages.clear()
                 world.caused_radius_damages.clear()
-                combat._LAST_SWING_AT = 0.0
+                combat.pose._LAST_SWING_AT = 0.0
                 world.played_custom_anims.clear()
                 # RMB dispatch: the throw starts with a real Bladed_Melee release motion
                 self.assertTrue(combat._try_melee_secondary_attack(cleaver, bl_inst, bl_card))

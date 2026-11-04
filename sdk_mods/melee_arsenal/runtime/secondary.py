@@ -123,10 +123,10 @@ def _play_throw_sfx(shooter: Any, kind: str = "whoosh") -> None:
     try:
         combat.ensure_combat_resources_cached()
         if kind == "impact":
-            ak = combat._CACHED_AKEVENTS.get(combat.AK_BLADE_HIT_FLESH)
+            ak = combat.resources._CACHED_AKEVENTS.get(combat.resources.AK_BLADE_HIT_FLESH)
         else:
             # "whoosh" (release / catch) and "rebound" (blade turning back) both read as air.
-            ak = combat._CACHED_AKEVENTS.get(combat.AK_SWING_WHOOSH)
+            ak = combat.resources._CACHED_AKEVENTS.get(combat.resources.AK_SWING_WHOOSH)
         if ak is not None:
             shooter.PlayAkEvent(ak)
     except Exception:
@@ -361,9 +361,9 @@ def _apply_throw_impact(
                     Target=victim,
                     DamageAmount=float(breakdown.final_hit_damage),
                     Momentum=12000.0 * max(0.5, st.card.momentum_scale),
-                    DamageType=combat._CACHED_BULLET_DMG_CLS,
+                    DamageType=combat.resources._CACHED_BULLET_DMG_CLS,
                     DamageTypeDefinition=dt_def,
-                    ImpactDefinition=combat._CACHED_MELEE_IMPACT,
+                    ImpactDefinition=combat.resources._CACHED_MELEE_IMPACT,
                     bCanDamageFriendlies=False,
                     DamageCauser=wpn,
                 )
@@ -404,9 +404,9 @@ def _apply_throw_impact(
                     DamageAmount=float(breakdown.splash_hit_damage),
                     bFullDamage=True,
                     Momentum=16000.0,
-                    DamageType=combat._CACHED_GRENADE_DMG_CLS or combat._CACHED_BULLET_DMG_CLS,
-                    DamageTypeDefinition=combat._CACHED_DMG_TYPES_PROC.get(Element.EXPLOSIVE),
-                    ImpactDefinition=combat._CACHED_MELEE_IMPACT,
+                    DamageType=combat.resources._CACHED_GRENADE_DMG_CLS or combat.resources._CACHED_BULLET_DMG_CLS,
+                    DamageTypeDefinition=combat.resources._CACHED_DMG_TYPES_PROC.get(Element.EXPLOSIVE),
+                    ImpactDefinition=combat.resources._CACHED_MELEE_IMPACT,
                     bCanDamageFriendlies=False,
                     Offset=offset_vec,
                     DamageCauser=wpn,
@@ -654,7 +654,7 @@ def _play_guard_sfx(wpn: Any, card: ComputedCardStats) -> None:
     try:
         shooter = getattr(wpn, "Instigator", None) or getattr(wpn, "Owner", None)
         combat.ensure_combat_resources_cached()
-        ak = combat._CACHED_AKEVENTS.get(combat.AK_SWING_WHOOSH)
+        ak = combat.resources._CACHED_AKEVENTS.get(combat.resources.AK_SWING_WHOOSH)
         if ak is not None and shooter is not None:
             shooter.PlayAkEvent(ak)
     except Exception:
@@ -767,15 +767,15 @@ def _reflect_parry(pawn: Any, st: GuardState, args: Any, incoming_damage: float)
         combat.ensure_combat_resources_cached()
         # Tag first: the reflected hit is a crit, so BL2's floating number must say CRITICAL.
         combat._mark_pending_crit_feedback(attacker)
-        dt_def = combat._CACHED_DMG_TYPES_PROC.get(st.card.element)
+        dt_def = combat.resources._CACHED_DMG_TYPES_PROC.get(st.card.element)
         with prevent_hooking_direct_calls():
             pawn.Behavior_CauseDamage(
                 Target=attacker,
                 DamageAmount=float(reflected),
                 Momentum=18000.0,
-                DamageType=combat._CACHED_BULLET_DMG_CLS,
+                DamageType=combat.resources._CACHED_BULLET_DMG_CLS,
                 DamageTypeDefinition=dt_def,
-                ImpactDefinition=combat._CACHED_MELEE_IMPACT,
+                ImpactDefinition=combat.resources._CACHED_MELEE_IMPACT,
                 bCanDamageFriendlies=False,
                 DamageCauser=wpn,
             )

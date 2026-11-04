@@ -62,7 +62,7 @@ class WeaponFrameCalibration:
     """
 
     scale_uu_per_meter: float = 34.0
-    # Calibrated from live Phase-3 probe (`Weap_Pistol` grip center `(0, +6.7, -5.5)` & `Arms` `"Weapon"` socket):
+    # Calibrated from observed BL2 `Weap_Pistol` grip center `(0, +6.7, -5.5)` and the `Arms` `"Weapon"` socket:
     # Places `gy = 0` (`SOCKET_BLADE`) at `(0, +3.2, +2.3)`, `gy = -0.25` palm center at `(0, +6.66, -5.46)`,
     # and `gy = -0.50` pommel at `(0, +10.11, -13.23)`, keeping 100% of blade + tip inside 90-deg 1P FOV.
     grip_origin_uu: tuple[float, float, float] = (0.0, 3.2, 2.3)

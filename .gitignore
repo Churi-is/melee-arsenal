@@ -3,7 +3,6 @@ __pycache__/
 .venv/
 .pytest_cache/
 .DS_Store
-sdk_mods/melee_arsenal_probe/reports/
 dist/
 
 # Staged Inkblade generator output & stage cache (./melee generate)

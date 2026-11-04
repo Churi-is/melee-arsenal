@@ -188,7 +188,7 @@ class RuntimeRegressionTests(unittest.TestCase):
             ctx = PlayerMeleeContext(melee_damage_scale=2.0, status_chance_scale=2.0, status_damage_scale=2.0)
             breakdown = compute_attack_damage(card, ctx)
             wpn = types.SimpleNamespace()
-            with mock.patch.object(combat.random, "random", return_value=0.0):
+            with mock.patch.object(combat.damage.random, "random", return_value=0.0):
                 dt, proc = combat.select_attack_damage_type(wpn, card, breakdown)
             self.assertTrue(proc)
             self.assertEqual(wpn.BaseStatusEffectChanceModifier, 50.0)

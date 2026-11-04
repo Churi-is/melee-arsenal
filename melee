@@ -7,8 +7,6 @@ DEFAULT_KIT="$REPO_ROOT/build/inkblade_kit"
 COOKED_REL="build/WillowGame/CookedPCConsole"
 BUILD_MANIFEST="$REPO_ROOT/build/inkblade_compiled_manifest.json"
 MOD_REL="sdk_mods/melee_arsenal"
-# Keep cleanup for ignored reports left by the retired in-game probe.
-LEGACY_PROBE_REL="sdk_mods/melee_arsenal_probe"
 BL2_CACHE_FILE="$REPO_ROOT/.bl2_dir"
 
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -480,7 +478,7 @@ cmd_uninstall() {
   local cooked_dst="$bl2/WillowGame/CookedPCConsole"
 
   info "Uninstalling Melee Arsenal from $bl2"
-  rm -rf "$sdk_dir/melee_arsenal" "$sdk_dir/melee_arsenal_probe"
+  rm -rf "$sdk_dir/melee_arsenal"
   rm -f "$cooked_dst/MeleeArsenalMeshes.upk" "$cooked_dst/MeleeArsenalTextures.upk"
   if [ "$purge_saves" -eq 1 ]; then
     rm -rf "$sdk_dir/_melee_arsenal_saves"
@@ -592,7 +590,7 @@ cmd_clean() {
   info "Cleaning bytecode caches & build artifacts"
   find "$REPO_ROOT" \( -name "__pycache__" -o -name ".pytest_cache" \) -type d -prune -exec rm -rf {} +
   find "$REPO_ROOT" \( -name "*.pyc" -o -name "*.pyo" -o -name ".DS_Store" \) -type f -delete
-  rm -rf "$REPO_ROOT/$LEGACY_PROBE_REL/reports" "$REPO_ROOT/build"
+  rm -rf "$REPO_ROOT/build"
   ok "Workspace cleaned."
 }
 
@@ -658,7 +656,7 @@ ${C_BOLD}Commands:${C_RESET}
   ${C_CYAN}uninstall${C_RESET} [options]       Remove mod & UPKs from Borderlands 2 (--purge-saves to wipe saves)
   ${C_CYAN}status${C_RESET}                    Show repo, kit, UPK, Borderlands 2 sync, and sidecar save status
   ${C_CYAN}logs${C_RESET} [-f] [-n <lines>]    View or follow live in-game melee_arsenal.log
-  ${C_CYAN}clean${C_RESET}                     Remove __pycache__, .pyc, ignored scratch reports, and build/
+  ${C_CYAN}clean${C_RESET}                     Remove __pycache__, .pyc, and build/
   ${C_CYAN}all${C_RESET} [install-options]     Full pipeline: build -> test -> package -> install (if BL2 found)
 
 ${C_BOLD}Environment:${C_RESET}
