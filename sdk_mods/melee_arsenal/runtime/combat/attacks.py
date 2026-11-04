@@ -289,7 +289,7 @@ def execute_melee_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCard
     rot_src = getattr(pc, "Rotation", None) or getattr(shooter, "Rotation", None)
     aim_dir = common.rot_to_forward(rot_src) if rot_src is not None else (1.0, 0.0, 0.0)
 
-    # Step 4 UU back inside shooter's ignored capsule so 0.0m point-blank targets always intersect
+    # 4uu back inside shooter's ignored capsule so 0.0m point-blank targets always intersect
     start_xyz = (
         eye_x - aim_dir[0] * 4.0,
         eye_y - aim_dir[1] * 4.0,
