@@ -16,10 +16,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .catalog import BLADES
 from .enums import Rarity
 from .loot_roller import validate_weapon_parts
-from .schemas import MeleeWeaponInstance, MeleeWeaponParts
+from .parts.accessories import NO_ACCESSORY_ID
+from .parts.blades import BLADES
+from .parts.elements import NO_ELEMENT_ID
+from .parts.weapon import MeleeWeaponInstance, MeleeWeaponParts
 
 PACKAGE_ROOT: str = "MeleeArsenalDev"
 SAVE_SCHEMA: int = 1
@@ -88,8 +90,8 @@ def deserialize_weapon(record: dict[str, Any]) -> MeleeWeaponInstance:
     parts = MeleeWeaponParts(
         blade_id=str(parts_raw["blade_id"]),
         grip_id=str(parts_raw["grip_id"]),
-        accessory_id=str(parts_raw.get("accessory_id", "Acc_None")),
-        element_id=str(parts_raw.get("element_id", "Elem_None")),
+        accessory_id=str(parts_raw.get("accessory_id", NO_ACCESSORY_ID)),
+        element_id=str(parts_raw.get("element_id", NO_ELEMENT_ID)),
     )
     errors = validate_weapon_parts(parts)
     if errors:

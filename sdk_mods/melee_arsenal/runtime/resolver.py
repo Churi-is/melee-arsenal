@@ -26,15 +26,16 @@ except ImportError:  # pragma: no cover
     Block = object()  # type: ignore[assignment]
     prevent_hooking_direct_calls = None  # type: ignore[assignment]
 
-from ..core.catalog import (
+from ..core.parts import (
     BLADES,
     BLADE_BY_MANUFACTURER,
     ELEMENT_PART_BY_TYPE,
     MANUFACTURERS,
+    NO_ACCESSORY_ID,
     resolve_weapon_name,
 )
 from ..core.enums import Manufacturer, Rarity
-from ..core.schemas import MeleeWeaponInstance, MeleeWeaponParts
+from ..core.parts.weapon import MeleeWeaponInstance, MeleeWeaponParts
 from ..core.stats import ComputedCardStats, compute_card_stats
 from .custom_assets import (
     get_part_rarity,
@@ -192,7 +193,7 @@ def resolve_melee_weapon(
         grip_id = STATE.part_path_to_grip_id.get(grip_p, f"Grip_{maker.value}")
 
         acc_p = obj_path(getattr(dd, "Accessory1PartDefinition", None))
-        acc_id = STATE.part_path_to_accessory_id.get(acc_p, "Acc_None")
+        acc_id = STATE.part_path_to_accessory_id.get(acc_p, NO_ACCESSORY_ID)
 
         elem_p = obj_path(getattr(dd, "ElementalPartDefinition", None))
         default_elem = mspec.allowed_elements[0]

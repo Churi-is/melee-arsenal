@@ -144,7 +144,7 @@ For deeper diagnostics, enable **Log Swing Damage Breakdown** and tail the log:
 
 ## For Developers
 
-- **Architecture, combat engine, secondary attacks, loot pools, persistence:** [docs/DEVELOPER.md](docs/DEVELOPER.md)
+- **Architecture, part catalog / adding new parts, combat engine, secondary attacks, loot pools, persistence:** [docs/DEVELOPER.md](docs/DEVELOPER.md)
 - **InkBlade art pipeline (10-stage generator, caching, decals):** [tools/inkblade_gen/README.md](tools/inkblade_gen/README.md)
 - **UPK codec & kit fingerprint:** [tools/inkblade_upk/](tools/inkblade_upk/)
 
@@ -154,7 +154,8 @@ Repository layout:
 .
 ├── melee                           # Build, test, package & BL2 deployment CLI
 ├── build/                          # Generated kit, cooked UPKs, manifest (gitignored)
-├── sdk_mods/melee_arsenal/         # Main mod — core/ (pure Python) + runtime/ (live UE3)
+├── sdk_mods/melee_arsenal/         # Main mod — core/parts/ (one file per part type), core/ math,
+│                                   # runtime/definitions/ (UE3 builders) + runtime/ hooks & combat
 ├── sdk_mods/melee_arsenal_probe/   # Optional in-game UE3 diagnostics
 ├── tools/                          # Kit generator, UPK compiler, preview tooling
 └── tests/                          # Unit tests (core math, mock SDK, UPK codec)

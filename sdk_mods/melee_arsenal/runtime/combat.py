@@ -68,7 +68,7 @@ from mods_base import get_pc
 from unrealsdk.hooks import Block, prevent_hooking_direct_calls
 
 from ..core.enums import Element, Manufacturer, SecondaryAttack, TargetingMode
-from ..core.schemas import MeleeWeaponInstance, PlayerMeleeContext
+from ..core.parts.weapon import MeleeWeaponInstance, PlayerMeleeContext
 from ..core.stats import (
     ComputedCardStats,
     apply_incoming_damage_reduction,

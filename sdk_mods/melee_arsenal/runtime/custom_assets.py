@@ -20,7 +20,16 @@ try:
 except ImportError:  # pragma: no cover
     unrealsdk = None  # type: ignore[assignment]
 
-from ..core.catalog import BLADES, BLADE_BY_MANUFACTURER, ELEMENT_PART_BY_TYPE, MANUFACTURERS
+from ..core.parts import (
+    BLADES,
+    BLADE_BY_MANUFACTURER,
+    BLADE_TO_KIT_ID,
+    ELEMENT_PART_BY_TYPE,
+    GRIP_TO_KIT_ID,
+    MANUFACTURERS,
+)
+from ..core.parts.accessories import ACCESSORY_TO_KIT_ID, NO_ACCESSORY_ID
+from ..core.parts.elements import ELEMENT_ID_TO_ATLAS_KEY, ELEMENT_TO_KIT_ID
 from ..core.enums import Manufacturer, Rarity
 from .log import log_debug_once, log_error, log_info, log_warn, obj_path
 from .state import KEEP_ALIVE_FLAGS, STATE
@@ -29,50 +38,9 @@ from .state import KEEP_ALIVE_FLAGS, STATE
 MANIFEST_PATH = Path(__file__).resolve().parents[1] / "data" / "inkblade_compiled_manifest.json"
 MASTER_CLASSMOD_SHADER_PATH = "Item_ClassMods.Mat.Master_ClassMod"
 
-BLADE_TO_KIT_ID: dict[str, str] = {
-    "Blade_Hyperion_Katana": "blade_hyperion",
-    "Blade_Bandit_Machete": "blade_bandit",
-    "Blade_Jakobs_Sabre": "blade_jakobs",
-    "Blade_Maliwan_Phaseblade": "blade_maliwan",
-    "Blade_Torgue_BlastCleaver": "blade_torgue",
-}
-
-GRIP_TO_KIT_ID: dict[str, str] = {
-    "Grip_Hyperion": "grip_hyperion",
-    "Grip_Bandit": "grip_bandit",
-    "Grip_Jakobs": "grip_jakobs",
-    "Grip_Maliwan": "grip_maliwan",
-    "Grip_Torgue": "grip_torgue",
-}
-
-ACCESSORY_TO_KIT_ID: dict[str, str | None] = {
-    "Acc_None": None,
-    "Acc_Serrated": "accessory_serrated_edge",
-    "Acc_Counterweight": "accessory_balanced_pommel",
-    "Acc_ExtendedTang": "accessory_extended_blade_fuller",
-    "Acc_RazorFuller": "accessory_monofilament_honing",
-    "Acc_BroadSweep": "accessory_flared_cleave_guard",
-    "Acc_HeavySpine": "accessory_reinforced_heavy_spine",
-    "Acc_FluxCapacitor": "accessory_overclocked_elemental_coil",
-}
-
-ELEMENT_TO_KIT_ID: dict[str, str | None] = {
-    "Elem_None": None,
-    "Elem_Fire": "element_fire",
-    "Elem_Shock": "element_shock",
-    "Elem_Corrosive": "element_corrosive",
-    "Elem_Slag": "element_slag",
-    "Elem_Explosive": "element_explosive",
-}
-
-ELEMENT_ID_TO_ATLAS_KEY: dict[str, str] = {
-    "Elem_None": "None",
-    "Elem_Fire": "Fire",
-    "Elem_Shock": "Shock",
-    "Elem_Corrosive": "Corrosive",
-    "Elem_Slag": "Slag",
-    "Elem_Explosive": "Explosive",
-}
+# Catalog -> InkBlade kit fragment id maps. The IDs are part data (`kit_id` /
+# `atlas_key` fields on each part spec) and are derived in `core/parts/`; this module
+# only consumes them, so adding a part never means editing two ID tables.
 
 
 def _find(cls_name: str, path_name: str) -> Any:
@@ -840,7 +808,7 @@ def sync_definition_data_visual_parts(dd: Any) -> bool:
     grip_id = STATE.part_path_to_grip_id.get(grip_p, f"Grip_{maker.value}")
 
     acc_p = obj_path(getattr(dd, "Accessory1PartDefinition", None))
-    acc_id = STATE.part_path_to_accessory_id.get(acc_p, "Acc_None")
+    acc_id = STATE.part_path_to_accessory_id.get(acc_p, NO_ACCESSORY_ID)
 
     elem_p = obj_path(getattr(dd, "ElementalPartDefinition", None))
     default_elem_id = ELEMENT_PART_BY_TYPE[mspec.allowed_elements[0]].part_id
