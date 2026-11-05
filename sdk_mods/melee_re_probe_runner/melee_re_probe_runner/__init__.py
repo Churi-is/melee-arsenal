@@ -30,12 +30,21 @@ try:
 except ImportError:  # pragma: no cover - offline inspection / tooling
     mods_base = None  # type: ignore[assignment]
     mod = None  # type: ignore[assignment]
+    add_command = None  # type: ignore[assignment]
+    remove_command = None  # type: ignore[assignment]
 else:
     from . import commands
+
+    try:
+        from unrealsdk.commands import add_command, remove_command  # type: ignore[import-not-found]
+    except Exception:  # pragma: no cover - outside the game
+        add_command = None  # type: ignore[assignment]
+        remove_command = None  # type: ignore[assignment]
 
     __version__ = "0.1.0"
     __author__ = "MeleeArsenal"
     mod = None  # set below after build_mod
+    _command_registered = False  # mrp command registered only while enabled
 
     # -- options -----------------------------------------------------------
 
@@ -86,6 +95,7 @@ else:
     # -- lifecycle ---------------------------------------------------------
 
     def _on_enable() -> None:
+        global _command_registered
         if not opt_enable_runner.value:
             return
         # Confirm RE Probe is present and enabled.
@@ -107,9 +117,28 @@ else:
         if opt_auto_dump.value and _RPROBE is not None:
             _RPROBE.start_dump("full")
 
+        # Register the mrp console command while the runner is enabled.
+        # Must happen here (not at module import) so unrealsdk's command
+        # system is ready and the command is tied to the mod's enabled state.
+        if add_command is not None and not _command_registered:
+            try:
+                add_command("mrp", commands.handle_command)
+                _command_registered = True
+            except Exception as exc:
+                _write_log(f"[Melee RE Probe Runner] could not register 'mrp' command: {exc}")
+
         _write_log("[Melee RE Probe Runner] enabled — type 'mrp help' for commands")
 
     def _on_disable() -> None:
+        global _command_registered
+        # Remove the mrp console command so it doesn't linger after disable.
+        if remove_command is not None and _command_registered:
+            try:
+                remove_command("mrp")
+            except Exception:
+                pass
+            _command_registered = False
+
         try:
             from re_probe import PROBE as _RPROBE  # type: ignore[import-not-found]
 
@@ -150,11 +179,5 @@ mod = mods_base.build_mod(
     on_enable=_on_enable,
     on_disable=_on_disable,
 )
-
-# Register the mrp_* console commands after the mod exists.
-if mods_base is not None:
-    from unrealsdk.commands import add_command  # type: ignore[import-not-found]
-
-    add_command("mrp", commands.handle_command)
 
 __all__ = ["mod", "__version__", "__author__"]
