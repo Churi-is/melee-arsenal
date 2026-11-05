@@ -133,25 +133,28 @@ def _write_log(message: str) -> None:
                 pass
     print(message)
 
-    mod = mods_base.build_mod(
-        name="Melee RE Probe Runner",
-        author=__author__,
-        version=__version__,
-        description=(
-            "Drives RE Probe for melee-arsenal analysis: starts dumps, arms the "
-            "melee combat trace, dumps held weapons, and parses dump results into "
-            "CONFIRMED/PARTIAL/REFUTED findings. Use 'mrp help' for commands."
-        ),
-        supported_games=mods_base.Game.BL2,
-        options=options,
-        on_enable=_on_enable,
-        on_disable=_on_disable,
-    )
 
-    # Register the mrp_* console commands after the mod exists.
-    if mods_base is not None:
-        from unrealsdk.commands import add_command  # type: ignore[import-not-found]
+# Build and register the mod with the mod menu (module level, not inside
+# _write_log — otherwise build_mod never runs at import time).
+mod = mods_base.build_mod(
+    name="Melee RE Probe Runner",
+    author=__author__,
+    version=__version__,
+    description=(
+        "Drives RE Probe for melee-arsenal analysis: starts dumps, arms the "
+        "melee combat trace, dumps held weapons, and parses dump results into "
+        "CONFIRMED/PARTIAL/REFUTED findings. Use 'mrp help' for commands."
+    ),
+    supported_games=mods_base.Game.BL2,
+    options=options,
+    on_enable=_on_enable,
+    on_disable=_on_disable,
+)
 
-        add_command("mrp", commands.handle_command)
+# Register the mrp_* console commands after the mod exists.
+if mods_base is not None:
+    from unrealsdk.commands import add_command  # type: ignore[import-not-found]
+
+    add_command("mrp", commands.handle_command)
 
 __all__ = ["mod", "__version__", "__author__"]
