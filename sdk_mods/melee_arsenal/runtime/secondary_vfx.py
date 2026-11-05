@@ -62,23 +62,12 @@ def _fallback_material(wpn: Any) -> Any:
     return None
 
 
-def _material_of(entry: Any) -> Any:
-    """`Materials` entries are either the material itself or a `{Material, ...}` struct."""
-    if entry is None:
-        return None
-    inner = getattr(entry, "Material", None)
-    return inner if inner is not None else entry
-
-
 @dataclass
 class ThrownBladeVisual:
     """The spinning mesh actor that stands in for the airborne blade."""
 
     comp: Any
     pawn: Any
-    # The held weapon's own (first-person) mesh is hidden while the blade is airborne, so the
-    # hand is visibly empty even if the procedural arms offset is unavailable on a build.
-    held_mesh: Any = None
     spin_deg: float = 0.0
     engine_xyz: tuple[float, float, float] | None = None
     last_update: float = field(default_factory=time.monotonic)
@@ -150,11 +139,6 @@ class ThrownBladeVisual:
             self.comp.SetSkeletalMesh(None)
         except Exception:
             pass
-        if self.held_mesh is not None:
-            try:
-                self.held_mesh.SetHiddenGame(False)
-            except Exception:
-                pass
 
 
 _ACTIVE_VISUAL: ThrownBladeVisual | None = None
@@ -162,18 +146,15 @@ _SPAWN_COUNTER: int = 0
 
 
 def _build_component(pawn: Any, wpn: Any) -> Any:
-    """Create + attach a skeletal mesh component showing the held blade in the world."""
+    """Create + attach a skeletal mesh component showing the held blade in the world.
+
+    `WillowWeapon` exposes no `Mesh` property (measured on the live weapon), so the blade is always
+    drawn from the cooked gestalt mesh and tinted with the weapon's own material instance.
+    """
     global _SPAWN_COUNTER
-    source = getattr(wpn, "Mesh", None)
-    skel = getattr(source, "SkeletalMesh", None) if source is not None else None
+    skel = getattr(STATE, "custom_skeletal_mesh", None)
     if skel is None:
-        # Fall back to the cooked gestalt mesh (all fragments in one asset).
-        skel = getattr(STATE, "custom_skeletal_mesh", None)
-    if skel is None:
-        log_warn(
-            "Thrown blade visual unavailable: the held weapon exposes no SkeletalMesh and the "
-            "custom gestalt mesh is not loaded."
-        )
+        log_warn("Thrown blade visual unavailable: the custom gestalt mesh is not loaded.")
         return None
 
     _SPAWN_COUNTER += 1
@@ -186,40 +167,12 @@ def _build_component(pawn: Any, wpn: Any) -> Any:
     )
     comp.SetSkeletalMesh(skel)
 
-    # The weapon's own material instances carry the atlas + rarity material, so copy them across.
-    materials = list(getattr(source, "Materials", None) or []) if source is not None else []
-    for index, entry in enumerate(materials):
-        material = _material_of(entry)
-        if material is None:
-            continue
+    material = _fallback_material(wpn)
+    if material is not None:
         try:
-            comp.SetMaterial(index, material)
+            comp.SetMaterial(0, material)
         except Exception:
             pass
-    if not materials:
-        material = _fallback_material(wpn)
-        if material is not None:
-            try:
-                comp.SetMaterial(0, material)
-            except Exception:
-                pass
-
-    # Match whatever scale the held weapon's mesh uses so the thrown blade is not a toy.
-    if source is not None:
-        scale3d = getattr(source, "Scale3D", None)
-        if scale3d is not None:
-            try:
-                comp.SetScale3D(scale3d)
-            except Exception:
-                try:
-                    comp.Scale3D = scale3d
-                except Exception:
-                    pass
-        else:
-            try:
-                comp.SetScale(float(getattr(source, "Scale", 1.0)))
-            except Exception:
-                pass
 
     for attr, value in (("bForceRefpose", True), ("bUpdateSkelWhenNotRendered", True)):
         try:
@@ -261,22 +214,10 @@ def spawn_thrown_blade(pawn: Any, wpn: Any, origin_xyz: tuple[float, float, floa
         return None
     if comp is None:
         return None
-    held_mesh = getattr(wpn, "Mesh", None)
-    visual = ThrownBladeVisual(comp=comp, pawn=pawn, held_mesh=held_mesh)
+    visual = ThrownBladeVisual(comp=comp, pawn=pawn)
     visual.move_to(origin_xyz)
     _ACTIVE_VISUAL = visual
     return visual
-
-
-def hide_held_blade() -> None:
-    """Hide the weapon mesh still attached to the first-person hands (empty hand while it flies)."""
-    visual = _ACTIVE_VISUAL
-    if visual is None or visual.held_mesh is None or not visual.alive:
-        return
-    try:
-        visual.held_mesh.SetHiddenGame(True)
-    except Exception:
-        pass
 
 
 def update_thrown_blade(xyz: tuple[float, float, float]) -> None:

@@ -1,6 +1,6 @@
 # Melee Arsenal — Borderlands 2 PythonSDK Mod
 
-**Melee Arsenal (`v0.4.5`)** adds a standalone **Melee Weapon** class to *Borderlands 2* — Willow2 Mod Manager v3.8+ (mods_base 1.12+ / unrealsdk 3.2 / pyunrealsdk 1.10) — powered by a custom 22-part modular 3D **InkBlade** Gestalt mesh and six 2048×2048 elemental texture atlases compiled via a pure-Python Unreal Engine 3 `.upk` pipeline.
+**Melee Arsenal (`v0.4.6`)** adds a standalone **Melee Weapon** class to *Borderlands 2* — Willow2 Mod Manager v3.8+ (mods_base 1.12+ / unrealsdk 3.2 / pyunrealsdk 1.10) — powered by a custom 22-part modular 3D **InkBlade** Gestalt mesh and six 2048×2048 elemental texture atlases compiled via a pure-Python Unreal Engine 3 `.upk` pipeline.
 
 Primary Fire swings your equipped Melee Weapon (precision single-target strikes or frontal cleave arcs) scaling with gun-level base damage, elemental DoT/splash, **player Melee Damage bonuses**, and **Roid shield buffs**, while `[V]` remains your vanilla character melee. **Right Mouse Button / Left Trigger fires each manufacturer's secondary attack** (ADS zoom stays suppressed): **Bandit and Torgue throw their blade**, **Hyperion and Jakobs hold to guard**, and **Maliwan gets nothing**.
 
@@ -19,7 +19,7 @@ Every Melee Weapon also rolls **level-scaled Damage Reduction** (~30% at Lv 1 �
 
 ## Installation (Players)
 
-1. Download `melee_arsenal.zip` (or `melee_arsenal-v0.4.5.zip`) from the Releases page.
+1. Download `melee_arsenal.zip` (or `melee_arsenal-v0.4.6.zip`) from the Releases page.
 2. Extract it to your Borderlands 2 install — `WillowGame/CookedPCConsole/MeleeArsenal*.upk` and `sdk_mods/melee_arsenal/` should appear.
 3. Launch the game, open **MODS → Melee Arsenal → Enabled**.
 4. Load any map to find Melee Weapons in-world. Check **MODS → Melee Arsenal** for tuning dials.
@@ -127,6 +127,21 @@ For deeper diagnostics, enable **Log Swing Damage Breakdown** and tail the log:
 
 ---
 
+## Development
+
+```bash
+./melee setup              # venv + Pillow
+./melee dev                # syntax check, then install to Borderlands 2
+./melee check              # byte-compile sdk_mods/ and tools/
+```
+
+**Why the engine calls in this mod look the way they do.** Class layouts, which hooks fire, the item
+card's real parameter names and icon strings, loot weights and the exact effect paths were measured
+in game rather than guessed; the results — and the code they justify — are recorded in
+[docs/ENGINE_FACTS.md](docs/ENGINE_FACTS.md).
+
+---
+
 ## Dependencies
 
 - **Runtime:** Borderlands 2 + Willow2 Mod Manager v3.8+ — no Python packages required to play.
@@ -148,4 +163,4 @@ Install with:
 
 ## Version
 
-`v0.4.5` — Willow2 Mod Manager v3.8+ (mods_base 1.12+ / unrealsdk 3.2 / pyunrealsdk 1.10)
+`v0.4.6` — Willow2 Mod Manager v3.8+ (mods_base 1.12+ / unrealsdk 3.2 / pyunrealsdk 1.10)

@@ -1,6 +1,6 @@
 [project]
 name = "melee-arsenal"
-version = "0.4.5"
+version = "0.4.6"
 description = "Borderlands 2 PythonSDK mod and Unreal Engine 3 asset pipeline"
 readme = "README.md"
 license = { text = "MIT" }

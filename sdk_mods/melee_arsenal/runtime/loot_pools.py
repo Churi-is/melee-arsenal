@@ -191,30 +191,24 @@ def _ensure_pools_subpackage() -> Any:
 
 
 def _sanitize_pool_object(pool_obj: Any) -> None:
-    """Strip inherited `Gamestage_02` / `Gamestage_07` gates and normalize `Quantity = 1.0`."""
+    """Strip inherited `Gamestage_02` / `Gamestage_07` gates and normalize `Quantity = 1.0`.
+
+    Every attribute below is declared on `ItemPoolDefinition` itself (measured from UE3 reflection).
+    """
     if pool_obj is None:
         return
-    for gate_attr in ("MinGameStageRequirement", "MaxGameStageRequirement"):
-        if hasattr(pool_obj, gate_attr):
-            try:
-                setattr(pool_obj, gate_attr, None)
-            except Exception:
-                pass
-    if hasattr(pool_obj, "bAutoReadyItems"):
-        try:
-            pool_obj.bAutoReadyItems = False
-        except Exception:
-            pass
-    if hasattr(pool_obj, "Quantity"):
-        try:
-            q = copy.copy(pool_obj.Quantity)
-            q.BaseValueConstant = 1.0
-            q.BaseValueAttribute = None
-            q.InitializationDefinition = None
-            q.BaseValueScaleConstant = 1.0
-            pool_obj.Quantity = q
-        except Exception as exc:  # pragma: no cover - engine call shape varies
-            log_debug_once("_sanitize_pool_object", f"_sanitize_pool_object failed: {exc!r}")
+    try:
+        pool_obj.MinGameStageRequirement = None
+        pool_obj.MaxGameStageRequirement = None
+        pool_obj.bAutoReadyItems = False
+        quantity = copy.copy(pool_obj.Quantity)
+        quantity.BaseValueConstant = 1.0
+        quantity.BaseValueAttribute = None
+        quantity.InitializationDefinition = None
+        quantity.BaseValueScaleConstant = 1.0
+        pool_obj.Quantity = quantity
+    except Exception as exc:  # pragma: no cover - engine call shape varies
+        log_debug_once("_sanitize_pool_object", f"_sanitize_pool_object failed: {exc!r}")
 
 
 def _set_constant_prob(entry: Any, weight: float) -> None:

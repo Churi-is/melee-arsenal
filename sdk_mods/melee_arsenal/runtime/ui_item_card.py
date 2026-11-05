@@ -6,9 +6,9 @@ Damage Reduction. Standard gun-only stats are hidden.
 Do not call `gfx_obj.AdjustHeight()`: in BL2 it moves and shrinks the shared item-card movie clip.
 """
 from __future__ import annotations
-from .sdk import Block, prevent_hooking_direct_calls, unrealsdk
+from .sdk import Block, prevent_hooking_direct_calls
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 
@@ -25,66 +25,40 @@ class ActiveCardOverride:
     card_stats: ComputedCardStats
     payload: ItemCardPayload
     gun_compare_arrow: CompareArrow | None = None
-    observed_icons: dict[int, str] = field(default_factory=dict)
-    observed_elem_icon: str = ""
     depth: int = 1
 
 
 _ACTIVE_CARDS: dict[str, ActiveCardOverride] = {}
-_COMPARE_ENUM_MAP: dict[CompareArrow, int] | None = None
 
-_ELEMENT_ICON_FALLBACK: dict[Element, str] = {
+# Gearbox's Flash stat icons, measured off live `ItemCardGFxObject` calls (docs/ENGINE_FACTS.md):
+# slot 0 `weaponDamage`, 1 `weaponAccuracy`, 2 `weaponFireRate`, 3 `weaponsReloadSpeed`,
+# 4 `weaponClipSize`, 5/6 `element<Element>` — `elementCorrosive` and `elementFire` both observed.
+_ICON_DAMAGE = "weaponDamage"
+_ICON_ACCURACY = "weaponAccuracy"
+_ICON_FIRE_RATE = "weaponFireRate"
+_ELEMENT_ICON: dict[Element, str] = {
     Element.NONE: "",
-    Element.FIRE: "incendiary",
-    Element.SHOCK: "shock",
-    Element.CORROSIVE: "corrosive",
-    Element.SLAG: "slag",
-    Element.EXPLOSIVE: "explosive",
+    Element.FIRE: "elementFire",
+    Element.SHOCK: "elementShock",
+    Element.CORROSIVE: "elementCorrosive",
+    Element.SLAG: "elementSlag",
+    Element.EXPLOSIVE: "elementExplosive",
 }
 
 
-def _discover_compare_enum() -> dict[CompareArrow, int]:
-    """Discover exact `ECompareStat` enum byte values from UE3 reflection (with safe defaults)."""
-    global _COMPARE_ENUM_MAP
-    if _COMPARE_ENUM_MAP is not None:
-        return _COMPARE_ENUM_MAP
-
-    mapping = {
-        CompareArrow.NONE: 0,
-        CompareArrow.BETTER: 1,
-        CompareArrow.EQUAL: 2,
-        CompareArrow.WORSE: 3,
-    }
-    if unrealsdk is None:
-        _COMPARE_ENUM_MAP = mapping
-        return mapping
-
-    try:
-        fn = unrealsdk.find_object("Function", "WillowGame.ItemCardGFxObject:SetTopStat")
-        if fn is not None:
-            for prop in fn._properties():
-                if str(prop.Name) == "CompareArrow" and hasattr(prop, "Enum") and prop.Enum is not None:
-                    enum_obj = prop.Enum
-                    if hasattr(enum_obj, "_names"):
-                        names = [str(n).lower() for n in enum_obj._names()]
-                        for idx, nm in enumerate(names):
-                            if any(k in nm for k in ("none", "blank", "no_compare", "empty")):
-                                mapping[CompareArrow.NONE] = idx
-                            elif any(k in nm for k in ("better", "higher", "up", "greater")):
-                                mapping[CompareArrow.BETTER] = idx
-                            elif any(k in nm for k in ("same", "equal", "even")):
-                                mapping[CompareArrow.EQUAL] = idx
-                            elif any(k in nm for k in ("worse", "lower", "down", "less")):
-                                mapping[CompareArrow.WORSE] = idx
-    except Exception:
-        pass
-
-    _COMPARE_ENUM_MAP = mapping
-    return mapping
+# `SetTopStat`'s `CompareArrow` parameter is typed `ETopStatArrow`. That enum's value array is not
+# exposed by the SDK (`_names()` is absent on the enum object), so it cannot be read at run time;
+# the byte values below are what the card has always used and what the game accepts.
+_ARROW_BYTES: dict[CompareArrow, int] = {
+    CompareArrow.NONE: 0,
+    CompareArrow.BETTER: 1,
+    CompareArrow.EQUAL: 2,
+    CompareArrow.WORSE: 3,
+}
 
 
 def _arrow_byte(arrow: CompareArrow) -> int:
-    return _discover_compare_enum().get(arrow, 0)
+    return _ARROW_BYTES.get(arrow, 0)
 
 
 def _compare_against_vanilla_gun_damage(card: ComputedCardStats, compare_item: Any) -> CompareArrow | None:
@@ -104,28 +78,6 @@ def _compare_against_vanilla_gun_damage(card: ComputedCardStats, compare_item: A
         return CompareArrow.BETTER if diff > 0 else CompareArrow.WORSE
     except Exception:
         return None
-
-
-def _resolve_title_rarity(engine_rarity: Any, card_rarity: Any) -> Any:
-    """Never let a Melee Weapon title render White when the weapon rolled a higher tier.
-
-    `ItemCardGFxObject.SetTitle`'s rarity argument is the 1-based BL2 rarity level the engine read
-    off the item (1 White … 4 Purple) and it colours the whole title. Items that we re-assemble
-    after the engine cached their level (command spawns, sidecar restores) can still report Common,
-    so promote the level to the rolled tier — we never downgrade a card.
-    """
-    try:
-        level = int(card_rarity)
-    except Exception:
-        return engine_rarity
-    if level <= 1:
-        return engine_rarity
-    if engine_rarity is None:
-        return level
-    if isinstance(engine_rarity, bool) or not isinstance(engine_rarity, (int, float)):
-        # Not a numeric rarity level (e.g. an already-resolved colour) — leave it untouched.
-        return engine_rarity
-    return level if int(engine_rarity) < level else engine_rarity
 
 
 def _call_set_top_stat(
@@ -149,9 +101,9 @@ def _apply_melee_card_override(gfx_obj: Any, ov: ActiveCardOverride) -> None:
     payload = ov.payload
     rows = payload.top_stats
 
-    dmg_icon = ov.observed_icons.get(0, "damage")
-    range_icon = ov.observed_icons.get(1, "accuracy")
-    speed_icon = ov.observed_icons.get(2, "firerate")
+    dmg_icon = _ICON_DAMAGE
+    range_icon = _ICON_ACCURACY
+    speed_icon = _ICON_FIRE_RATE
 
     row0_arrow = ov.gun_compare_arrow if ov.gun_compare_arrow is not None else rows[0].arrow
 
@@ -161,7 +113,7 @@ def _apply_melee_card_override(gfx_obj: Any, ov: ActiveCardOverride) -> None:
 
     elem_sec = payload.elemental_section
     if elem_sec is not None:
-        e_icon = ov.observed_elem_icon or _ELEMENT_ICON_FALLBACK.get(elem_sec.element, "")
+        e_icon = _ELEMENT_ICON.get(elem_sec.element, "")
         _call_set_top_stat(
             gfx_obj,
             3,
@@ -243,15 +195,13 @@ def on_set_title_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
         return None
     try:
         mfr_str = str(getattr(args, "Manufacturer", "") or ov.payload.manufacturer_name)
-        rarity_color = _resolve_title_rarity(
-            getattr(args, "Rarity", None),
-            ov.card_stats.rarity,
-        )
-        type_icon = str(getattr(args, "TypeIcon", "") or "pistol")
+        # `SetTitle`'s rarity argument is a `Color` struct (measured from the UFunction), not a
+        # 1-based level with a `__int__`, so the engine's colour is always what we render.
+        rarity_color = getattr(args, "Rarity", None)
+        type_icon = str(getattr(args, "TypeIcon", "") or "Pistol")
         elem_icon = str(getattr(args, "ElementalIcon", "") or "")
         if not elem_icon and ov.card_stats.element != Element.NONE:
-            elem_icon = _ELEMENT_ICON_FALLBACK.get(ov.card_stats.element, "")
-        ov.observed_elem_icon = elem_icon
+            elem_icon = _ELEMENT_ICON.get(ov.card_stats.element, "")
         is_readied = bool(getattr(args, "bIsReadied", False))
 
         if prevent_hooking_direct_calls is not None:
@@ -279,20 +229,10 @@ def on_set_title_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
 
 
 def on_set_top_stat_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
-    """Capture Gearbox's Flash icon names and suppress Accuracy/Reload/Mag Size on melee cards."""
-    ov = _ACTIVE_CARDS.get(cache_key(obj))
-    if ov is None:
-        return None
-    try:
-        idx = int(getattr(args, "StatIndex", -1))
-        icon = str(getattr(args, "IconName", "") or "")
-        if idx >= 0 and icon:
-            ov.observed_icons[idx] = icon
-            if idx >= 3 and not ov.observed_elem_icon:
-                ov.observed_elem_icon = icon
-    except Exception:
-        pass
-    return Block
+    """Suppress the donor gun's Accuracy / Reload / Mag Size rows while a melee card renders."""
+    if cache_key(obj) in _ACTIVE_CARDS:
+        return Block
+    return None
 
 
 def on_set_fun_stats_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:

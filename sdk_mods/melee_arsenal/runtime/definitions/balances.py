@@ -360,21 +360,17 @@ def build_balances(ctx: BuildContext) -> None:
                             setattr(dpool, gate_attr, None)
                         except Exception:
                             pass
-                if hasattr(dpool, "bAutoReadyItems"):
-                    try:
-                        dpool.bAutoReadyItems = False
-                    except Exception:
-                        pass
-                if hasattr(dpool, "Quantity"):
-                    try:
-                        q = copy.copy(dpool.Quantity)
-                        q.BaseValueConstant = 1.0
-                        q.BaseValueAttribute = None
-                        q.InitializationDefinition = None
-                        q.BaseValueScaleConstant = 1.0
-                        dpool.Quantity = q
-                    except Exception as exc:  # pragma: no cover - engine call shape varies
-                        log_debug_once("build_balances", f"build_balances failed: {exc!r}")
+                # Declared on `ItemPoolDefinition` itself (docs/ENGINE_FACTS.md).
+                dpool.bAutoReadyItems = False
+                try:
+                    quantity = copy.copy(dpool.Quantity)
+                    quantity.BaseValueConstant = 1.0
+                    quantity.BaseValueAttribute = None
+                    quantity.InitializationDefinition = None
+                    quantity.BaseValueScaleConstant = 1.0
+                    dpool.Quantity = quantity
+                except Exception as exc:  # pragma: no cover - engine call shape varies
+                    log_debug_once("build_balances", f"build_balances failed: {exc!r}")
                 donor_items = list(getattr(drop_pool_donor, "BalancedItems", []) or [])
                 if donor_items:
                     entry = copy.copy(donor_items[0])

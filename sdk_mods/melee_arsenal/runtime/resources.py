@@ -14,7 +14,6 @@ from .sdk import unrealsdk
 from ..core.enums import Element
 from ..core.parts import ELEMENTS
 from .log import log_debug, log_debug_once, log_info
-from .object_identity import is_dead
 
 
 ATTR_MELEE_MODIFIER = "D_Attributes.DamageSourceModifiers.InstigatedMeleeDamageModifier"
@@ -199,97 +198,17 @@ def ensure_combat_resources_cached() -> None:
     _cache_torgue_explosion_assets()
 
 
-def _score_explosion_ps_path(p: str) -> int:
-    low = p.lower()
-    if "explo" not in low:
-        return -1
-    if any(
-        bad in low
-        for bad in (
-            "default__",
-            "muzzle",
-            "trail",
-            "tracer",
-            "loop",
-            "_lp",
-            "ambient",
-            "env_",
-            "nuke",
-            "mongol",
-            "norfleet",
-            "badaboom",
-            "tunguska",
-            "blood",
-            "gore",
-            "corrosive",
-            "incendiary",
-            "shock",
-            "slag",
-            "amp",
-            "cryo",
-            "firehawk",
-        )
-    ):
-        return -1
-    score = 10
-    if "gyrojet" in low or "gyro" in low:
-        score += 65
-    if "torgue" in low:
-        score += 55
-    if "explosive" in low:
-        score += 50
-    if "fx_wep_explosions" in low or "fxe_" in low:
-        score += 30
-    if "default" in low or "small" in low or "med" in low:
-        score += 25
-    if "grenade" in low or "impact" in low:
-        score += 18
-    return score
-
-
-def _score_explosion_ak_path(p: str) -> int:
-    low = p.lower()
-    if "ak_play" not in low or "explo" not in low:
-        return -1
-    if any(
-        bad in low
-        for bad in (
-            "default__",
-            "stop",
-            "loop",
-            "_lp",
-            "tail",
-            "reload",
-            "equip",
-            "ui_",
-            "vo_",
-            "dlg",
-            "nuke",
-        )
-    ):
-        return -1
-    score = 10
-    if "gyro" in low:
-        score += 60
-    if "torgue" in low:
-        score += 50
-    if "wep_explosion" in low or "ake_wep_explosion" in low or "explosions" in low:
-        score += 40
-    if "default" in low or "small" in low or "med" in low:
-        score += 30
-    if "grenade" in low or "impact" in low or "rocket" in low:
-        score += 20
-    return score
-
-
 def _cache_torgue_explosion_assets() -> None:
-    """Discover and cache a real loaded explosive `ParticleSystem` + `AkEvent` once."""
+    """Cache the explosive `ParticleSystem` + `AkEvent` the Torgue splash uses.
+
+    These four paths were measured as loaded in a normal session (`section_catalogue.json`), so the
+    ordered fallback chain is the whole lookup: no whole-object scan, no name scoring.
+    """
     global _CACHED_EXPLOSION_PS, _CACHED_EXPLOSION_AK, _EXPLOSION_ASSETS_SCANNED
-    if _EXPLOSION_ASSETS_SCANNED and (_CACHED_EXPLOSION_PS is not None or _CACHED_EXPLOSION_AK is not None):
+    if _EXPLOSION_ASSETS_SCANNED:
         return
     _EXPLOSION_ASSETS_SCANNED = True
 
-    # Prefer known Borderlands 2 startup/base explosion assets.
     best_ps = _safe_find(
         "ParticleSystem", "FX_WEP_Explosions.Particles.Default.Part_ExplosiveExplosion_Medium"
     ) or _safe_find("ParticleSystem", "FX_WEP_Explosions.Particles.Default.Part_ExplosiveExplosion_Small")
@@ -299,44 +218,11 @@ def _cache_torgue_explosion_assets() -> None:
         or _safe_find("AkEvent", "Ake_Exp_Elemental.Exp_Explosive.Ak_Play_Exp_Elemental_Explosive_LG")
     )
 
-    # Fallback heuristic scan across already-loaded objects if needed
-    if best_ps is None:
-        best_ps_score = -1
-        try:
-            for ps in list(unrealsdk.find_all("ParticleSystem", exact=False)):
-                if is_dead(ps):
-                    continue
-                try:
-                    p = str(ps._path_name())
-                except Exception:
-                    continue
-                sc = _score_explosion_ps_path(p)
-                if sc > best_ps_score:
-                    best_ps_score = sc
-                    best_ps = ps
-        except Exception:
-            pass
-
-    if best_ak is None:
-        best_ak_score = -1
-        try:
-            for ak in list(unrealsdk.find_all("AkEvent", exact=False)):
-                if is_dead(ak):
-                    continue
-                try:
-                    p = str(ak._path_name())
-                except Exception:
-                    continue
-                sc = _score_explosion_ak_path(p)
-                if sc > best_ak_score:
-                    best_ak_score = sc
-                    best_ak = ak
-        except Exception:
-            pass
-
     _CACHED_EXPLOSION_PS = best_ps
     _CACHED_EXPLOSION_AK = best_ak
     if best_ps is not None or best_ak is not None:
         ps_name = str(best_ps._path_name()) if best_ps is not None else "None"
         ak_name = str(best_ak._path_name()) if best_ak is not None else "None"
         log_info(f"Cached Torgue Blast-Cleaver explosion FX={ps_name} Audio={ak_name}")
+    else:
+        log_debug_once("combat.explosion_fx", "no explosive ParticleSystem/AkEvent loaded; splash is silent")

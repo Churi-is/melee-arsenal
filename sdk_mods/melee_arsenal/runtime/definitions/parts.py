@@ -39,7 +39,7 @@ def build_body_parts(ctx: BuildContext) -> None:
             STATE.keep_alive(bpart)
         _clear_part_stat_bonuses(bpart)
         mfr_obj = STATE.maker_to_donor_manufacturer.get(maker)
-        if mfr_obj is not None and hasattr(bpart, "ManufacturerDefinitionForScopeMovie"):
+        if mfr_obj is not None:  # declared on `WeaponPartDefinition`
             bpart.ManufacturerDefinitionForScopeMovie = mfr_obj
         _clear_array_prop(bpart, "TitleList")
         _clear_array_prop(bpart, "PrefixList")
@@ -240,18 +240,12 @@ def build_element_parts(ctx: BuildContext) -> None:
             )
             STATE.keep_alive(part)
         _clear_part_stat_bonuses(part)
-        if espec.element == Element.NONE and hasattr(part, "GestaltModeSkeletalMeshName"):
-            try:
-                part.GestaltModeSkeletalMeshName = "None"
-            except Exception:
-                pass
+        if espec.element == Element.NONE:
+            part.GestaltModeSkeletalMeshName = "None"  # declared on `WeaponPartDefinition`
 
         dt = resources._CACHED_DEF_DMG_TYPES.get(espec.element)
-        if dt is not None and hasattr(part, "CustomDamageTypeDefinition"):
-            try:
-                part.CustomDamageTypeDefinition = dt
-            except Exception:
-                pass
+        if dt is not None:
+            part.CustomDamageTypeDefinition = dt  # declared on `WeaponPartDefinition`
 
         _clear_array_prop(part, "TitleList")
         pref_np = STATE.prefix_parts.get(espec.default_prefix) if espec.default_prefix else None

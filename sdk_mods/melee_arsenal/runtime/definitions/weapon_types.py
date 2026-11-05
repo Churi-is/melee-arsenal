@@ -83,6 +83,7 @@ def build_weapon_types(ctx: BuildContext) -> None:
         _clear_array_prop(wt, "WeaponAttributeEffects")
         # Strip 0.2667s pistol recoil kick & gun shake so our 1st-person blade swing plays cleanly
         _clear_array_prop(wt, "WeaponFireAnimations")
+        # All seven fields are declared on `WeaponTypeDefinition` (measured on the live weapon type).
         for kick_attr in (
             "WeaponKickSpeed",
             "WeaponKickUp",
@@ -91,20 +92,12 @@ def build_weapon_types(ctx: BuildContext) -> None:
             "WeaponKickRight",
             "ZoomedRecoilAnimScale",
         ):
-            if hasattr(wt, kick_attr):
-                try:
-                    setattr(wt, kick_attr, 0.0)
-                except Exception:
-                    pass
-        if hasattr(wt, "FireShake"):
-            try:
-                fs = copy.copy(wt.FireShake)
-                fs.OffsetTime = 0.0
-                fs.RotTime = 0.0
-                fs.FOVTime = 0.0
-                wt.FireShake = fs
-            except Exception:
-                pass
+            setattr(wt, kick_attr, 0.0)
+        fire_shake = copy.copy(wt.FireShake)
+        fire_shake.OffsetTime = 0.0
+        fire_shake.RotTime = 0.0
+        fire_shake.FOVTime = 0.0
+        wt.FireShake = fire_shake
 
         ihd = copy.copy(wt.InstantHitDamage)
         ihd.BaseValueConstant = 20.0

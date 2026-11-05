@@ -90,7 +90,6 @@ from .ui_item_card import (
 _tick_counter: int = 0
 _map_restore_ready_at: float = 0.0
 _last_restored_pawn_key: str = ""
-_last_frame_tick_at: float = 0.0
 
 
 def _notify_hud(title: str, message: str) -> None:
@@ -252,18 +251,14 @@ btn_spawn_all = ButtonOption(
 # Engine Hooks
 
 def _run_frame_tick() -> None:
-    """One frame of runtime work, driven by whichever engine tick actually fires.
+    """One frame of runtime work, driven by `WillowPlayerController:PlayerTick`.
 
-    `Engine.GameViewportClient:Tick` is not a UFunction on every BL2 build (it is a native
-    method), so hooking it alone can silently never run — which froze thrown blades in mid-air
-    and left the guard pose stuck. `WillowPlayerController:PlayerTick` is the engine function
-    mods reliably hook, so the same body is driven from both, de-duplicated per frame.
+    Measured over a full session: `PlayerTick` fires ~12.7k times, `WillowGameViewportClient:Tick`
+    ~14.9k times, and `Engine.GameViewportClient:Tick` never once (it resolves, so the hook
+    installs silently and does nothing). One live driver is enough, so `PlayerTick` is the only
+    tick hook and the frame de-duplication guard it needed is gone.
     """
-    global _tick_counter, _map_restore_ready_at, _last_restored_pawn_key, _last_frame_tick_at
-    now = time.monotonic()
-    if now - _last_frame_tick_at < 0.002:
-        return
-    _last_frame_tick_at = now
+    global _tick_counter, _map_restore_ready_at, _last_restored_pawn_key
     _tick_counter += 1
 
     # Drain staggered multi-weapon grants & restore reward mission template
@@ -313,6 +308,7 @@ def _run_frame_tick() -> None:
         if not pawn_key:
             return
         if pawn_key != _last_restored_pawn_key:
+            now = time.monotonic()
             if _map_restore_ready_at == 0.0:
                 reset_secondary_state()
                 restore_all_arms_rest_transforms()
@@ -326,10 +322,6 @@ def _run_frame_tick() -> None:
                 # Always re-sync on map load so SparkLevelPatchEntry / BLCMM / UCP hotfixes never wipe our pools
                 sync_loot_pools()
                 restore_player_melee_inventory(pc=pc)
-
-
-def _on_viewport_tick(obj: Any, args: Any, ret: Any, func: Any) -> None:
-    _run_frame_tick()
 
 
 def _on_player_tick(obj: Any, args: Any, ret: Any, func: Any) -> None:
@@ -346,7 +338,6 @@ def _on_has_active_ammo(obj: Any, args: Any, ret: Any, func: Any) -> Any:
 # Every engine hook this mod installs. Registered through `build_mod(hooks=...)`, which enables
 # them when the mod is enabled and disables them when it is not.
 HOOKS = [
-    hook("Engine.GameViewportClient:Tick", Type.POST)(_on_viewport_tick),
     hook("WillowGame.WillowPlayerController:PlayerTick", Type.POST)(_on_player_tick),
     hook("WillowGame.WillowWeapon:InitializeFromDefinitionData", Type.PRE)(on_weapon_initialize_from_def_pre),
     hook("WillowGame.WillowWeapon:InitializeInternal", Type.PRE)(on_weapon_initialize_internal_pre),
