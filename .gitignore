@@ -11,3 +11,6 @@ build/
 /WillowGame/CookedPCConsole/
 /sdk_mods/melee_arsenal/upk/
 .bl2_dir
+
+# Ground-truth probe output (run `probe_dump` in game, then copy the JSON/MD you want to keep)
+/sdk_mods/melee_arsenal_probe/ground_truth/

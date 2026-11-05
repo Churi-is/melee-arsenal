@@ -127,6 +127,24 @@ For deeper diagnostics, enable **Log Swing Damage Breakdown** and tail the log:
 
 ---
 
+## Development
+
+```bash
+./melee setup              # venv + Pillow
+./melee dev                # syntax check, then install to Borderlands 2
+./melee probe              # install the ground-truth probe mod
+```
+
+**Ground-truth probe.** `sdk_mods/melee_arsenal_probe` is a standalone developer mod that records the
+engine facts this mod would otherwise rediscover at run time — which hooks exist and fire, real
+parameter names, class/struct/enum layouts, exact effect and impact asset paths, loot weights,
+vanilla item-card icons, and animation sequences. Run it once per BL2 build, then delete the
+matching trial-and-error code. What it measures, and the ~1,300 lines it retires, is written up in
+[docs/GROUND_TRUTH.md](docs/GROUND_TRUTH.md); usage is in
+[sdk_mods/melee_arsenal_probe/README.md](sdk_mods/melee_arsenal_probe/README.md).
+
+---
+
 ## Dependencies
 
 - **Runtime:** Borderlands 2 + Willow2 Mod Manager v3.8+ — no Python packages required to play.

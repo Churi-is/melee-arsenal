@@ -24,6 +24,8 @@ jobs:
         run: ruff check sdk_mods tools
       - name: Syntax check
         run: ./melee check
+      - name: Probe self-test
+        run: python tools/probe_selftest.py
       - name: Build UPKs and verify tracked manifest
         if: matrix.python-version == '3.11'
         run: |

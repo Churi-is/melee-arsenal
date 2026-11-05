@@ -7,6 +7,7 @@ DEFAULT_KIT="$REPO_ROOT/build/inkblade_kit"
 COOKED_REL="build/WillowGame/CookedPCConsole"
 BUILD_MANIFEST="$REPO_ROOT/build/inkblade_compiled_manifest.json"
 MOD_REL="sdk_mods/melee_arsenal"
+PROBE_REL="sdk_mods/melee_arsenal_probe"
 BL2_CACHE_FILE="$REPO_ROOT/.bl2_dir"
 
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -511,6 +512,26 @@ cmd_logs() {
   fi
 }
 
+cmd_probe() {
+  local bl2_arg=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --bl2-dir)   [ "$#" -ge 2 ] || die "--bl2-dir requires a path argument."; bl2_arg="$2"; shift 2 ;;
+      --bl2-dir=*) bl2_arg="${1#*=}"; shift ;;
+      *)           die "Unknown probe flag: $1 (supported: --bl2-dir <path>)" ;;
+    esac
+  done
+
+  local bl2 sdk_dir
+  bl2="$(detect_bl2_dir "$bl2_arg")" || die "Could not auto-detect Borderlands 2 directory. Pass --bl2-dir \"/path/to/Borderlands 2\"."
+  sdk_dir="$(resolve_sdk_mods_dir "$bl2")"
+
+  info "Installing ground-truth probe -> $sdk_dir/melee_arsenal_probe"
+  sync_python_mod_dir "$REPO_ROOT/$PROBE_REL" "$sdk_dir/melee_arsenal_probe"
+  ok "Probe installed. Enable 'Melee Arsenal Probe' in MODS, play a minute, then run 'probe_dump'."
+  info "Results land in $sdk_dir/melee_arsenal_probe/ground_truth/ (ground_truth.json + GROUND_TRUTH.md)"
+}
+
 cmd_status() {
   local py ver
   py="$(pick_python)"
@@ -649,6 +670,9 @@ ${C_BOLD}Commands:${C_RESET}
   ${C_CYAN}uninstall${C_RESET} [options]       Remove mod & UPKs from Borderlands 2 (--purge-saves to wipe saves)
   ${C_CYAN}status${C_RESET}                    Show repo, kit, UPK, Borderlands 2 sync, and sidecar save status
   ${C_CYAN}logs${C_RESET} [-f] [-n <lines>]    View or follow live in-game melee_arsenal.log
+  ${C_CYAN}probe${C_RESET} [--bl2-dir <p>]    Install the ground-truth probe mod (records hook order, engine
+                            schemas, exact asset paths, card icons, pool weights).
+                            In game: enable it, play a minute, run 'probe_dump'.
   ${C_CYAN}clean${C_RESET}                     Remove __pycache__, .pyc, and build/
   ${C_CYAN}all${C_RESET} [install-options]     Full pipeline: build -> test -> package -> install (if BL2 found)
 
@@ -673,6 +697,7 @@ main() {
     uninstall)             cmd_uninstall "$@" ;;
     status)                cmd_status "$@" ;;
     logs)                  cmd_logs "$@" ;;
+    probe)                 cmd_probe "$@" ;;
     clean)                 cmd_clean "$@" ;;
     all)                   cmd_all "$@" ;;
     -h|--help|help)        cmd_help ;;
