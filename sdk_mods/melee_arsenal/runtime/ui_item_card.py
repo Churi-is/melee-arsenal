@@ -153,7 +153,7 @@ def _apply_melee_card_override(gfx_obj: Any, ov: ActiveCardOverride) -> None:
 # Engine Hook Callbacks
 
 def on_set_item_card_ex_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
-    """Begin Melee Item Card override (`SetItemCard` or `SetItemCardEx`)."""
+    """Begin the override at SetItemCardEx, the shared card-rendering entry point."""
     existing = _ACTIVE_CARDS.get(cache_key(obj))
     if existing is not None:
         existing.depth += 1

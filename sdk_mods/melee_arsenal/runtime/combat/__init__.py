@@ -51,7 +51,6 @@ from .hooks import (
     on_weapon_instant_fire_pre,
     on_weapon_play_fire_effects_pre,
     on_weapon_reload_pre,
-    on_weapon_shared_fire_post,
 )
 from .pose import (
     BLADED_MELEE_SEQ_LENGTH,
@@ -171,7 +170,6 @@ __all__ = [
     "on_weapon_instant_fire_pre",
     "on_weapon_play_fire_effects_pre",
     "on_weapon_reload_pre",
-    "on_weapon_shared_fire_post",
     "play_camera_anim",
     "play_parry_feedback",
     "play_thrown_impact_feedback",

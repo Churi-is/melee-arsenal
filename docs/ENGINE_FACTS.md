@@ -163,12 +163,15 @@ The captured sessions show these *observed* relationships:
   show that 120 of the firing calls were a Lascaux SMG, while only 3 and 2 were
   on sampled Bandit and Hyperion melee weapons. These are function-level object
   counts, not per-object edge counts; the object definitions were captured at
-  dump time and could have changed. Do not infer all 125 shots were melee or
-  remove the fallback and dedup on this basis.
+  dump time and could have changed. Do not infer all 125 shots were melee. In the sampled objects, both melee weapons
+  took the same shared-fire → instant-fire path. The separate shared-fire POST
+  fallback and shot-sequence dedup have now been removed; untested alternate
+  firing paths are a regression risk and should be checked in game.
 * `SetItemCard` → `SetItemCardEx` (16); `SetItemCardEx` also entered from outside
   the hooked set (430). `SetItemCardEx` → `SetCardUIStats` → `SetTopStat` and
-  `SetItemCardEx` → `SetTitle` / `SetFunStats` were observed. Both entry points
-  and nesting handling remain relevant; sampled calls include non-melee cards.
+  `SetItemCardEx` → `SetTitle` / `SetFunStats` were observed. Both direct and nested `SetItemCardEx` calls enter the same rendering pipeline;
+  the mod now hooks only that entry point and keeps a depth guard for reentrant
+  `SetItemCardEx` calls. Sampled calls include non-melee cards.
 * `InitializeFromDefinitionData` → `InitializeInternal` (19), and
   `InitializeInternal` → `ChooseRandomNameParts` (8). This does not prove every
   initialization path uses this chain or that any of the hooks are redundant.
@@ -176,3 +179,14 @@ The captured sessions show these *observed* relationships:
 Trace arguments are PRE samples, capped per edge. A null caller can represent an
 unhooked or native entry point. These observations don't prove behavior in other
 maps, equipment, builds, multiplayer or throw/guard states.
+
+## Runtime simplifications based on the paired trace
+
+The melee primary attack now runs only from `InstantFire` PRE; the backup
+`SharedFireAmmunition` POST hook, global shot counter and dedup state are gone.
+`ConsumeAmmo` still refills the magazine and clears semi-auto pending fire, and
+`InstantFire` still blocks firing while a thrown blade is airborne. The item-card
+override now starts/finishes at `SetItemCardEx` rather than also hooking its
+observed wrapper `SetItemCard`. Check equipped and pickup cards, both guard and
+throw weapons, semi-auto and automatic swings, and attacking during/after a
+throw. Native/other mod paths absent from this trace could still differ.

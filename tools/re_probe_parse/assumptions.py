@@ -17,7 +17,7 @@ ASSUMPTIONS: list[dict[str, str]] = [
         "mod": "runtime/__init__.py HOOKS + combat/hooks.py",
         "assumption": "WillowGame.WillowWeapon:InstantFire resolves as a UFunction and fires exactly once per melee swing; hooking it PRE and returning Block replaces the gun shot.",
         "check": "functions: path present, then traces: callee InstantFire has calls > 0 with caller PlayerTick or null.",
-        "simplify_if_confirmed": "Keep the hook; a single trace cannot establish that the backup or dedup is redundant.",
+        "simplify_if_confirmed": "Keep InstantFire interception; exercise melee types and throw recovery after removing the backup.",
         "risk_if_refuted": "If InstantFire does not exist or never fires, primary melee attacks do nothing silently.",
     },
     {
@@ -33,9 +33,9 @@ ASSUMPTIONS: list[dict[str, str]] = [
         "id": "HOOK-SHAREDFIRE",
         "category": "hooks",
         "mod": "runtime/__init__.py HOOKS + combat/hooks.py",
-        "assumption": "SharedFireAmmunition is a secondary firing path that must be suppressed while a thrown blade is airborne (shot-sequence dedup).",
+        "assumption": "SharedFireAmmunition invokes InstantFire for the sampled melee weapons; the mod now relies on InstantFire for primary swings.",
         "check": "Trace per object and scenario, including firing while a blade is airborne; absence does not prove a path cannot occur.",
-        "simplify_if_confirmed": "Retain dedup until alternate paths and throw recovery have been tested across scenarios.",
+        "simplify_if_confirmed": "Validate the simplified InstantFire-only path across weapons and throw recovery.",
         "risk_if_refuted": "If SharedFireAmmunition fires independently, delayed swings occur after throw rebound.",
     },
     {

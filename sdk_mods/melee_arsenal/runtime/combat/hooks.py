@@ -21,11 +21,6 @@ from . import attacks, damage, pose
 MELEE_SECONDARY_ATTACK_ENABLED = True
 
 
-_SHOT_SEQ: int = 0
-
-
-_HANDLED_SHOT_SEQ: int = 0
-
 
 def try_melee_secondary_attack(wpn: Any, inst: MeleeWeaponInstance, card: ComputedCardStats) -> bool:
     """Dispatch a Melee Weapon secondary attack on RMB / Left Trigger.
@@ -73,13 +68,11 @@ def on_melee_weapon_start_zoom_pre(obj: Any, args: Any, ret: Any, func: Any) -> 
 
 
 def on_weapon_consume_ammo_post(obj: Any, args: Any, ret: Any, func: Any) -> Any:
-    """Track shots, keep melee magazines full, and clear pending fire for semi-auto blades."""
-    global _SHOT_SEQ
+    """Keep melee magazines full and clear pending fire for semi-auto blades."""
     resolved = resolve_melee_weapon(obj, sync_weapon_props=True)
     if resolved is None:
         return None
     _inst, card = resolved
-    _SHOT_SEQ += 1
 
     try:
         clip = int(getattr(obj, "ClipSize", 100) or 100)
@@ -97,18 +90,13 @@ def on_weapon_consume_ammo_post(obj: Any, args: Any, ret: Any, func: Any) -> Any
 
 def on_weapon_instant_fire_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
     """Primary `LMB` melee attack intercept (`WillowWeapon:InstantFire` PRE -> `Block`)."""
-    global _HANDLED_SHOT_SEQ
     resolved = resolve_melee_weapon(obj)
     if resolved is None:
         return None
     # The blade is in the air (Bandit / Torgue throw): Primary Fire is locked until it rebounds.
-    # Consume the shot sequence too, so the `SharedFireAmmunition` backup never fires a delayed
-    # swing once the blade comes back.
     if is_weapon_thrown(obj):
-        _HANDLED_SHOT_SEQ = _SHOT_SEQ
         return Block
     inst, card = resolved
-    _HANDLED_SHOT_SEQ = _SHOT_SEQ
     try:
         attacks.execute_melee_attack(obj, inst, card)
     except Exception as exc:
@@ -127,28 +115,6 @@ def on_weapon_play_fire_effects_pre(obj: Any, args: Any, ret: Any, func: Any) ->
     """Block gun muzzle flashes & gun-fire twitch animations (`WillowWeapon:PlayFireEffects` PRE)."""
     if resolve_melee_weapon(obj) is not None:
         return Block
-    return None
-
-
-def on_weapon_shared_fire_post(obj: Any, args: Any, ret: Any, func: Any) -> Any:
-    """Backup safety net if any firing path ever bypasses `InstantFire`."""
-    global _HANDLED_SHOT_SEQ
-    if _HANDLED_SHOT_SEQ == _SHOT_SEQ:
-        return None
-    resolved = resolve_melee_weapon(obj)
-    if resolved is None:
-        return None
-    # Swallow any backup `SharedFireAmmunition` path while the thrown blade is still airborne,
-    # consuming the shot sequence so no delayed swing fires after the blade comes back.
-    if is_weapon_thrown(obj):
-        _HANDLED_SHOT_SEQ = _SHOT_SEQ
-        return None
-    inst, card = resolved
-    _HANDLED_SHOT_SEQ = _SHOT_SEQ
-    try:
-        attacks.execute_melee_attack(obj, inst, card)
-    except Exception as exc:
-        log_error(f"on_weapon_shared_fire_post error: {exc!r}")
     return None
 
 

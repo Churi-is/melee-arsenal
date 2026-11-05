@@ -16,6 +16,12 @@ runtime.__path__ = [str(ROOT / "sdk_mods/melee_arsenal/runtime")]
 sys.modules.setdefault("melee_arsenal.runtime", runtime)
 loot = importlib.import_module("melee_arsenal.runtime.loot_pools")
 ui = importlib.import_module("melee_arsenal.runtime.ui_item_card")
+sdk = importlib.import_module("melee_arsenal.runtime.sdk")
+mods_stub = types.ModuleType("mods_base")
+mods_stub.hook = lambda *args, **kwargs: lambda fn: fn
+mods_stub.get_pc = lambda: None
+with patch.dict(sys.modules, {"mods_base": mods_stub, "unrealsdk": types.ModuleType("unrealsdk")}), patch.object(sdk, "Type", types.SimpleNamespace(PRE="pre")):
+    combat_hooks = importlib.import_module("melee_arsenal.runtime.combat.hooks")
 from melee_arsenal.core.item_card import CompareArrow  # noqa: E402
 from re_probe.probe import trace  # noqa: E402
 from re_probe.probe.hook_registration import install  # noqa: E402
@@ -49,6 +55,49 @@ class EngineEvidenceTests(unittest.TestCase):
         self.assertEqual(loot._eval_prob_weight(prob("Weight_1_Common_RareMod")), 0)
         self.assertEqual(loot._eval_prob_weight(prob("Weight_2_Uncommon_RareMod")), 0)
         self.assertEqual(loot._eval_prob_weight(prob("Weight_1_Common_unrecognized")), 1)
+
+
+class RuntimeSimplificationTests(unittest.TestCase):
+    def test_instant_fire_is_single_attack_and_blocks_thrown_blade(self):
+        weapon, inst, card = object(), object(), object()
+        with patch.object(combat_hooks, "resolve_melee_weapon", return_value=(inst, card)), \
+             patch.object(combat_hooks, "is_weapon_thrown", return_value=False) as thrown, \
+             patch.object(combat_hooks.attacks, "execute_melee_attack") as attack:
+            self.assertIs(combat_hooks.on_weapon_instant_fire_pre(weapon, None, None, None), combat_hooks.Block)
+            attack.assert_called_once_with(weapon, inst, card)
+            thrown.return_value = True
+            self.assertIs(combat_hooks.on_weapon_instant_fire_pre(weapon, None, None, None), combat_hooks.Block)
+            attack.assert_called_once()
+
+    def test_consume_ammo_keeps_semiauto_ready(self):
+        card = types.SimpleNamespace(semi_auto_click=True)
+        weapon = types.SimpleNamespace(ClipSize=20, ReloadCnt=0)
+        weapon.ClearPendingFire = unittest.mock.Mock()
+        with patch.object(combat_hooks, "resolve_melee_weapon", return_value=(object(), card)):
+            combat_hooks.on_weapon_consume_ammo_post(weapon, None, None, None)
+        self.assertEqual(weapon.ReloadCnt, 20)
+        weapon.ClearPendingFire.assert_called_once_with(0)
+
+    def test_card_ex_direct_and_reentrant_apply_once(self):
+        card, obj = object(), object()
+        args = types.SimpleNamespace(InventoryItem=object(), CompareAgainstInventoryItem=None)
+        ui.clear_active_card_overrides()
+        with patch.object(ui, "cache_key", return_value="card"), \
+             patch.object(ui, "resolve_melee_weapon", return_value=(object(), card)), \
+             patch.object(ui, "build_item_card_payload", return_value=object()), \
+             patch.object(ui, "_apply_melee_card_override") as apply:
+            # Direct entry (also used when SetItemCard delegates to SetItemCardEx).
+            ui.on_set_item_card_ex_pre(obj, args, None, None)
+            ui.on_set_item_card_ex_post(obj, args, None, None)
+            self.assertEqual(apply.call_count, 1)
+            # Reentrant Ex calls still defer rendering to the outermost return.
+            ui.on_set_item_card_ex_pre(obj, args, None, None)
+            ui.on_set_item_card_ex_pre(obj, args, None, None)
+            ui.on_set_item_card_ex_post(obj, args, None, None)
+            self.assertEqual(apply.call_count, 1)
+            ui.on_set_item_card_ex_post(obj, args, None, None)
+            self.assertEqual(apply.call_count, 2)
+        ui.clear_active_card_overrides()
 
 
 class FakeHooks:
