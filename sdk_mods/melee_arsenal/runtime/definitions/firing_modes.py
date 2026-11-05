@@ -10,7 +10,7 @@ import copy
 from typing import Any
 
 from ...core.enums import Element
-from ..log import log_warn, obj_path
+from ..log import log_debug_once, log_warn, obj_path
 from .. import resources
 from ..state import KEEP_ALIVE_FLAGS, STATE
 from .context import BuildContext
@@ -20,6 +20,10 @@ from .helpers import (
     _find,
     _zero_vector_struct,
 )
+
+# Donor for the Torgue splash: the one loaded firing mode whose `OnAnyImpact` list carries the
+# `Behavior_Explode` we clone (its `_2`/`_3` siblings do too).
+FLAKKER_EXPLODE_DONOR = "GD_Weap_Shotgun.FiringModes.Bullets_Shotgun_Torgue_Flakker_Child"
 
 
 def _configure_melee_firing_mode(fm: Any, range_uu: float) -> None:
@@ -35,20 +39,17 @@ def _configure_melee_firing_mode(fm: Any, range_uu: float) -> None:
     fm.Speed = MELEE_RAY_SPEED
     fm.TraceInterval = 0.2
     fm.Lifetime = max(0.11, (range_uu / MELEE_RAY_SPEED) + 0.075)
+    # Every field below is declared on `FiringModeDefinition` itself (measured from UE3 reflection),
+    # so there is nothing to probe for.
     fm.AirFriction = 0.0
-    if hasattr(fm, "RicochetFriction"):
-        fm.RicochetFriction = 0.0
+    fm.RicochetFriction = 0.0
     fm.PartSysTemplate = None
     fm.ConditionalPartSysTemplate = None
-    if hasattr(fm, "SoundDefinition"):
-        fm.SoundDefinition = None
+    fm.SoundDefinition = None
     fm.bSuppressWeaponSpread = True
-    if hasattr(fm, "bFireRandomlyFromPattern"):
-        fm.bFireRandomlyFromPattern = False
-    if hasattr(fm, "bResetPatternAfterEachShot"):
-        fm.bResetPatternAfterEachShot = True
-    if hasattr(fm, "bScalePatternByWeaponSpread"):
-        fm.bScalePatternByWeaponSpread = False
+    fm.bFireRandomlyFromPattern = False
+    fm.bResetPatternAfterEachShot = True
+    fm.bScalePatternByWeaponSpread = False
     fm.bPenetratePawn = False
     fm.NumRicochets = 0
     for arr_field in ("FiringPatternLines", "OnAnyImpact", "TimerEvents"):
@@ -57,36 +58,35 @@ def _configure_melee_firing_mode(fm: Any, range_uu: float) -> None:
         _zero_vector_struct(fm, vec_field)
 
 
+def _first_explode_behavior(mode: Any) -> Any:
+    """First `Behavior_Explode` in a firing mode's impact behaviour list, if any."""
+    for behaviour in getattr(mode, "OnAnyImpact", None) or ():
+        class_name = str(getattr(getattr(behaviour, "Class", None), "Name", "") or "")
+        if class_name == "Behavior_Explode":
+            return behaviour
+    return None
+
+
 def _attach_torgue_explode_on_impact(fm_explosive: Any, pkg: Any) -> None:
-    """Attach a 180 UU (50% splash) `Behavior_Explode` to `FM_Melee_Elem_EXPLOSIVE` when available."""
+    """Attach a 180 UU (50% splash) `Behavior_Explode` to `FM_Melee_Elem_EXPLOSIVE` when available.
+
+    The donor is `Bullets_Shotgun_Torgue_Flakker_Child`, and its blast behaviour sits in its
+    `OnAnyImpact` list — not in its `TimerEvents`, which is where the earlier search looked (all 38
+    loaded explosive firing modes carry `Behavior_Explode` on `OnAnyImpact` and none in `TimerEvents`,
+    so the search could never match and the splash was silently skipped).
+    """
     try:
         unrealsdk.load_package("GD_Weap_Shotgun")
     except Exception:
         pass
     try:
-        donor_behavior = None
-        flakker = _find(
-            "FiringModeDefinition",
-            "GD_Weap_Shotgun.FiringModes.Bullets_Shotgun_Torgue_Flakker_Child",
-        )
-        candidates = [flakker] if flakker is not None else []
-        if not candidates:
-            candidates = list(unrealsdk.find_all("FiringModeDefinition") or [])
-        for mode in candidates:
-            if mode is None:
-                continue
-            for ev in getattr(mode, "TimerEvents", []) or []:
-                resp = getattr(ev, "Response", None)
-                for beh in getattr(resp, "Behaviors", []) or []:
-                    if beh is not None and str(getattr(beh.Class, "Name", "")) == "Behavior_Explode":
-                        donor_behavior = beh
-                        break
-                if donor_behavior is not None:
-                    break
-            if donor_behavior is not None:
-                break
-
+        donor_mode = _find("FiringModeDefinition", FLAKKER_EXPLODE_DONOR)
+        donor_behavior = _first_explode_behavior(donor_mode) if donor_mode is not None else None
         if donor_behavior is None:
+            log_debug_once(
+                "torgue.explode_donor",
+                f"no Behavior_Explode on {FLAKKER_EXPLODE_DONOR}; explosive splash left disabled",
+            )
             return
 
         explode_beh = _find("Behavior_Explode", f"{obj_path(pkg)}.Melee_BlastCleaver_Explode")

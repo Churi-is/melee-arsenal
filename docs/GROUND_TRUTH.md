@@ -152,3 +152,114 @@ python3 tools/probe_selftest.py   # offline verification of the probe itself
 
 `probe_dump` writes each section to `ground_truth/section_<name>.json` as it completes (census ->
 live -> schema -> catalogue), so a failing section cannot discard the ones before it.
+
+---
+
+# Measured results (probe run 2026-11-05)
+
+One full in-game session, Sanctuary, `unrealsdk v3.2.0`, `pyunrealsdk 1.10.0`, Python 3.14.6 32-bit,
+all four sections written (`errors: {}`). Raw dump: `ground_truth/` beside the mod in the game folder
+(2.8 MB, not committed). Everything below is a printed engine value, not an inference.
+
+**Ledger status after this run.** Closed and applied: `schema.functions`, `census.groups` (tick pair),
+`assets.catalogues` (explosion/audio/camera paths), `explosion_donors`, `attribute_init_defs`,
+`pools` (weights + gates), `item_card_observed`. Measured but not yet applied: the fleet of
+`FiringModeDefinition`/`WeaponPartDefinition`/`ItemPoolDefinition` guards listed below. Blocked on one
+more probe target: `schema.classes` for the weapon-type/balance classes, `arms.anim_slots` (already
+resolvable), `pose`'s `RotOrigin` guards, element icons for slots 5/6.
+
+## Hooks: which of the 37 registrations can actually run
+
+| hook | fires | consequence |
+| --- | --- | --- |
+| `WillowPlayerController:PlayerTick` | 12,724 | the only tick driver needed |
+| `WillowGame.WillowGameViewportClient:Tick` | 14,942 | — (mod does not hook it) |
+| `Engine.GameViewportClient:Tick` | **0** | the mod's registration resolves but never runs: **deleted**, and the per-frame de-dup guard with it |
+| `StartZoom` / `ClientStartZoom` | 11 / 6 | both pairs fire: **not collapsible** |
+| `StopZoom` / `ClientStopZoom` | 48 / 48 | both pairs fire: **not collapsible** |
+| `SetTopStat` / `SetItemCardEx` / `SetTitle` / `SetFunStats` / `SetItemCard` | 429 / 132 / 73 / 73 / 24 | all live |
+| `AdjustHeight`, `PlayFireEffects`, `WillowPlayerPawn:TakeDamage`, `InitConstructPreview` | 0 | fire nothing in a normal pass — safe to leave, do not delete as broken |
+| `WillowWeapon:InitializeInternal` / `ChooseRandomNameParts` / `InitializeFromDefinitionData` | 238 / 226 / 84 | all three construction paths are real |
+
+Boot order (seconds from the first tick): `PlayerTick` 0.002 -> viewport tick 0.003 ->
+`InitializeInternal` 5.672 -> `ChooseRandomNameParts` -> `ApplyWeaponSaveGameData` +
+`ValidateWeaponDefinition` 8.055 -> `InitializeFromDefinitionData` 8.056 -> `SaveGame` 11.014 ->
+`StartZoom` 21.227 -> `StopZoom` 22.662 -> `SharedFireAmmunition`/`ConsumeAmmo` 25.385 ->
+`InstantFire` 25.404 -> `TakeDamage` 30.251. `InitializeInternal` *wraps* `ChooseRandomNameParts`;
+`InitializeFromDefinitionData` belongs to a separate (restore) path — the two hooks stay.
+
+## A bug the dump found
+
+`firing_modes._attach_torgue_explode_on_impact` searched donor firing modes for `Behavior_Explode`
+inside **`TimerEvents[].Response.Behaviors`**. All 38 loaded explosive firing modes carry it in
+**`OnAnyImpact`** instead — the search could never match, so the Torgue splash silently never
+attached. Fixed: the donor list is read from `OnAnyImpact`, and the whole `find_all` sweep is gone.
+
+## Reflection: `_properties()` is per class, not per object
+
+`Class._properties()` returns only what that class itself declares. `Mesh` is declared on
+`WillowPawn`/`WillowPlayerPawn`, not on `WillowWeapon`; `Arms` is declared on `WillowPlayerPawn`, not
+`WillowPawn`; native members (`RotOrigin`, `Origin`, `PlayAkEvent`) and UFunctions
+(`PlayCustomAnim`) never appear at all. Two consequences:
+
+* a `hasattr` guard can **only** be retired with evidence about the class that actually declares the
+  property, or by testing the live object;
+* reading "absent from the captured class" as "dead guard" would have broken `pose.py`, which
+  genuinely reads `RotOrigin`/`Origin` off the arms component at runtime.
+
+## Guards retired this pass (declared on the exact class being written)
+
+| file | attribute | declaring class |
+| --- | --- | --- |
+| `definitions/firing_modes.py` | `SoundDefinition`, `bFireRandomlyFromPattern`, `bResetPatternAfterEachShot`, `bScalePatternByWeaponSpread`, `RicochetFriction` | `FiringModeDefinition` (68 props) |
+| `definitions/name_parts.py` | `bNameIsUnique` | `WeaponNamePartDefinition` (72 props) |
+| `definitions/name_parts.py` | `CustomFiringModeDefinition` | `WeaponPartDefinition` (66 props) |
+| `loot_pools.py` | `MinGameStageRequirement`, `MaxGameStageRequirement`, `bAutoReadyItems`, `Quantity` | `ItemPoolDefinition` (23 props) |
+
+Also verified on `FiringModeDefinition` and therefore safe to use unguarded later: `PartSysTemplate`,
+`ConditionalPartSysTemplate`, `FiringPatternLines`, `OnAnyImpact`, `TimerEvents`, `Acceleration`,
+`WaveFreq/Amp/Phase`, `TraceExtent`, `bPenetratePawn`, `NumRicochets`, `ExplosionOverrideDefinition`,
+`ExplosionOverideInstanceDataName`.
+
+## Item card
+
+* `SetTitle`'s `Rarity` parameter is a **`Color` struct**, not a 1-based level. The "promote the
+  rarity colour" helper could never convert it and always returned the engine value: **deleted**.
+* `SetTopStat`'s real parameter names are `StatIndex`, `LabelText`, `ValueText`, `CompareArrow`,
+  `AuxText`, `IconName` (+ three `New*` out-params). `CompareArrow`'s enum is **`ETopStatArrow`**
+  (not `ECompareStat`), and its `_names()` is not exposed, so the byte mapping stays a default.
+* Icon names, measured off live calls: slot 0 `weaponDamage`, 1 `weaponAccuracy`, 2 `weaponFireRate`,
+  3 `weaponsReloadSpeed`, 4 `weaponClipSize`, 5/6 `element<Element>` (`elementCorrosive` observed).
+  The old fallbacks (`damage`, `accuracy`, `firerate`) and the old `idx >= 3` element sniff were
+  wrong; both are now literals/`idx >= 5`. Only the *corrosive* element icon is confirmed — the probe
+  now records an icon histogram per slot so the rest can be filled in from one more card hover.
+* `TypeIcon` is `"Pistol"`, not `"pistol"`.
+
+## Assets and weights
+
+Every hard-coded path the runtime uses is confirmed loaded: the four `Ake_Wep_Melee`/`Ake_Mon_Thresher`
+SFX, `Anim_CameraAnimations.Melee.Canim_{RepeaterPistol,CombatShotgun,RocketLauncher}_Melee`,
+`GD_Impacts.Melee.Impact_MeleeGeneric`, `FX_WEP_Explosions...Part_ExplosiveExplosion_{Medium,Small}`,
+`Ake_Exp_Elemental...Explosive_{MED,SM,LG}`, `GD_Weap_Shared_Effects.Default_Elemental_Explosions`,
+and the five elemental `DmgType_*_NoDoT` definitions plus `DmgType_Normal`. That is what let the
+explosion-FX scorer and its two `find_all` sweeps (130 lines) go.
+
+`Weight_0..6` resolve to exactly `200 / 100 / 10 / 5 / 1 / 0.1 / 0.01`; the table in `loot_pools.py`
+was already right. `Weight_1_Common_RareMod`, `Weight_2_Uncommon_RareMod` and
+`Weight_Lobelia_Pearlescent_Tubbies` are `0.0`.
+
+## Still open (needs one more probe pass, not guesswork)
+
+1. **`WillowWeaponTypeDefinition` / `WillowWeaponBalanceDefinition` never resolved by name**, so
+   `weapon_types.py`'s preview block (`Presentation`, `UIMeshRotation`, `FocusRadius`,
+   `MinimumHorizontal/VerticalPercentage`, `ThirdPersonMeshScale`, `bUIMeshRotationNeedsTransformFixup`)
+   has no declaration evidence yet. Resolve the class from a live `WeaponTypeDefinition` object
+   (`obj.Class`) rather than by guessed name.
+2. **Per-object guard audit.** For each guarded name, report `hasattr(live_object, name)` on the
+   objects the runtime really touches (arms component, held weapon, current firing mode, a name part,
+   a part, a pool). This is the only test that answers `pose.py`.
+3. **Element icons for slots 5/6** for every element, via the new `item_card.icon_by_slot` histogram.
+4. `ItemPoolDefinition` has **no `ItemPool`** property — entries are `BalancedItems` (fixed in the
+   probe; the first dump's `entry_count` was 0 for all 345 pools because of it).
+5. `WillowGame.ItemCardGFxObject:SetBottomStat` and `WillowGame.WillowHUDMovieBase:AddTrainingText`
+   confirmed absent twice. Two dead `FUNCTION_TARGETS`, nothing in the runtime.

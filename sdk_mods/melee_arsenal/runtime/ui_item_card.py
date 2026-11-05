@@ -33,13 +33,22 @@ class ActiveCardOverride:
 _ACTIVE_CARDS: dict[str, ActiveCardOverride] = {}
 _COMPARE_ENUM_MAP: dict[CompareArrow, int] | None = None
 
+# Gearbox's Flash stat icons, measured off a live `ItemCardGFxObject` (probe run, `section_census.json`):
+# slot 0 `weaponDamage`, 1 `weaponAccuracy`, 2 `weaponFireRate`, 3 `weaponsReloadSpeed`, 4 `weaponClipSize`,
+# 5/6 `element<Element>`. Only `elementCorrosive` was observed directly; the rest follow the same
+# `element` + Element-name convention the engine used (`element` + `Corrosive`).
+_SLOT_ICON_FALLBACK: dict[int, str] = {
+    0: "weaponDamage",
+    1: "weaponAccuracy",
+    2: "weaponFireRate",
+}
 _ELEMENT_ICON_FALLBACK: dict[Element, str] = {
     Element.NONE: "",
-    Element.FIRE: "incendiary",
-    Element.SHOCK: "shock",
-    Element.CORROSIVE: "corrosive",
-    Element.SLAG: "slag",
-    Element.EXPLOSIVE: "explosive",
+    Element.FIRE: "elementIncendiary",
+    Element.SHOCK: "elementShock",
+    Element.CORROSIVE: "elementCorrosive",
+    Element.SLAG: "elementSlag",
+    Element.EXPLOSIVE: "elementExplosive",
 }
 
 
@@ -106,28 +115,6 @@ def _compare_against_vanilla_gun_damage(card: ComputedCardStats, compare_item: A
         return None
 
 
-def _resolve_title_rarity(engine_rarity: Any, card_rarity: Any) -> Any:
-    """Never let a Melee Weapon title render White when the weapon rolled a higher tier.
-
-    `ItemCardGFxObject.SetTitle`'s rarity argument is the 1-based BL2 rarity level the engine read
-    off the item (1 White … 4 Purple) and it colours the whole title. Items that we re-assemble
-    after the engine cached their level (command spawns, sidecar restores) can still report Common,
-    so promote the level to the rolled tier — we never downgrade a card.
-    """
-    try:
-        level = int(card_rarity)
-    except Exception:
-        return engine_rarity
-    if level <= 1:
-        return engine_rarity
-    if engine_rarity is None:
-        return level
-    if isinstance(engine_rarity, bool) or not isinstance(engine_rarity, (int, float)):
-        # Not a numeric rarity level (e.g. an already-resolved colour) — leave it untouched.
-        return engine_rarity
-    return level if int(engine_rarity) < level else engine_rarity
-
-
 def _call_set_top_stat(
     gfx_obj: Any,
     slot_idx: int,
@@ -149,9 +136,9 @@ def _apply_melee_card_override(gfx_obj: Any, ov: ActiveCardOverride) -> None:
     payload = ov.payload
     rows = payload.top_stats
 
-    dmg_icon = ov.observed_icons.get(0, "damage")
-    range_icon = ov.observed_icons.get(1, "accuracy")
-    speed_icon = ov.observed_icons.get(2, "firerate")
+    dmg_icon = ov.observed_icons.get(0, _SLOT_ICON_FALLBACK[0])
+    range_icon = ov.observed_icons.get(1, _SLOT_ICON_FALLBACK[1])
+    speed_icon = ov.observed_icons.get(2, _SLOT_ICON_FALLBACK[2])
 
     row0_arrow = ov.gun_compare_arrow if ov.gun_compare_arrow is not None else rows[0].arrow
 
@@ -243,11 +230,10 @@ def on_set_title_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
         return None
     try:
         mfr_str = str(getattr(args, "Manufacturer", "") or ov.payload.manufacturer_name)
-        rarity_color = _resolve_title_rarity(
-            getattr(args, "Rarity", None),
-            ov.card_stats.rarity,
-        )
-        type_icon = str(getattr(args, "TypeIcon", "") or "pistol")
+        # `SetTitle`'s rarity argument is a `Color` struct (measured from the UFunction), not a
+        # 1-based level with a `__int__`, so the engine's colour is always what we render.
+        rarity_color = getattr(args, "Rarity", None)
+        type_icon = str(getattr(args, "TypeIcon", "") or "Pistol")
         elem_icon = str(getattr(args, "ElementalIcon", "") or "")
         if not elem_icon and ov.card_stats.element != Element.NONE:
             elem_icon = _ELEMENT_ICON_FALLBACK.get(ov.card_stats.element, "")
@@ -288,7 +274,7 @@ def on_set_top_stat_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
         icon = str(getattr(args, "IconName", "") or "")
         if idx >= 0 and icon:
             ov.observed_icons[idx] = icon
-            if idx >= 3 and not ov.observed_elem_icon:
+            if idx >= 5 and not ov.observed_elem_icon:
                 ov.observed_elem_icon = icon
     except Exception:
         pass

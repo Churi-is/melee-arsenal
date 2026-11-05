@@ -182,11 +182,13 @@ def _collect_attribute_init_defs() -> list[dict[str, Any]]:
 def _pool_entries(pool: Any, limit: int = 40) -> list[dict[str, Any]]:
     entries: list[dict[str, Any]] = []
     try:
-        raw = safe_get(pool, "ItemPool", None) or ()
+        # `ItemPoolDefinition` has no `ItemPool` property; its weighted entries live in
+        # `BalancedItems` (`WeightedInventoryBalanceData` rows), which is why this used to be empty.
+        raw = safe_get(pool, "BalancedItems", None) or ()
     except Exception:
         raw = ()
     for entry in list(raw)[:limit]:
-        item = safe_get(entry, "Item", None)
+        item = safe_get(entry, "Item", None) or safe_get(entry, "BalanceDefinition", None)
         probability = safe_get(entry, "Probability", None)
         entry_record: dict[str, Any] = {
             "item": obj_path(item) or str(safe_get(item, "Name", "") or ""),

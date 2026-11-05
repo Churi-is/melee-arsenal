@@ -130,6 +130,12 @@ _STARTED_AT: float = time.monotonic()
 _CARD_TITLE: dict[str, Any] = {}
 _CARD_TOP_STATS: dict[int, dict[str, Any]] = {}
 _CARD_BOTTOM_STAT_LIMIT = 60
+_CARD_ICON_SLOTS: dict[int, dict[str, int]] = {}
+_CARD_ICON_LIMIT = 8
+
+# Measured from the UFunction: `SetTopStat` takes `StatIndex`, `LabelText`, `ValueText`,
+# `CompareArrow`, `AuxText`, `IconName`, and three `New*` out-params.
+_CARD_TOP_STAT_ARGS = ("LabelText", "ValueText", "CompareArrow", "AuxText", "IconName")
 _CARD_BOTTOM_STATS: list[dict[str, Any]] = []
 
 
@@ -188,14 +194,34 @@ def _stats_for(group: str, hook: str, kind: str) -> _HookStats:
     return stats
 
 
-def _describe_args(args: Any, func: Any) -> dict[str, Any]:
+_PARAM_NAMES: dict[str, list[str]] = {}
+
+
+def _param_names(hook: str, func: Any) -> list[str]:
+    """Parameter names for a hooked function.
+
+    The `func` handed to a hook callback is a hook wrapper: `func_params()` on it returns an empty
+    list. Fall back to resolving the real UFunction from the hook's `Package.Class:Function` name,
+    then cache — otherwise every named argument dump comes back empty.
+    """
+    cached = _PARAM_NAMES.get(hook)
+    if cached is not None:
+        return cached
+    names = [prop.get("name", "") for prop in func_params(func) if prop.get("name")]
+    if not names and ":" in hook:
+        class_path, func_name = hook.rsplit(":", 1)
+        ufunc = resolve_function(class_path, func_name)
+        if ufunc is not None:
+            names = [prop.get("name", "") for prop in func_params(ufunc) if prop.get("name")]
+    if names:
+        _PARAM_NAMES[hook] = names
+    return names
+
+
+def _describe_args(args: Any, func: Any, hook: str = "") -> dict[str, Any]:
     """Named argument dump for the first calls of a hook."""
     out: dict[str, Any] = {}
-    names: list[str] = []
-    for prop in func_params(func):
-        name = prop.get("name", "")
-        if name:
-            names.append(name)
+    names = list(_param_names(hook, func))
     if not names:
         for name in ("ReturnValue", "InventoryItem", "CompareAgainstInventoryItem"):
             if safe_get(args, name, None) is not None:
@@ -218,7 +244,7 @@ def record(group: str, hook: str, kind: str, args: Any, func: Any, obj: Any = No
         stats.count += 1
         if not stats.first_at:
             stats.first_at = now
-            stats.param_names = [prop.get("name", "") for prop in func_params(func)]
+            stats.param_names = _param_names(hook, func)
         stats.last_at = now
 
         if len(stats.samples) < _SAMPLE_LIMIT:
@@ -226,7 +252,7 @@ def record(group: str, hook: str, kind: str, args: Any, func: Any, obj: Any = No
                 "at": round(now, 3),
                 "self": obj_path(obj) or describe_value(obj),
             }
-            described_args = _describe_args(args, func)
+            described_args = _describe_args(args, func, hook)
             if described_args:
                 sample["args"] = described_args
             if ret is not None:
@@ -296,8 +322,13 @@ def _record_card_call(hook: str, args: Any) -> None:
             return
         if index in _CARD_TOP_STATS:
             return
+        icon = str(safe_get(args, "IconName", "") or "")
+        if icon:
+            histogram = _CARD_ICON_SLOTS.setdefault(index, {})
+            if icon in histogram or len(histogram) < _CARD_ICON_LIMIT:
+                histogram[icon] = histogram.get(icon, 0) + 1
         entry: dict[str, Any] = {"StatIndex": index}
-        for name in ("Label", "Value", "CompareArrow", "AuxValue", "IconName"):
+        for name in _CARD_TOP_STAT_ARGS:
             value = safe_get(args, name, None)
             if value is not None:
                 entry[name] = describe_value(value, depth=0)
@@ -306,7 +337,7 @@ def _record_card_call(hook: str, args: Any) -> None:
 
     if func_name == "SetBottomStat" and len(_CARD_BOTTOM_STATS) < _CARD_BOTTOM_STAT_LIMIT:
         entry = {}
-        for name in ("StatIndex", "Label", "Value", "CompareArrow", "IconName"):
+        for name in ("StatIndex",) + _CARD_TOP_STAT_ARGS:
             value = safe_get(args, name, None)
             if value is not None:
                 entry[name] = describe_value(value, depth=0)
@@ -336,6 +367,7 @@ def snapshot() -> dict[str, Any]:
             "title": _CARD_TITLE,
             "top_stats": {str(key): value for key, value in sorted(_CARD_TOP_STATS.items())},
             "bottom_stats": _CARD_BOTTOM_STATS,
+            "icon_by_slot": {str(slot): rows for slot, rows in sorted(_CARD_ICON_SLOTS.items())},
         },
         "verdicts": _verdicts(by_group),
     }

@@ -98,8 +98,7 @@ def _build_name_part(pkg: Any, obj_name: str, text: str, template: Any, is_title
         _clear_array_prop(np, clear_field)
 
     np.PartName = text
-    if hasattr(np, "bNameIsUnique"):
-        np.bNameIsUnique = bool(is_title and text)
+    np.bNameIsUnique = bool(is_title and text)  # declared on `WeaponNamePartDefinition`
     return np
 
 
@@ -113,11 +112,7 @@ def _clear_part_stat_bonuses(part: Any) -> None:
         "ZoomFirstPersonHandsIdleAnimations",
     ):
         _clear_array_prop(part, field_name)
-    if hasattr(part, "CustomFiringModeDefinition"):
-        try:
-            part.CustomFiringModeDefinition = None
-        except Exception:
-            pass
+    part.CustomFiringModeDefinition = None  # declared on `WeaponPartDefinition`
 
 
 def _apply_crit_bonus_if_supported(part: Any, crit_bonus: float, crit_template: tuple[str, Any] | None) -> None:

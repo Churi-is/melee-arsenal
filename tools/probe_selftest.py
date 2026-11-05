@@ -151,7 +151,7 @@ def build_world() -> dict[str, Any]:
     item_pool_cls = FakeClass(
         "ItemPoolDefinition",
         [
-            FakeProp("ItemPool", array_dim=16),
+            FakeProp("BalancedItems", array_dim=16),
             FakeProp("Quantity", struct=attribute_init_data),
             FakeProp("MinGameStageRequirement"),
             FakeProp("MaxGameStageRequirement"),
@@ -269,7 +269,7 @@ def build_world() -> dict[str, Any]:
     pistol_pool = FakeObject(
         "FakeGame.ItemPoolDefinition.Pool_Melee_Pistol",
         item_pool_cls,
-        ItemPool=[
+        BalancedItems=[
             _entry("FakeGame.WillowWeapon.InkbladeKatana", "Weight_4_Rare", 1.0),
             _entry("FakeGame.WillowWeapon.InkbladeSabre", "Weight_2_Uncommon", 10.0),
         ],
@@ -281,7 +281,7 @@ def build_world() -> dict[str, Any]:
     shop_pool = FakeObject(
         "GD_ItemPools_Shop.WeaponPools.ShopPool_Weapons_SMG",
         item_pool_cls,
-        ItemPool=[_entry("FakeGame.WillowWeapon.InkbladeMachete", "Weight_1_Common", 100.0)],
+        BalancedItems=[_entry("FakeGame.WillowWeapon.InkbladeMachete", "Weight_1_Common", 100.0)],
         Quantity=FakeStructValue(BaseValueConstant=2.0),
         MinGameStageRequirement=None,
         MaxGameStageRequirement=None,
