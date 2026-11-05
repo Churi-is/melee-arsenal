@@ -40,6 +40,16 @@ to load. It writes only to its own `ground_truth/` folder. To remove it, delete
 4. Copy `ground_truth/ground_truth.json` and `ground_truth/GROUND_TRUTH.md` into the repository
    (or attach them to the issue you are working on).
 
+`probe_dump` runs **census -> live -> schema -> catalogue** and writes each section to its own
+`ground_truth/section_<name>.json` the moment it finishes, so a section that fails can never cost you
+the ones before it. If the game does hard-crash, `ground_truth/last_section.txt` names the section
+that was running, and everything before it is already on disk.
+
+A note on what the probe will *not* do: it never calls `unrealsdk.load_package`. BL2's `LoadPackage`
+takes the game down with a UE3 "Failed to find file for package ..." fatal error when handed a name
+that is not a real `.upk` — a bad class path segment like `WillowGame` is exactly that, and it is not
+a catchable Python exception. Function existence is checked with `find_object` / `Class._find` only.
+
 ## Commands
 
 | command | answers |

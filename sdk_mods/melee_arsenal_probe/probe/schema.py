@@ -13,12 +13,14 @@ from . import common
 from .common import (
     describe_value,
     enum_names,
+    find_class,
     find_object,
     func_params,
     log,
     obj_path,
     prop_info,
     props_of,
+    resolve_function,
     safe_get,
     struct_shape,
 )
@@ -130,36 +132,10 @@ STRUCT_TARGETS: tuple[str, ...] = (
 )
 
 
-def _function_paths(class_path: str, func_name: str) -> tuple[str, ...]:
-    """UE3 object paths for a function. A UFunction's outer is its class, hence `Class:Function`."""
-    return (f"{class_path}:{func_name}", f"{class_path}.{func_name}")
-
-
 def _resolve_function(hook_name: str) -> Any:
-    """`Package.Class:Function` -> live UFunction, loading the package if the SDK allows it."""
-    if common.unrealsdk is None:
-        return None
+    """`Package.Class:Function` -> live UFunction, or None. Never loads a package (see common)."""
     class_path, _, func_name = hook_name.partition(":")
-    if not class_path or not func_name:
-        return None
-    for path in _function_paths(class_path, func_name):
-        found = find_object("Function", path)
-        if found is not None:
-            return found
-
-    package_name = class_path.split(".", 1)[0]
-    loader = safe_get(common.unrealsdk, "load_package", None)
-    if not callable(loader):
-        return None
-    try:
-        loader(package_name)
-    except Exception:
-        return None
-    for path in _function_paths(class_path, func_name):
-        found = find_object("Function", path)
-        if found is not None:
-            return found
-    return None
+    return resolve_function(class_path, func_name)
 
 
 def probe_functions() -> dict[str, Any]:
@@ -200,13 +176,7 @@ def probe_classes() -> dict[str, Any]:
     """Property list + class-default values for every class the runtime touches."""
     result: dict[str, Any] = {}
     for logical, cls_name in CLASS_TARGETS.items():
-        cls_obj = None
-        finder = safe_get(common.unrealsdk, "find_class", None) if common.unrealsdk else None
-        if callable(finder):
-            try:
-                cls_obj = finder(cls_name)
-            except Exception:
-                cls_obj = None
+        cls_obj = find_class(cls_name)
 
         record: dict[str, Any] = {"class": cls_name, "found": cls_obj is not None}
         if cls_obj is None:
@@ -242,9 +212,9 @@ def probe_classes() -> dict[str, Any]:
 def probe_enums() -> dict[str, Any]:
     """Every enum reachable from the target classes, in declared order (= integer value)."""
     result: dict[str, Any] = {}
-    finder = safe_get(common.unrealsdk, "find_class", None) if common.unrealsdk else None
-    if not callable(finder):
+    if common.unrealsdk is None:
         return result
+
     def _record(enum_obj: Any, used_as: str) -> None:
         key = obj_path(enum_obj) or str(safe_get(enum_obj, "Name", "") or "unknown_enum")
         names = enum_names(enum_obj)
@@ -262,11 +232,7 @@ def probe_enums() -> dict[str, Any]:
 
     # Enum properties declared on a class.
     for cls_name in CLASS_TARGETS.values():
-        try:
-            cls_obj = finder(cls_name)
-        except Exception:
-            continue
-        for prop in props_of(cls_obj):
+        for prop in props_of(find_class(cls_name)):
             enum_obj = safe_get(prop, "Enum", None)
             if enum_obj is not None:
                 _record(enum_obj, f"{cls_name}.{safe_get(prop, 'Name', '')}")
@@ -287,12 +253,15 @@ def probe_enums() -> dict[str, Any]:
 def probe_structs() -> dict[str, Any]:
     """Field layout of the structs the runtime builds or reads blind."""
     result: dict[str, Any] = {}
-    finder = safe_get(common.unrealsdk, "find_class", None) if common.unrealsdk else None
 
+    # Resolve the struct class through `find_class` first: asking `find_object` for an unknown
+    # class name is the same class of hazard as a bad package name, and there is nothing to gain.
+    struct_class_name = next(
+        (name for name in ("ScriptStruct", "Struct") if find_class(name) is not None),
+        "",
+    )
     for struct_name in STRUCT_TARGETS:
-        struct_obj = find_object("ScriptStruct", struct_name)
-        if struct_obj is None:
-            struct_obj = find_object("Struct", struct_name)
+        struct_obj = find_object(struct_class_name, struct_name) if struct_class_name else None
         if struct_obj is None:
             result[struct_name] = {"found": False}
             continue
@@ -304,28 +273,23 @@ def probe_structs() -> dict[str, Any]:
 
     # Auto-discover nested structs from the target classes (AttributeInitializationData lives
     # inside half of BL2's balances and pools, and its shape is currently guessed at).
-    if callable(finder):
-        for cls_name in CLASS_TARGETS.values():
-            try:
-                cls_obj = finder(cls_name)
-            except Exception:
+    for cls_name in CLASS_TARGETS.values():
+        for prop in props_of(find_class(cls_name)):
+            struct_obj = safe_get(prop, "Struct", None)
+            if struct_obj is None:
                 continue
-            for prop in props_of(cls_obj):
-                struct_obj = safe_get(prop, "Struct", None)
-                if struct_obj is None:
-                    continue
-                key = str(safe_get(struct_obj, "Name", "") or "")
-                if not key:
-                    continue
-                existing = result.get(key)
-                if existing is not None and existing.get("found"):
-                    continue
-                result[key] = {
-                    "found": True,
-                    "path": obj_path(struct_obj),
-                    "discovered_on": f"{cls_name}.{safe_get(prop, 'Name', '')}",
-                    "fields": struct_shape(struct_obj),
-                }
+            key = str(safe_get(struct_obj, "Name", "") or "")
+            if not key:
+                continue
+            existing = result.get(key)
+            if existing is not None and existing.get("found"):
+                continue
+            result[key] = {
+                "found": True,
+                "path": obj_path(struct_obj),
+                "discovered_on": f"{cls_name}.{safe_get(prop, 'Name', '')}",
+                "fields": struct_shape(struct_obj),
+            }
     return result
 
 
@@ -338,7 +302,6 @@ def probe_library_globals() -> dict[str, Any]:
         "find_object",
         "find_all",
         "find_class",
-        "load_package",
         "construct_object",
         "make_struct",
         "console_exec",

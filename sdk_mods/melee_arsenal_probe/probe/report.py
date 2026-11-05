@@ -169,40 +169,79 @@ TARGETS: list[dict[str, Any]] = [
 
 
 SECTIONS: dict[str, Callable[[], Any]] = {
+    "census": census.snapshot,
+    "live": live.probe_live,
     "schema": schema.probe_all,
     "catalogue": assets.probe_all,
-    "live": live.probe_live,
 }
+
+# Cheapest and most valuable first. `census` is already in memory (no engine calls at all), `live`
+# is a handful of reads, `schema` walks reflection, `catalogue` sweeps every loaded object. If a
+# later section dies, everything before it is already on disk.
+SECTION_ORDER: tuple[str, ...] = ("census", "live", "schema", "catalogue")
+
+# Both live next to the JSON so one path constant (`JSON_PATH`) is the only source of truth.
+PROGRESS_NAME = "last_section.txt"
+
+
+def _write_section(section: str, data: Any) -> str:
+    """Persist one finished section immediately, so a crash later cannot lose it."""
+    path = JSON_PATH.parent / f"section_{section}.json"
+    try:
+        write_json(path, data)
+        return str(path)
+    except Exception as exc:
+        log(f"could not write {path}: {exc!r}")
+        return ""
+
+
+def _progress(message: str) -> None:
+    """Breadcrumb for the section in progress: a hard crash still says where it died."""
+    try:
+        path = JSON_PATH.parent / PROGRESS_NAME
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(message + "\n", encoding="utf-8")
+    except Exception:
+        pass
 
 
 def run_sections(selected: list[str] | None = None) -> dict[str, Any]:
-    """Run the requested sections, isolating failures so one bad probe cannot lose the rest."""
-    wanted = selected or ["schema", "catalogue", "census", "live"]
+    """Run the requested sections, writing each one to disk as it finishes."""
+    wanted = selected or list(SECTION_ORDER)
     payload: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "sections_run": [],
+        "section_files": {},
         "errors": {},
     }
-    for name in wanted:
+    # Keep the caller's intent, but run in the safe order so cheap sections land first.
+    ordered = [name for name in SECTION_ORDER if name in wanted]
+    ordered += [name for name in wanted if name not in SECTION_ORDER]
+
+    for name in ordered:
         runner = SECTIONS.get(name)
         if runner is None:
             continue
+        _progress(f"running section: {name}")
         try:
-            payload[name] = runner()
-            payload["sections_run"].append(name)
-            log(f"section {name} complete")
+            data = runner()
         except Exception as exc:
             payload["errors"][name] = repr(exc)
             log(f"section {name} failed: {exc!r}")
-    if "census" in wanted:
-        try:
-            payload["census"] = census.snapshot()
-            payload["sections_run"].append("census")
-        except Exception as exc:
-            payload["errors"]["census"] = repr(exc)
+            _progress(f"section {name} failed: {exc!r}")
+            continue
+        payload[name] = data
+        payload["sections_run"].append(name)
+        written = _write_section(name, data)
+        if written:
+            payload["section_files"][name] = written
+        log(f"section {name} complete")
+        _progress(f"section {name} complete")
+
     payload["targets"] = TARGETS
     payload["census_plan"] = census.describe_plan()
+    _progress("all sections complete")
     return payload
 
 

@@ -22,6 +22,7 @@ from .common import (
     func_params,
     log,
     obj_path,
+    resolve_function,
     safe_get,
     same_uobject,
 )
@@ -151,18 +152,8 @@ def is_enabled() -> bool:
 
 def _function_exists(hook_name: str) -> bool:
     """True when the UFunction resolves. A UFunction's outer is its class: `Package.Class:Function`."""
-    if unrealsdk is None:
-        return False
     class_path, _, func_name = hook_name.partition(":")
-    if not class_path or not func_name:
-        return False
-    for path in (f"{class_path}:{func_name}", f"{class_path}.{func_name}"):
-        try:
-            if unrealsdk.find_object("Function", path) is not None:
-                return True
-        except Exception:
-            continue
-    return False
+    return resolve_function(class_path, func_name) is not None
 
 
 def resolvable_hooks() -> dict[str, list[str]]:

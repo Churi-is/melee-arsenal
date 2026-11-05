@@ -130,6 +130,46 @@ def find_object(cls_name_: str, path: str) -> Any:
         return None
 
 
+def find_class(name: str) -> Any:
+    if unrealsdk is None or not name:
+        return None
+    finder = safe_get(unrealsdk, "find_class", None)
+    if not callable(finder):
+        return None
+    try:
+        return finder(name)
+    except Exception:
+        return None
+
+
+def resolve_function(class_path: str, func_name: str) -> Any:
+    """The UFunction named `func_name` on `Package.Class`, or None when it does not exist.
+
+    `unrealsdk.load_package()` is deliberately never used here. BL2's `LoadPackage` fatals (a UE3
+    "Failed to find file for package ..." crash, not a Python exception) when handed a name that is
+    not a real `.upk` — and a class path's first segment ("WillowGame") is exactly that. Probing
+    for a function that may not exist must therefore stay on `find_object` / `Class._find`.
+    """
+    if unrealsdk is None or not class_path or not func_name:
+        return None
+
+    # A UFunction's outer is its class, so the canonical path uses `:` before the function name.
+    for path in (f"{class_path}:{func_name}", f"{class_path}.{func_name}"):
+        found = find_object("Function", path)
+        if found is not None:
+            return found
+
+    # Fallback: ask the owning class directly. This is the same call `runtime/resolver.py` makes.
+    owner = find_class(class_path.rsplit(".", 1)[-1])
+    finder = safe_get(owner, "_find", None)
+    if not callable(finder):
+        return None
+    try:
+        return finder(func_name)
+    except Exception:
+        return None
+
+
 # Reflection --------------------------------------------------------------------------------
 
 

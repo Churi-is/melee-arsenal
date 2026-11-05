@@ -149,3 +149,6 @@ See [`sdk_mods/melee_arsenal_probe/README.md`](../sdk_mods/melee_arsenal_probe/R
 # in game: enable "Melee Arsenal Probe", play a minute, run probe_dump
 python3 tools/probe_selftest.py   # offline verification of the probe itself
 ```
+
+`probe_dump` writes each section to `ground_truth/section_<name>.json` as it completes (census ->
+live -> schema -> catalogue), so a failing section cannot discard the ones before it.

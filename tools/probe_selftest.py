@@ -431,6 +431,8 @@ def build_world() -> dict[str, Any]:
     }
     return {
         "classes": classes,
+        "find_object_calls": [],
+        "load_package_calls": [],
         "objects_by_class": objects_by_class,
         "objects_by_path": objects_by_path,
         "compare_arrow": compare_arrow,
@@ -452,11 +454,24 @@ def install_fake_sdk(world: dict[str, Any]) -> None:
         POST = "POST"
 
     unrealsdk.find_class = lambda name: world["classes"].get(name)
+
+    def _find_object(cls: str, path: str) -> Any:
+        # Missing objects return None, like the real SDK. A lookup for an unknown class name is
+        # also just a miss: the probe must never depend on it succeeding.
+        world["find_object_calls"].append((cls, path))
+        if cls == "Function":
+            return world["objects_by_path"].get(path)
+        return None
+
+    def _load_package(name: str) -> None:
+        # UE3 `LoadPackage` fatals on a name that is not a real .upk (that crash took the game
+        # down at `WillowGame.ItemCardGFxObject:SetBottomStat`). The probe must never call it.
+        world["load_package_calls"].append(name)
+        raise AssertionError(f"load_package({name!r}) must never be used by the probe")
+
     unrealsdk.find_all = lambda name, exact=False: list(world["objects_by_class"].get(name, []))
-    unrealsdk.find_object = lambda cls, path: (
-        world["objects_by_path"].get(path) if cls in ("Function", "Class") else None
-    )
-    unrealsdk.load_package = lambda name: None
+    unrealsdk.find_object = _find_object
+    unrealsdk.load_package = _load_package
     unrealsdk.make_struct = lambda name, **kwargs: FakeStructValue(kwargs)
     unrealsdk.construct_object = lambda *args, **kwargs: None
     unrealsdk.__version__ = "3.2.0-fake"
@@ -540,6 +555,16 @@ def run_checks() -> None:
             "function parameters not read",
         )
         check(not functions["weapon_start_zoom_pre"]["exists"], "missing UFunction reported as present")
+        # Regression: `SetBottomStat` does not exist on `ItemCardGFxObject`. Resolving it must
+        # report `exists: False` and must not reach for `load_package` (a UE3 fatal error).
+        check(
+            not functions["card_set_bottom_stat_pre"]["exists"],
+            "a non-existent UFunction was reported as present",
+        )
+        check(
+            functions["card_set_bottom_stat_pre"].get("note", "") != "",
+            "missing UFunction lacks the deletable-code note",
+        )
         top_stat = functions["card_set_top_stat_pre"]
         check(
             top_stat.get("enum_params", {}).get("CompareArrow") == [
@@ -650,6 +675,14 @@ def main() -> int:
     world = build_world()
     install_fake_sdk(world)
     run_checks()
+    check(
+        not world["load_package_calls"],
+        f"probe called load_package, which fatals BL2: {world['load_package_calls']}",
+    )
+    check(
+        any(call[0] == "Function" for call in world["find_object_calls"]),
+        "probe resolved functions without find_object",
+    )
     if FAILURES:
         print("probe self-test FAILED:")
         for failure in FAILURES:
