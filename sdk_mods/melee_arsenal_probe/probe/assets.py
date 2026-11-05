@@ -54,12 +54,13 @@ INTERESTING_FIELDS: dict[str, tuple[str, ...]] = {
         "ThirdPersonMeshScale",
         "bUIMeshRotationNeedsTransformFixup",
     ),
+    # Verified from an in-game dump: `InventoryCardPresentationDefinition` has exactly these three
+    # properties (the rest are UObject internals). The inventory-preview tuning in
+    # `definitions/name_parts.py` therefore writes to `WeaponTypeDefinition`, not to this class.
     "card_presentations": (
-        "MeshRotation",
-        "MeshScale",
-        "BoundsScale",
-        "FocusRadius",
-        "CardRegion",
+        "ZippyFrame",
+        "ItemFrame",
+        "DescriptionLocReference",
     ),
 }
 
