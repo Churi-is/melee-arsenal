@@ -286,3 +286,54 @@ property lists on a frame tick while a map is up (`live.capture_runtime_snapshot
 whenever the held weapon changes, and copies them into a menu-time dump as `map_snapshot`. The class
 property dump happens at the same moment, on the live object's own `Class`, because loot packages are
 unloaded in the menu and `find_class(name)` would find nothing there.
+
+## Third run: the guards, answered on the live objects
+
+Dumped from the main menu, which no longer matters — the latch did its job:
+`live.map_snapshot.guards` and `live.map_snapshot.classes` came back fully populated.
+
+The measured classes are **not** the ones the probe guessed:
+
+| logical | real class | declared properties |
+| --- | --- | --- |
+| `weapon_type` | **`WeaponTypeDefinition`** (not `WillowWeaponTypeDefinition`) | 249 |
+| `weapon_balance` | **`WeaponBalanceDefinition`** (not `WillowWeaponBalanceDefinition`) | 23 |
+| `weapon_part` | `WeaponPartDefinition` | 66 |
+| `weapon_name_part` | `WeaponNamePartDefinition` | 72 |
+| `arms_component` | `GearboxSkeletalMeshComponent` | 348 |
+
+`hasattr` results on the objects the runtime actually holds:
+
+| object | present | missing |
+| --- | --- | --- |
+| `WeaponTypeDefinition` | `Presentation`, `UIMeshRotation`, `bUIMeshRotationNeedsTransformFixup`, `FocusRadius`, `MinimumVerticalPercentage`, `MinimumHorizontalPercentage`, `ThirdPersonMeshScale`, `FireShake`, and every kick attribute | `WeaponMesh`, `LeftHandSocketName`, `RightHandSocketName`, `WeaponCardType` (unused) |
+| `WeaponPartDefinition` | `WeaponAttributeEffects`, `ExternalAttributeEffects`, `AttributeSlotEffects`, `AttributeSlotUpgrades`, `CustomFiringModeDefinition`, `Material`, `GestaltModeSkeletalMeshName`, `AdditionalGestaltModeSkeletalMeshNames`, `ManufacturerDefinitionForScopeMovie`, `Rarity`, `CustomDamageTypeDefinition` | `ZoomFirstPersonHandsIdleAnimations` |
+| `WeaponNamePartDefinition` | `PartName`, `bNameIsUnique`, `CustomPresentations`, `CustomFiringModeDefinition` | — |
+| `WillowWeapon` | `DefinitionData`, `InstantHitDamage`, `ProjectilesPerShot`, `ClipSize`, `PlayAkEvent` | **`Mesh`**, `WeaponTypeDefinition`, `CurrentFiringModeDefinition`, `bCanBeUsed` |
+| `WillowPlayerPawn` | `Arms`, `Weapon`, `Mesh`, `PlayAkEvent`, `Location` | `PendingWeapon` (it is declared on `InventoryManager`) |
+| `GearboxSkeletalMeshComponent` | `Rotation`, `Translation`, `ForceUpdate`, `Materials`, `SkeletalMesh`, `AnimSets` | `RotOrigin`, `Origin`, `PlayAkEvent` |
+
+That last row is the important correction to this document's earlier reasoning: the first-person
+pose writes `RotOrigin`/`Origin` on **`Arms.SkeletalMesh`**, the hands *mesh asset* — not on the
+component. The component is only `ForceUpdate`d. The runtime's own log (`Captured first-person arms
+rest transform: rot=(0, 0, 0), loc=(40.0, 0.0, -167.0)`) proves those writes land, so the guards are
+unnecessary rather than dead; the component's missing `RotOrigin` is what made them look dead.
+
+## Applied from this run
+
+| file | deleted | why |
+| --- | --- | --- |
+| `definitions/name_parts.py` | `apply_ui_preview_settings_to_all_wts` guard block (−47/+19) | all eight fields on `WeaponTypeDefinition` |
+| `definitions/weapon_types.py` | kick/FireShake guards | same class |
+| `definitions/parts.py` | 3 guards + their `try` shells | `WeaponPartDefinition` declares them |
+| `definitions/balances.py` | drop-pool guards | `ItemPoolDefinition` declares them |
+| `custom_assets.py` | `Rarity` / gestalt-names guards | `WeaponPartDefinition` declares them |
+| `combat/pose.py` | the whole held-blade mesh layer (`_held_weapon_mesh`, `_snapshot_blade`, `_write_blade_tilt`, `_restore_blade`, `_POSE_BLADE_REST`, three tilt constants) and the `PendingWeapon` branch | `WillowWeapon` has no `Mesh`, so every one of those calls was handed `None`; `PendingWeapon` is never on the pawn |
+
+Totals across the branch: **12,981 -> 12,681 lines**, `hasattr(` **69 -> 37**, `except` **262 -> 249**.
+
+`WeaponBalanceDefinition` declares none of `MinGameStageIndex` / `MaxGameStageIndex` /
+`GameStageRequirement`, but `balances.py` writes those on **structs** (`WeightedInventoryBalanceData`
+rows and manufacturer-weight rows), not on the balance class — so those guards stay until a struct
+dump covers them. `Probe: _pool_entries` now reads the real row fields (`InvBalanceDefinition`,
+`ItmPoolDefinition`) instead of `Item`.

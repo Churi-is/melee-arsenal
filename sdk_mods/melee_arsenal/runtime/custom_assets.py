@@ -141,17 +141,16 @@ def set_part_gestalt_fragment(part: Any, fragment_name: str) -> None:
         part.GestaltModeSkeletalMeshName = fragment_name
     except Exception:
         pass
-    if hasattr(part, "AdditionalGestaltModeSkeletalMeshNames"):
+    try:  # `AdditionalGestaltModeSkeletalMeshNames` is declared on `WeaponPartDefinition`
+        current = list(part.AdditionalGestaltModeSkeletalMeshNames)
+        names = max(2, len(current)) if current else 2
+        part.AdditionalGestaltModeSkeletalMeshNames = tuple("None" for _ in range(names))
+    except Exception:
         try:
-            cur = list(part.AdditionalGestaltModeSkeletalMeshNames)
-            n = max(2, len(cur)) if cur else 2
-            part.AdditionalGestaltModeSkeletalMeshNames = tuple("None" for _ in range(n))
+            for idx in range(len(part.AdditionalGestaltModeSkeletalMeshNames)):
+                part.AdditionalGestaltModeSkeletalMeshNames[idx] = "None"
         except Exception:
-            try:
-                for idx in range(len(part.AdditionalGestaltModeSkeletalMeshNames)):
-                    part.AdditionalGestaltModeSkeletalMeshNames[idx] = "None"
-            except Exception:
-                pass
+            pass
 
 
 def set_part_rarity(part: Any, rarity: Rarity | int | float) -> None:
@@ -160,7 +159,7 @@ def set_part_rarity(part: Any, rarity: Rarity | int | float) -> None:
     BL2 derives finished-item rarity from the **Material** part. Its value controls the item-card
     title, loot-beam colour, and sell value, so each generated material part is assigned its rolled tier.
     """
-    if part is None or not hasattr(part, "Rarity"):
+    if part is None:
         return
     level = float(int(rarity))
     try:

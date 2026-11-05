@@ -17,7 +17,11 @@ from .context import BuildContext
 from .helpers import _clear_array_prop, _deg_to_rot_units, _ensure_subpackage, _find, _sanitize_token
 
 def apply_ui_preview_settings_to_all_wts() -> None:
-    """Orient Melee Weapons horizontally & zoom framing closer in Inventory / Inspect previews."""
+    """Orient Melee Weapons horizontally & zoom framing closer in Inventory / Inspect previews.
+
+    Every attribute below is declared on `WeaponTypeDefinition` (measured on the live weapon type),
+    so this writes them straight out instead of probing each one for existence.
+    """
     pitch_ru = _deg_to_rot_units(STATE.preview_pitch_deg)
     yaw_ru = _deg_to_rot_units(STATE.preview_yaw_deg)
     roll_ru = _deg_to_rot_units(STATE.preview_roll_deg)
@@ -26,53 +30,21 @@ def apply_ui_preview_settings_to_all_wts() -> None:
     for wt in STATE.maker_to_wt.values():
         if wt is None:
             continue
-        if hasattr(wt, "bUIMeshRotationNeedsTransformFixup"):
-            try:
-                wt.bUIMeshRotationNeedsTransformFixup = False
-            except Exception:
-                pass
-        if hasattr(wt, "UIMeshRotation"):
-            try:
-                rot = copy.copy(wt.UIMeshRotation)
-                rot.Pitch = pitch_ru
-                rot.Yaw = yaw_ru
-                rot.Roll = roll_ru
-                wt.UIMeshRotation = rot
-            except Exception:
-                try:
-                    wt.UIMeshRotation = unrealsdk.make_struct(
-                        "Rotator",
-                        Pitch=pitch_ru,
-                        Yaw=yaw_ru,
-                        Roll=roll_ru,
-                    )
-                except Exception:
-                    pass
-        if hasattr(wt, "FocusRadius"):
-            try:
-                wt.FocusRadius = focus_rad
-            except Exception:
-                pass
-        if hasattr(wt, "MinimumVerticalPercentage"):
-            try:
-                wt.MinimumVerticalPercentage = 0.0
-            except Exception:
-                pass
-        if hasattr(wt, "MinimumHorizontalPercentage"):
-            try:
-                wt.MinimumHorizontalPercentage = 0.85
-            except Exception:
-                pass
-        if hasattr(wt, "ThirdPersonMeshScale"):
-            try:
-                wt.ThirdPersonMeshScale = 1.05
-            except Exception:
-                pass
-        if STATE.ui_presentation is not None and hasattr(wt, "Presentation"):
-            try:
+        try:
+            wt.bUIMeshRotationNeedsTransformFixup = False
+            rotation = copy.copy(wt.UIMeshRotation)
+            rotation.Pitch = pitch_ru
+            rotation.Yaw = yaw_ru
+            rotation.Roll = roll_ru
+            wt.UIMeshRotation = rotation
+            wt.FocusRadius = focus_rad
+            wt.MinimumVerticalPercentage = 0.0
+            wt.MinimumHorizontalPercentage = 0.85
+            wt.ThirdPersonMeshScale = 1.05
+            if STATE.ui_presentation is not None:
                 wt.Presentation = STATE.ui_presentation
-            except Exception:
-                pass
+        except Exception as exc:  # pragma: no cover - engine call shape varies
+            log_debug_once("preview_wt", f"inventory preview tuning failed: {exc!r}")
 
     apply_gestalt_bounds_framing()
 

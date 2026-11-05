@@ -188,7 +188,14 @@ def _pool_entries(pool: Any, limit: int = 40) -> list[dict[str, Any]]:
     except Exception:
         raw = ()
     for entry in list(raw)[:limit]:
-        item = safe_get(entry, "Item", None) or safe_get(entry, "BalanceDefinition", None)
+        # A `WeightedInventoryBalanceData` row names its payload `InvBalanceDefinition` (a balance or
+        # an item definition) or `ItmPoolDefinition` (a nested pool) — `Item`/`BalanceDefinition` are
+        # not fields of it, which is why every entry used to dump as an empty string.
+        item = (
+            safe_get(entry, "InvBalanceDefinition", None)
+            or safe_get(entry, "ItmPoolDefinition", None)
+            or safe_get(entry, "Item", None)
+        )
         probability = safe_get(entry, "Probability", None)
         entry_record: dict[str, Any] = {
             "item": obj_path(item) or str(safe_get(item, "Name", "") or ""),
