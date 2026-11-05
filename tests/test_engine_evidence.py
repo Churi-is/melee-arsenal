@@ -78,6 +78,39 @@ class RuntimeSimplificationTests(unittest.TestCase):
         self.assertEqual(weapon.ReloadCnt, 20)
         weapon.ClearPendingFire.assert_called_once_with(0)
 
+    def test_slag_stat_icons_replace_previous_element_without_changing_title_mapping(self):
+        from melee_arsenal.core.enums import Element
+        from melee_arsenal.core.item_card import CompareArrow
+
+        class Card:
+            def __init__(self):
+                self.rows = {}
+
+            def SetTopStat(self, index, label, value, arrow, aux, icon):
+                self.rows[index] = (label, icon)
+
+            def SetFunStats(self, text):
+                pass
+
+        def override(element):
+            rows = [types.SimpleNamespace(label=label, formatted_value="1", arrow=CompareArrow.NONE)
+                    for label in ("Damage", "Range", "Swing Speed")]
+            elemental = types.SimpleNamespace(element=element, dps_label="Damage/s", dps_formatted="1",
+                dps_arrow=CompareArrow.NONE, chance_label="Effect Chance", chance_formatted="10%",
+                chance_arrow=CompareArrow.NONE)
+            payload = types.SimpleNamespace(top_stats=rows, elemental_section=elemental, fun_stats_html="")
+            return ui.ActiveCardOverride(card_stats=None, payload=payload)
+
+        card = Card()
+        ui._apply_melee_card_override(card, override(Element.FIRE))
+        self.assertEqual(card.rows[4][1], "elementFire")
+        ui._apply_melee_card_override(card, override(Element.SLAG))
+        self.assertEqual(card.rows[3][1], "elementAmp")
+        self.assertEqual(card.rows[4], ("Effect Chance", "elementAmp"))
+        self.assertEqual(ui._ELEMENT_ICON[Element.SLAG], "elementSlag")  # SetTitle is unchanged.
+        ui._apply_melee_card_override(card, override(Element.CORROSIVE))
+        self.assertEqual(card.rows[4][1], "elementCorrosive")
+
     def test_card_ex_direct_and_reentrant_apply_once(self):
         card, obj = object(), object()
         args = types.SimpleNamespace(InventoryItem=object(), CompareAgainstInventoryItem=None)

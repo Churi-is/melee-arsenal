@@ -46,6 +46,12 @@ _ELEMENT_ICON: dict[Element, str] = {
 }
 
 
+# Stat-row IconName values are not always the same as SetTitle's ElementalIcon.
+# BL2 calls slag "Amp" in its elemental attribute presentation; elementSlag
+# is not a stat icon and can leave the previous row's movie-clip image visible.
+_STAT_ELEMENT_ICON: dict[Element, str] = {**_ELEMENT_ICON, Element.SLAG: "elementAmp"}
+
+
 # RE Probe reflected WillowGame.InventoryCardGFx:ETopStatArrow in BL2.
 _ARROW_BYTES: dict[CompareArrow, int] = {
     CompareArrow.NONE: 0,
@@ -111,7 +117,7 @@ def _apply_melee_card_override(gfx_obj: Any, ov: ActiveCardOverride) -> None:
 
     elem_sec = payload.elemental_section
     if elem_sec is not None:
-        e_icon = _ELEMENT_ICON.get(elem_sec.element, "")
+        e_icon = _STAT_ELEMENT_ICON.get(elem_sec.element, "")
         _call_set_top_stat(
             gfx_obj,
             3,
