@@ -19,8 +19,8 @@ from .helpers import _clear_array_prop, _deg_to_rot_units, _ensure_subpackage, _
 def apply_ui_preview_settings_to_all_wts() -> None:
     """Orient Melee Weapons horizontally & zoom framing closer in Inventory / Inspect previews.
 
-    Every attribute below is declared on `WeaponTypeDefinition` (measured on the live weapon type),
-    so this writes them straight out instead of probing each one for existence.
+    Every attribute below is declared on `WeaponTypeDefinition` (see docs/ENGINE_FACTS.md), so this
+    writes them straight out instead of testing each one for existence.
     """
     pitch_ru = _deg_to_rot_units(STATE.preview_pitch_deg)
     yaw_ru = _deg_to_rot_units(STATE.preview_yaw_deg)

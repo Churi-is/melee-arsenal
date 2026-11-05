@@ -6,7 +6,7 @@ Damage Reduction. Standard gun-only stats are hidden.
 Do not call `gfx_obj.AdjustHeight()`: in BL2 it moves and shrinks the shared item-card movie clip.
 """
 from __future__ import annotations
-from .sdk import Block, prevent_hooking_direct_calls, unrealsdk
+from .sdk import Block, prevent_hooking_direct_calls
 
 from dataclasses import dataclass
 from typing import Any
@@ -29,12 +29,10 @@ class ActiveCardOverride:
 
 
 _ACTIVE_CARDS: dict[str, ActiveCardOverride] = {}
-_COMPARE_ENUM_MAP: dict[CompareArrow, int] | None = None
 
-# Gearbox's Flash stat icons, read off live `ItemCardGFxObject` calls by the probe (two sessions,
-# several weapons): slot 0 `weaponDamage`, 1 `weaponAccuracy`, 2 `weaponFireRate`,
-# 3 `weaponsReloadSpeed`, 4 `weaponClipSize`, 5/6 `element<Element>` — `elementCorrosive` and
-# `elementFire` both observed, so the element icons are the same `element` + capitalised name.
+# Gearbox's Flash stat icons, measured off live `ItemCardGFxObject` calls (docs/ENGINE_FACTS.md):
+# slot 0 `weaponDamage`, 1 `weaponAccuracy`, 2 `weaponFireRate`, 3 `weaponsReloadSpeed`,
+# 4 `weaponClipSize`, 5/6 `element<Element>` — `elementCorrosive` and `elementFire` both observed.
 _ICON_DAMAGE = "weaponDamage"
 _ICON_ACCURACY = "weaponAccuracy"
 _ICON_FIRE_RATE = "weaponFireRate"
@@ -48,48 +46,19 @@ _ELEMENT_ICON: dict[Element, str] = {
 }
 
 
-def _discover_compare_enum() -> dict[CompareArrow, int]:
-    """Discover exact `ECompareStat` enum byte values from UE3 reflection (with safe defaults)."""
-    global _COMPARE_ENUM_MAP
-    if _COMPARE_ENUM_MAP is not None:
-        return _COMPARE_ENUM_MAP
-
-    mapping = {
-        CompareArrow.NONE: 0,
-        CompareArrow.BETTER: 1,
-        CompareArrow.EQUAL: 2,
-        CompareArrow.WORSE: 3,
-    }
-    if unrealsdk is None:
-        _COMPARE_ENUM_MAP = mapping
-        return mapping
-
-    try:
-        fn = unrealsdk.find_object("Function", "WillowGame.ItemCardGFxObject:SetTopStat")
-        if fn is not None:
-            for prop in fn._properties():
-                if str(prop.Name) == "CompareArrow" and hasattr(prop, "Enum") and prop.Enum is not None:
-                    enum_obj = prop.Enum
-                    if hasattr(enum_obj, "_names"):
-                        names = [str(n).lower() for n in enum_obj._names()]
-                        for idx, nm in enumerate(names):
-                            if any(k in nm for k in ("none", "blank", "no_compare", "empty")):
-                                mapping[CompareArrow.NONE] = idx
-                            elif any(k in nm for k in ("better", "higher", "up", "greater")):
-                                mapping[CompareArrow.BETTER] = idx
-                            elif any(k in nm for k in ("same", "equal", "even")):
-                                mapping[CompareArrow.EQUAL] = idx
-                            elif any(k in nm for k in ("worse", "lower", "down", "less")):
-                                mapping[CompareArrow.WORSE] = idx
-    except Exception:
-        pass
-
-    _COMPARE_ENUM_MAP = mapping
-    return mapping
+# `SetTopStat`'s `CompareArrow` parameter is typed `ETopStatArrow`. That enum's value array is not
+# exposed by the SDK (`_names()` is absent on the enum object), so it cannot be read at run time;
+# the byte values below are what the card has always used and what the game accepts.
+_ARROW_BYTES: dict[CompareArrow, int] = {
+    CompareArrow.NONE: 0,
+    CompareArrow.BETTER: 1,
+    CompareArrow.EQUAL: 2,
+    CompareArrow.WORSE: 3,
+}
 
 
 def _arrow_byte(arrow: CompareArrow) -> int:
-    return _discover_compare_enum().get(arrow, 0)
+    return _ARROW_BYTES.get(arrow, 0)
 
 
 def _compare_against_vanilla_gun_damage(card: ComputedCardStats, compare_item: Any) -> CompareArrow | None:

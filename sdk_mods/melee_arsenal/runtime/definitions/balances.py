@@ -360,7 +360,7 @@ def build_balances(ctx: BuildContext) -> None:
                             setattr(dpool, gate_attr, None)
                         except Exception:
                             pass
-                # Declared on `ItemPoolDefinition` itself (measured), so no probing.
+                # Declared on `ItemPoolDefinition` itself (docs/ENGINE_FACTS.md).
                 dpool.bAutoReadyItems = False
                 try:
                     quantity = copy.copy(dpool.Quantity)

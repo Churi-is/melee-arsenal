@@ -39,8 +39,7 @@ def _configure_melee_firing_mode(fm: Any, range_uu: float) -> None:
     fm.Speed = MELEE_RAY_SPEED
     fm.TraceInterval = 0.2
     fm.Lifetime = max(0.11, (range_uu / MELEE_RAY_SPEED) + 0.075)
-    # Every field below is declared on `FiringModeDefinition` itself (measured from UE3 reflection),
-    # so there is nothing to probe for.
+    # Every field below is declared on `FiringModeDefinition` itself (see docs/ENGINE_FACTS.md).
     fm.AirFriction = 0.0
     fm.RicochetFriction = 0.0
     fm.PartSysTemplate = None

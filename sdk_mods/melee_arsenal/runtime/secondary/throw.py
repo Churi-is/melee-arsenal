@@ -484,7 +484,6 @@ def tick_throw() -> None:
     if elapsed >= THROW_HAND_EMPTY_DELAY_SEC:
         if combat.active_first_person_pose() != combat.POSE_THROWN:
             combat.apply_first_person_pose(deref_weak(st.pc_ref), combat.POSE_THROWN)
-        secondary_vfx.hide_held_blade()
     secondary_vfx.update_thrown_blade(point)
     st.visual_updates += 1
 
