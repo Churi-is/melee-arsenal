@@ -322,6 +322,18 @@ with zipfile.ZipFile(mod_zip, "w", compression=zipfile.ZIP_DEFLATED, compresslev
             if not should_skip(rel.parts, f):
                 zf.write(f, rel.as_posix())
 
+    # Companion SDK-library mods (pure Python, no UPKs).
+    # Install the inner package dir (<mod>/<mod>/__init__.py) so the
+    # zip layout matches what BL2 expects under sdk_mods/<mod>/.
+    for companion in ("re_probe", "melee_re_probe_runner"):
+        comp_dir = repo / "sdk_mods" / companion / companion
+        if comp_dir.is_dir():
+            for f in sorted(comp_dir.rglob("*")):
+                if f.is_file():
+                    rel = f.relative_to(repo)
+                    if not should_skip(rel.parts, f):
+                        zf.write(f, rel.as_posix())
+
 ver_zip.write_bytes(mod_zip.read_bytes())
 
 src_zip = dist / "source.zip"
@@ -437,8 +449,10 @@ cmd_install() {
   sdk_dir="$(resolve_sdk_mods_dir "$bl2")"
   local cooked_dst="$bl2/WillowGame/CookedPCConsole"
 
-  info "Installing Melee Arsenal v$(mod_version) -> $bl2"
+  info "Installing Melee Arsenal + companion SDK mods v$(mod_version) -> $bl2"
   mkdir -p "$cooked_dst" "$sdk_dir"
+
+  # --- melee-arsenal (has cooked UPKs) -------------------------------------
   cp -f "$meshes_upk" "$cooked_dst/MeleeArsenalMeshes.upk"
   cp -f "$tex_upk" "$cooked_dst/MeleeArsenalTextures.upk"
   ok "Staged UPKs -> $cooked_dst/"
@@ -449,6 +463,14 @@ cmd_install() {
   cp -f "$tex_upk" "$sdk_dir/melee_arsenal/upk/MeleeArsenalTextures.upk"
   cp -f "$BUILD_MANIFEST" "$sdk_dir/melee_arsenal/data/inkblade_compiled_manifest.json"
   ok "Synced mod -> $sdk_dir/melee_arsenal/ (sidecar saves in _melee_arsenal_saves preserved)"
+
+  # --- companion SDK-library mods (pure Python, no UPKs) -------------------
+  # Each companion mod keeps its importable package one layer in
+  # (sdk_mods/<mod>/<mod>/__init__.py); install that layer as the mod dir.
+  for companion_mod in re_probe melee_re_probe_runner; do
+    sync_python_mod_dir "$REPO_ROOT/sdk_mods/$companion_mod/$companion_mod" "$sdk_dir/$companion_mod"
+  done
+  ok "Synced companion mods -> $sdk_dir/re_probe/ and $sdk_dir/melee_re_probe_runner/"
 
 }
 
@@ -470,8 +492,8 @@ cmd_uninstall() {
   sdk_dir="$(resolve_sdk_mods_dir "$bl2")"
   local cooked_dst="$bl2/WillowGame/CookedPCConsole"
 
-  info "Uninstalling Melee Arsenal from $bl2"
-  rm -rf "$sdk_dir/melee_arsenal"
+  info "Uninstalling Melee Arsenal + companion SDK mods from $bl2"
+  rm -rf "$sdk_dir/melee_arsenal" "$sdk_dir/re_probe" "$sdk_dir/melee_re_probe_runner"
   rm -f "$cooked_dst/MeleeArsenalMeshes.upk" "$cooked_dst/MeleeArsenalTextures.upk"
   if [ "$purge_saves" -eq 1 ]; then
     rm -rf "$sdk_dir/_melee_arsenal_saves"
@@ -574,6 +596,15 @@ cmd_status() {
       save_cnt="$(find "$sdk_dir/_melee_arsenal_saves" -maxdepth 1 -name '*.json' | wc -l | tr -d ' ')"
       printf "  Sidecar saves   : %s save file(s) in _melee_arsenal_saves\n" "$save_cnt"
     fi
+
+    # Companion SDK-library mods (pure Python, no UPKs).
+    for companion_mod in re_probe melee_re_probe_runner; do
+      if [ -d "$sdk_dir/$companion_mod" ]; then
+        printf "  %-20s : %s✓ installed%s (pure Python mod)\n" "$companion_mod" "$C_GREEN" "$C_RESET"
+      else
+        printf "  %-20s : %s✗ not installed%s (run ./melee install)\n" "$companion_mod" "$C_YELLOW" "$C_RESET"
+      fi
+    done
   else
     printf "  BL2 install     : %snot auto-detected%s (pass --bl2-dir <path> to ./melee install)\n" "$C_DIM" "$C_RESET"
   fi
@@ -641,7 +672,8 @@ ${C_BOLD}Commands:${C_RESET}
   ${C_CYAN}preview${C_RESET}                   Roll & print sample Level 50 Melee Arsenal item cards & hit math
   ${C_CYAN}package${C_RESET} [--build]         Build release archives in build/dist/
                             (recompiles the UPKs first if the kit has changed since the last build)
-  ${C_CYAN}install${C_RESET} [options]         Install UPKs + sdk_mods/melee_arsenal into Borderlands 2
+  ${C_CYAN}install${C_RESET} [options]         Install melee-arsenal + companion SDK mods
+                            (re_probe, melee_re_probe_runner) into Borderlands 2
                             Recompiles the UPKs automatically when the kit has been regenerated.
                             Options: --bl2-dir <path> (cached in .bl2_dir), --no-rebuild
   ${C_CYAN}dev${C_RESET} [install-options]     Quick iterate: syntax check, then install to Borderlands 2
