@@ -1,7 +1,7 @@
 """Enum value report.
 
 The SDK does not expose `ETopStatArrow._names()`, so the mod hard-codes the
-byte mapping `NONE=0, BETTER=1, EQUAL=2, WORSE=3` (ui_item_card.py). RE Probe
+byte mapping `NONE=0, BETTER=1, WORSE=2, EQUAL=3` (ui_item_card.py). RE Probe
 dumps `UEnum.values` directly, so we can confirm or replace that guess.
 """
 
@@ -12,7 +12,7 @@ from typing import Any
 from .loader import Dump
 
 WANTED_ENUMS: list[str] = [
-    "WillowGame.ETopStatArrow",
+    "WillowGame.InventoryCardGFx:ETopStatArrow",
     # Context enums the mod's part catalogs reference by name elsewhere
     "WillowGame.EAmmoType",
     "WillowGame.EControllerMode",
@@ -69,7 +69,7 @@ def write_markdown(result: dict[str, Any]) -> str:
         if entry["name"] == "ETopStatArrow":
             arrow_map = {v["name"]: v["value"] for v in (entry.get("values") or [])}
             lines.append(
-                "**Mod assumption:** `CompareArrow` bytes `NONE=0, BETTER=1, EQUAL=2, WORSE=3` "
+                "**Mod assumption:** `CompareArrow` bytes `NONE=0, BETTER=1, WORSE=2, EQUAL=3` "
                 f"→ observed mapping: {arrow_map}."
             )
             lines.append("")

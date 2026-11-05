@@ -195,13 +195,13 @@ def build_findings(dump_dir: str, trace_path: str | None = None) -> dict[str, An
         elif cat == "structs":
             structs_result = classes_result  # structs are inside the classes report
             target = {
-                "STRUCT-DEFINITIONDATA": "WillowGame.WeaponDefinitionData",
-                "STRUCT-WEIGHTEDROW": "WillowGame.WeightedInventoryBalanceData",
+                "STRUCT-DEFINITIONDATA": "WillowGame.WillowWeaponTypes:WeaponDefinitionData",
+                "STRUCT-WEIGHTEDROW": "WillowGame.ItemPoolDefinition:BalancedInventoryData",
             }[aid]
             found_struct = False
             present_fields: list[str] = []
             for entry in (structs_result.get("structs") or []):
-                if entry.get("path") == target:
+                if entry.get("path") == target and entry.get("found"):
                     found_struct = True
                     present_fields = [p.get("name") for p in (entry.get("properties") or [])]
                     break
@@ -214,15 +214,17 @@ def build_findings(dump_dir: str, trace_path: str | None = None) -> dict[str, An
                     "TitlePartDefinition", "GameStage", "UniqueId",
                 ]
             else:
-                want = ["InvBalanceDefinition", "ItmPoolDefinition", "Probability", "Manufacturer", "DefaultWeightIndex", "MinGameStageIndex", "MaxGameStageIndex"]
+                want = ["InvBalanceDefinition", "ItmPoolDefinition", "Probability", "bDropOnDeath"]
             if not found_struct:
-                status = "REFUTED"
+                status = "UNVERIFIED"
                 evidence.append(f"{target} struct not in dump")
             else:
                 missing = [p for p in want if p not in present_fields]
                 if not missing:
-                    status = "CONFIRMED"
-                    evidence.append(f"{target} layout confirmed: {', '.join(want)}")
+                    status = "PARTIAL" if aid == "STRUCT-WEIGHTEDROW" else "CONFIRMED"
+                    evidence.append(f"{target} layout reflected: {', '.join(want)}")
+                    if aid == "STRUCT-WEIGHTEDROW":
+                        evidence.append("Manufacturer fields and native selection behavior are not established by this layout.")
                 else:
                     status = "PARTIAL"
                     evidence.append(f"{target} partial: missing {', '.join(missing)}")
@@ -230,16 +232,16 @@ def build_findings(dump_dir: str, trace_path: str | None = None) -> dict[str, An
         elif cat == "enums":
             rec = None
             for e in (enums_result.get("enums") or []):
-                if e.get("path") == "WillowGame.ETopStatArrow":
+                if e.get("path") == "WillowGame.InventoryCardGFx:ETopStatArrow":
                     rec = e
                     break
             if not rec or not rec.get("found"):
-                status = "REFUTED"
+                status = "UNVERIFIED"
                 evidence.append("ETopStatArrow enum not in dump")
             else:
                 amap = {v["name"]: v["value"] for v in (rec.get("values") or [])}
-                expected = {"NONE": 0, "BETTER": 1, "EQUAL": 2, "WORSE": 3}
-                if amap == expected:
+                expected = {"ETSA_Blank": 0, "ETSA_Up": 1, "ETSA_Down": 2, "ETSA_Same": 3}
+                if all(amap.get(name) == value for name, value in expected.items()):
                     status = "CONFIRMED"
                     evidence.append(f"byte mapping matches mod: {amap}")
                 else:

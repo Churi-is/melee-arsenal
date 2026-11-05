@@ -10,8 +10,7 @@ file paths and sampled function arguments: review before sharing.
 ## Install and run
 
 1. Copy `sdk_mods/melee_research` to the game's `sdk_mods`. Copy the included
-   `sdk_mods/re_probe ` folder too, but **rename the copy to `re_probe`** (the
-   repository folder has a trailing space). Keep its `probe` subfolder intact.
+   `sdk_mods/re_probe` folder too. Keep its `probe` subfolder intact.
    Enable RE Probe, Melee Research, and Melee Arsenal in the mod manager. If
    already installed, use the included RE Probe version, which exposes `driver`.
 2. Load a character in a populated map with Melee Arsenal active and a blade
@@ -73,3 +72,16 @@ identity, not all property text. Sections have explicit caps; raw shards remain
 available. RE Probe's default depth, array, instance, xref and property limits
 still apply. RE Probe's programmatic `start_dump` uses its own default settings,
 not the options UI. This runner uses no third-party packages.
+
+### Repeating traces after the registration fix
+
+Replace both `re_probe` and `melee_research` with the updated folders and fully
+restart the game first: older RE Probe sessions may have left hooks installed in
+that process. Run the same combat and inventory scenarios above and send the new
+report. For each trace, check `status_before_stop`: `armed_hooks` should equal
+`arm.matched_functions`, `pending_hooks` should be zero, and `failed_hooks`,
+`errors`, and `stack_drift` should ideally be empty/zero. The report now records
+installed function paths and registration failures. Stack drift can still occur
+when another mod blocks a call, so even a clean installation does not make an
+absent event or a call graph definitive. Please also compare item cards with a
+clearly better, worse and equal stat to check the corrected arrow mapping.

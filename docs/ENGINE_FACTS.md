@@ -35,8 +35,9 @@ Rarity, TypeIcon, ElementalIcon, bIsReadied)`.
 
 * `SetTitle`'s **`Rarity` is a `Color` struct** (`{B: 0, G: 180, R: 255, A: 255}`), not a 1-based
   level. Nothing can turn it into an integer, so the mod renders the engine's colour unchanged.
-* `CompareArrow` is typed **`ETopStatArrow`**, and that enum's value array is not exposed by the SDK
-  (no `_names()`), so the byte mapping is the literal `0/1/2/3`.
+* `CompareArrow` is typed **`ETopStatArrow`**. RE Probe reflected
+  `WillowGame.InventoryCardGFx:ETopStatArrow`: blank=0, up=1, down=2, same=3.
+  An earlier guess had down and same reversed; the item-card mapping now uses the reflected values.
 * `TypeIcon` values are capitalised: `Pistol`.
 * Stat icons, by card slot: `0 weaponDamage`, `1 weaponAccuracy`, `2 weaponFireRate`,
   `3 weaponsReloadSpeed`, `4 weaponClipSize`, `5/6 element<Element>` — `elementCorrosive` and
@@ -75,7 +76,7 @@ Two consequences that are easy to get wrong:
 
 ## Pool entries and weights
 
-`ItemPoolDefinition.BalancedItems` holds `WeightedInventoryBalanceData` rows whose payload fields are
+`ItemPoolDefinition.BalancedItems` holds `WillowGame.ItemPoolDefinition:BalancedInventoryData` rows whose payload fields are
 `InvBalanceDefinition` (a balance or an item definition) and `ItmPoolDefinition` (a nested pool) —
 not `Item`. Each row's `Probability` is an `AttributeInitializationData` with exactly
 `BaseValueConstant`, `BaseValueAttribute`, `BaseValueScaleConstant`, `InitializationDefinition`.
@@ -114,8 +115,24 @@ Measured facts do not make the mod brave everywhere. These are genuinely variabl
 * **Save/sidecar restore** — the item you get back was written by an older build of the mod.
 * **Map-load ordering** — packages finish loading at unpredictable times, which is why the pool sync
   is idempotent and re-runs on map change.
-* **Field writes on structs** (`WeightedInventoryBalanceData` rows, manufacturer weight rows,
-  `ManufacturerCustomPartWeightData`) — those layouts were not dumped field by field, so the guards
-  around them stay until they are.
+* **Field writes on structs** (`BalancedInventoryData` rows, manufacturer weight rows,
+  `ManufacturerCustomPartWeightData`) — reflection confirms the pool row layout, but not
+  safe writes or native behavior. Manufacturer layouts and behavior need more evidence.
 * **`load_package` for the damage-type packages.** Those packages being loaded is a *consequence* of
   this call, not an independent fact, so it stays.
+
+## RE Probe follow-up (2026-11-05)
+
+A full dump with Melee Arsenal enabled captured five `Pool_Weapons_All_*` objects. Each
+contained six class entries with weights 100, 80, 80, 80, 55 and 20 (total **415**).
+Four also contained an injected melee entry of about 63.846. These are live, possibly
+hotfixed values, not proof of every pool or its pristine state. The mod retains 520 as
+the slider reference denominator, while measuring each pool separately; changing that
+constant would change the slider behavior.
+
+The reflected `BalancedInventoryData` layout has `ItmPoolDefinition`,
+`InvBalanceDefinition`, `Probability` and `bDropOnDeath`; the previously used name
+`WeightedInventoryBalanceData` was incorrect for these rows.
+
+The captured traces had hook registration errors and stack drift; do not treat their
+call edges or unobserved functions as evidence until repeated with a corrected tracer.

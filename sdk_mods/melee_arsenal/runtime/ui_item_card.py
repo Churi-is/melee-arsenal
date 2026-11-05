@@ -46,14 +46,12 @@ _ELEMENT_ICON: dict[Element, str] = {
 }
 
 
-# `SetTopStat`'s `CompareArrow` parameter is typed `ETopStatArrow`. That enum's value array is not
-# exposed by the SDK (`_names()` is absent on the enum object), so it cannot be read at run time;
-# the byte values below are what the card has always used and what the game accepts.
+# RE Probe reflected WillowGame.InventoryCardGFx:ETopStatArrow in BL2.
 _ARROW_BYTES: dict[CompareArrow, int] = {
     CompareArrow.NONE: 0,
     CompareArrow.BETTER: 1,
-    CompareArrow.EQUAL: 2,
-    CompareArrow.WORSE: 3,
+    CompareArrow.EQUAL: 3,
+    CompareArrow.WORSE: 2,
 }
 
 

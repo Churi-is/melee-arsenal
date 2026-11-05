@@ -106,7 +106,7 @@ new safety checks the dump reveals are needed.
 - `loader.py` — dump/shard reading (manifest-authoritative, glob fallback)
 - `functions.py` — UFunction signatures for every function the mod hooks/calls
 - `classes.py` — class property checks (declared + inherited via super_chain)
-  and struct layouts (WeaponDefinitionData, WeightedInventoryBalanceData, …)
+  and struct layouts (WeaponDefinitionData, BalancedInventoryData, …)
 - `enums.py` — ETopStatArrow etc. (CompareArrow byte mapping)
 - `objects.py` — donor path / asset presence checks
 - `values.py` — CDO defaults, live instances, globals

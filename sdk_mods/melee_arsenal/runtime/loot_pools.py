@@ -16,8 +16,8 @@ from .definitions import ensure_definitions_built
 from .log import log_debug_once, log_error, log_info, log_warn, obj_path
 from .state import KEEP_ALIVE_FLAGS, STATE
 
-# Sum of the 6 vanilla weapon classes in `Pool_Weapons_All_*`:
-# Pistols (100) + SMGs (100) + ARs (100) + Shotguns (100) + Snipers (75) + Launchers (45) = 520.0
+# Reference denominator for the world-drop slider, not a claim about live pool weights.
+# Live pools are measured separately; changing this value would change slider behavior.
 VANILLA_WEAPON_CLASS_SUM: float = 520.0
 
 _TIER_SPECS: tuple[tuple[Rarity, str, str], ...] = (
@@ -52,6 +52,9 @@ _KNOWN_WEIGHT_INIT_DEFS: dict[str, float] = {
     "Weight_4_Rare": 1.0,
     "Weight_5_VeryRare": 0.1,
     "Weight_6_Legendary": 0.01,
+    "Weight_1_Common_RareMod": 0.0,
+    "Weight_2_Uncommon_RareMod": 0.0,
+    "Weight_Lobelia_Pearlescent_Tubbles": 0.0,
 }
 
 _NON_WEAPON_POOL_TOKENS: tuple[str, ...] = (
@@ -235,9 +238,9 @@ def _eval_prob_weight(prob: Any) -> float:
     init_def = getattr(prob, "InitializationDefinition", None)
     if init_def is not None:
         init_name = str(getattr(init_def, "Name", "") or obj_path(init_def).rsplit(".", 1)[-1])
-        for key, val in _KNOWN_WEIGHT_INIT_DEFS.items():
-            if key in init_name:
-                return val * scale
+        known = _KNOWN_WEIGHT_INIT_DEFS.get(init_name)
+        if known is not None:
+            return known * scale
         # Fallback: inspect `ValueFormula.Multiplier.BaseValueConstant` if exposed
         vf = getattr(init_def, "ValueFormula", None)
         if vf is not None:

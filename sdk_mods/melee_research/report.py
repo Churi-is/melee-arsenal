@@ -7,7 +7,7 @@ from typing import Any
 
 # Specific engineering questions, not claims that missing reflection means absence.
 QUERIES = {
-    "weight_and_pool": ["WeightedInventoryBalanceData", "AttributeInitializationData", "ManufacturerCustomPartWeightData", "ManufacturerGrade", "ItemPoolDefinition", "Pool_Weapons_All", "Weight_0_", "Weight_1_", "Weight_2_", "Weight_3_", "Weight_4_", "Weight_5_", "Weight_6_", "ValueFormula"],
+    "weight_and_pool": ["BalancedInventoryData", "AttributeInitializationData", "ManufacturerCustomPartWeightData", "ManufacturerGrade", "ItemPoolDefinition", "Pool_Weapons_All", "Weight_0_", "Weight_1_", "Weight_2_", "Weight_3_", "Weight_4_", "Weight_5_", "Weight_6_", "ValueFormula"],
     "weapon_and_save": ["WeaponDefinitionData", "WillowWeapon", "WeaponBalanceDefinition", "WeaponPartDefinition", "SaveGame", "ValidateWeaponDefinition", "ServerGrantMissionRewards"],
     "combat_and_ui": ["WillowPlayerPawn", "WillowAIPawn", "WillowPlayerController", "ItemCardGFxObject", "ETopStatArrow", "FiringModeDefinition", "Behavior_Explode", "Behavior_CauseDamage", "SkeletalMeshComponent", "AnimNodeSlot"],
     "custom_objects": ["MeleeArsenalDev", "FM_Melee", "Pool_Melee"],

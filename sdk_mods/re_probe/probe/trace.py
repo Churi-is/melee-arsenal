@@ -20,18 +20,21 @@ from __future__ import annotations
 import fnmatch
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from . import api
+from .hook_registration import install
 
 try:  # pragma: no cover - only outside the game
-    from unrealsdk.hooks import Type, add_hook, remove_hook  # type: ignore[import-not-found]
+    from unrealsdk.hooks import Type, add_hook, has_hook, remove_hook  # type: ignore[import-not-found]
 except Exception:  # pragma: no cover
     Type = None  # type: ignore[assignment]
     add_hook = None  # type: ignore[assignment]
     remove_hook = None  # type: ignore[assignment]
+    has_hook = None  # type: ignore[assignment]
 
 from .values import ValueSerializer
 
@@ -82,8 +85,10 @@ class CallTracer:
         self.stack_drift = 0
         self._pending: list[str] = []
         self._installed: list[tuple[str, str, str]] = []
+        self._failed_hooks: list[dict[str, str]] = []
         self._armed_history = 0
         self._hook_seq = 0
+        self._hook_token = uuid.uuid4().hex
         self._edges: dict[tuple[str | None, str], _Edge] = {}
         self._functions: dict[str, _Function] = {}
         self._local = threading.local()
@@ -100,7 +105,7 @@ class CallTracer:
     # -- public API ---------------------------------------------------------
 
     def arm(self, patterns: list[str], *, max_hooks: int | None = None) -> dict[str, Any]:
-        if Type is None or add_hook is None:
+        if Type is None or add_hook is None or has_hook is None or remove_hook is None:
             return {"ok": False, "error": "pyunrealsdk hooks are not available"}
         if self.state in {"arming", "armed"}:
             return {"ok": False, "error": "a trace session is already active; stop it first"}
@@ -116,8 +121,11 @@ class CallTracer:
         self.samples = 0
         self.dropped_edges = 0
         self.stack_drift = 0
+        self._local = threading.local()
+        self._hook_token = uuid.uuid4().hex
         self._pending = []
         self._installed = []
+        self._failed_hooks = []
         self._armed_history = 0
         self._edges = {}
         self._functions = {}
@@ -169,20 +177,31 @@ class CallTracer:
 
         del self._pending[: len(batch)]
         for path in batch:
+            pre_installed = False
             try:
-                pre_id = f"re_probe.trace.{self._hook_seq}.pre"
-                post_id = f"re_probe.trace.{self._hook_seq}.post"
+                pre_id = f"re_probe.trace.{self._hook_token}.{self._hook_seq}.pre"
+                post_id = f"re_probe.trace.{self._hook_token}.{self._hook_seq}.post"
                 self._hook_seq += 1
-                if not add_hook(path, Type.PRE, pre_id, self._pre):
+                if not install(add_hook, has_hook, remove_hook, path, Type.PRE, pre_id, self._pre):
                     self.errors += 1
+                    self._failed_hooks.append({"path": path, "stage": "pre", "error": "hook not installed"})
                     continue
-                if not add_hook(path, Type.POST_UNCONDITIONAL, post_id, self._post):
+                pre_installed = True
+                if not install(add_hook, has_hook, remove_hook, path, Type.POST_UNCONDITIONAL, post_id, self._post):
                     remove_hook(path, Type.PRE, pre_id)
                     self.errors += 1
+                    self._failed_hooks.append({"path": path, "stage": "post", "error": "hook not installed"})
                     continue
                 self._installed.append((path, pre_id, post_id))
             except Exception as exc:  # pragma: no cover - defensive
+                # The pre hook may already have been installed when post failed.
+                try:
+                    if pre_installed:
+                        remove_hook(path, Type.PRE, pre_id)
+                except Exception:
+                    pass
                 self._hook_error = repr(exc)
+                self._failed_hooks.append({"path": path, "stage": "post" if pre_installed else "pre", "error": repr(exc)})
                 self.errors += 1
 
         if not self._pending:
@@ -238,6 +257,8 @@ class CallTracer:
             "patterns": list(self.patterns),
             "armed_hooks": len(self._installed),
             "pending_hooks": len(self._pending),
+            "installed_functions": [path for path, _, _ in self._installed],
+            "failed_hooks": list(self._failed_hooks),
             "calls": self.calls,
             "edges": len(self._edges),
             "functions": len(self._functions),
@@ -274,6 +295,7 @@ class CallTracer:
                     "measure_time": self.settings.measure_time,
                 },
                 "hooks": self._armed_history,
+                "failed_hooks": list(self._failed_hooks),
                 "calls": self.calls,
                 "edges": len(edges),
                 "functions": len(functions),
