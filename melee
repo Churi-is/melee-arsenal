@@ -465,12 +465,10 @@ cmd_install() {
   ok "Synced mod -> $sdk_dir/melee_arsenal/ (sidecar saves in _melee_arsenal_saves preserved)"
 
   # --- companion SDK-library mods (pure Python, no UPKs) -------------------
-  # Each companion mod keeps its importable package one layer in
-  # (sdk_mods/<mod>/<mod>/__init__.py); install that layer as the mod dir.
-  for companion_mod in re_probe melee_re_probe_runner; do
-    sync_python_mod_dir "$REPO_ROOT/sdk_mods/$companion_mod/$companion_mod" "$sdk_dir/$companion_mod"
+  for companion_mod in re_probe melee_research; do
+    sync_python_mod_dir "$REPO_ROOT/sdk_mods/$companion_mod" "$sdk_dir/$companion_mod"
   done
-  ok "Synced companion mods -> $sdk_dir/re_probe/ and $sdk_dir/melee_re_probe_runner/"
+  ok "Synced companion mods -> $sdk_dir/re_probe/ and $sdk_dir/melee_research/"
 
 }
 
