@@ -22,6 +22,7 @@ from .common import (
     keyword_match,
     log,
     obj_path,
+    props_of,
     safe_get,
     same_uobject,
     unrealsdk,
@@ -379,19 +380,96 @@ def runtime_objects() -> dict[str, Any]:
     }
 
 
+_SNAPSHOT: dict[str, Any] | None = None
+_SNAPSHOT_WEAPON = ""
+_LATCH_TICKS = 0
+
+
+def _class_properties(obj: Any) -> dict[str, Any]:
+    """Property names declared on the object's own class, read while the package is still loaded."""
+    cls = safe_get(obj, "Class", None)
+    if cls is None:
+        return {}
+    names = [str(safe_get(prop, "Name", "") or "") for prop in props_of(cls)]
+    names = [name for name in names if name]
+    return {
+        "class": str(safe_get(cls, "Name", "") or ""),
+        "property_count": len(names),
+        "property_names": names,
+    }
+
+
+def runtime_classes() -> dict[str, Any]:
+    """Property lists for the definitions the runtime patches, taken off the live objects.
+
+    Doing this here (instead of in `probe_schema`) is deliberate: `probe_dump` is often run from the
+    main menu, where loot packages are unloaded and `find_class(name)` finds nothing. The class
+    object held by a live definition is readable whenever a map is, whatever the name is.
+    """
+    out: dict[str, Any] = {}
+    for logical, obj in runtime_objects().items():
+        if obj is None:
+            continue
+        record = _class_properties(obj)
+        if record:
+            out[logical] = record
+    return out
+
+
 def discovered_class_names() -> dict[str, str]:
     """Real class names, read off live objects instead of guessed.
 
     Guessing (`WillowWeaponTypeDefinition`, `WillowWeaponBalanceDefinition`) is why the property
     dumps for the two files that need them most (`definitions/weapon_types.py`,
-    `definitions/balances.py`) came back empty: BL2 names those classes differently.
+    `definitions/balances.py`) came back empty: BL2 names those classes differently. Falls back to
+    the latched map-time snapshot so a menu-time dump still names them.
     """
     out: dict[str, str] = {}
     for logical, obj in runtime_objects().items():
         name = _class_name(obj) if obj is not None else ""
         if name:
             out[logical] = name
-    return out
+    if out:
+        return out
+    snapshot = _SNAPSHOT or {}
+    return {logical: rec.get("class", "") for logical, rec in (snapshot.get("classes") or {}).items()}
+
+
+def capture_runtime_snapshot() -> None:
+    """Remember the live measurements while a map is loaded (called once per frame tick).
+
+    The first dump of this probe was taken from the main menu, where there is no pawn: `guards` and
+    `discovered_classes` came back empty and the class dumps for the remaining cleanup were lost.
+    This latches the first usable snapshot and refreshes it whenever the held weapon changes.
+    """
+    global _SNAPSHOT, _SNAPSHOT_WEAPON, _LATCH_TICKS
+    _LATCH_TICKS += 1
+    if _LATCH_TICKS % 30 != 0:  # three times a second is plenty for something that rarely changes
+        return
+    objects = runtime_objects()
+    pawn = objects.get("pawn")
+    weapon = objects.get("weapon")
+    if pawn is None or weapon is None:
+        return
+    weapon_path = obj_path(weapon)
+    if _SNAPSHOT is not None and weapon_path and weapon_path == _SNAPSHOT_WEAPON:
+        return
+    pc = objects.get("player_controller")
+    _SNAPSHOT = {
+        "weapon": weapon_path,
+        "player": _player_summary(pc),
+        "held_weapon": _weapon_summary(pawn),
+        "arms": _arms_summary(pawn),
+        "guards": guard_report(),
+        "classes": runtime_classes(),
+    }
+    _SNAPSHOT_WEAPON = weapon_path
+    log(f"latched map snapshot: weapon={weapon_path or '?'} classes={sorted(_SNAPSHOT['classes'])}")
+
+
+def map_snapshot() -> dict[str, Any] | None:
+    """The last snapshot captured during gameplay, if any."""
+    return _SNAPSHOT
 
 
 def guard_report() -> dict[str, Any]:
@@ -439,7 +517,21 @@ def probe_live() -> dict[str, Any]:
         "guards": guard_report(),
         "discovered_classes": discovered_class_names(),
     }
-    if not live["player"].get("found"):
+    snapshot = map_snapshot()
+    if snapshot is not None:
+        live["map_snapshot"] = snapshot
+        if not live["player"].get("pawn"):
+            live["player"] = snapshot["player"]
+            live["held_weapon"] = snapshot["held_weapon"]
+            live["arms"] = snapshot["arms"]
+            live["guards"] = snapshot["guards"]
+            live["note"] = (
+                "Dumped outside a map. `map_snapshot` is what was measured while playing; `player`, "
+                "`held_weapon`, `arms` and `guards` above are copied from it."
+            )
+    elif not live["player"].get("pawn"):
+        live["note"] = "Not in a map (or no local player yet): load a character and run again."
+    if not live["player"].get("found") and "note" not in live:
         live["note"] = "Not in a map (or no local player yet): load a character and run again."
     log(f"live snapshot: player={live['player'].get('found')} arms={live['arms'].get('found')}")
     return live

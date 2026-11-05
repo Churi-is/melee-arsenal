@@ -8,7 +8,7 @@ Do not call `gfx_obj.AdjustHeight()`: in BL2 it moves and shrinks the shared ite
 from __future__ import annotations
 from .sdk import Block, prevent_hooking_direct_calls, unrealsdk
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 
@@ -25,26 +25,22 @@ class ActiveCardOverride:
     card_stats: ComputedCardStats
     payload: ItemCardPayload
     gun_compare_arrow: CompareArrow | None = None
-    observed_icons: dict[int, str] = field(default_factory=dict)
-    observed_elem_icon: str = ""
     depth: int = 1
 
 
 _ACTIVE_CARDS: dict[str, ActiveCardOverride] = {}
 _COMPARE_ENUM_MAP: dict[CompareArrow, int] | None = None
 
-# Gearbox's Flash stat icons, measured off a live `ItemCardGFxObject` (probe run, `section_census.json`):
-# slot 0 `weaponDamage`, 1 `weaponAccuracy`, 2 `weaponFireRate`, 3 `weaponsReloadSpeed`, 4 `weaponClipSize`,
-# 5/6 `element<Element>`. Only `elementCorrosive` was observed directly; the rest follow the same
-# `element` + Element-name convention the engine used (`element` + `Corrosive`).
-_SLOT_ICON_FALLBACK: dict[int, str] = {
-    0: "weaponDamage",
-    1: "weaponAccuracy",
-    2: "weaponFireRate",
-}
-_ELEMENT_ICON_FALLBACK: dict[Element, str] = {
+# Gearbox's Flash stat icons, read off live `ItemCardGFxObject` calls by the probe (two sessions,
+# several weapons): slot 0 `weaponDamage`, 1 `weaponAccuracy`, 2 `weaponFireRate`,
+# 3 `weaponsReloadSpeed`, 4 `weaponClipSize`, 5/6 `element<Element>` — `elementCorrosive` and
+# `elementFire` both observed, so the element icons are the same `element` + capitalised name.
+_ICON_DAMAGE = "weaponDamage"
+_ICON_ACCURACY = "weaponAccuracy"
+_ICON_FIRE_RATE = "weaponFireRate"
+_ELEMENT_ICON: dict[Element, str] = {
     Element.NONE: "",
-    Element.FIRE: "elementIncendiary",
+    Element.FIRE: "elementFire",
     Element.SHOCK: "elementShock",
     Element.CORROSIVE: "elementCorrosive",
     Element.SLAG: "elementSlag",
@@ -136,9 +132,9 @@ def _apply_melee_card_override(gfx_obj: Any, ov: ActiveCardOverride) -> None:
     payload = ov.payload
     rows = payload.top_stats
 
-    dmg_icon = ov.observed_icons.get(0, _SLOT_ICON_FALLBACK[0])
-    range_icon = ov.observed_icons.get(1, _SLOT_ICON_FALLBACK[1])
-    speed_icon = ov.observed_icons.get(2, _SLOT_ICON_FALLBACK[2])
+    dmg_icon = _ICON_DAMAGE
+    range_icon = _ICON_ACCURACY
+    speed_icon = _ICON_FIRE_RATE
 
     row0_arrow = ov.gun_compare_arrow if ov.gun_compare_arrow is not None else rows[0].arrow
 
@@ -148,7 +144,7 @@ def _apply_melee_card_override(gfx_obj: Any, ov: ActiveCardOverride) -> None:
 
     elem_sec = payload.elemental_section
     if elem_sec is not None:
-        e_icon = ov.observed_elem_icon or _ELEMENT_ICON_FALLBACK.get(elem_sec.element, "")
+        e_icon = _ELEMENT_ICON.get(elem_sec.element, "")
         _call_set_top_stat(
             gfx_obj,
             3,
@@ -236,8 +232,7 @@ def on_set_title_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
         type_icon = str(getattr(args, "TypeIcon", "") or "Pistol")
         elem_icon = str(getattr(args, "ElementalIcon", "") or "")
         if not elem_icon and ov.card_stats.element != Element.NONE:
-            elem_icon = _ELEMENT_ICON_FALLBACK.get(ov.card_stats.element, "")
-        ov.observed_elem_icon = elem_icon
+            elem_icon = _ELEMENT_ICON.get(ov.card_stats.element, "")
         is_readied = bool(getattr(args, "bIsReadied", False))
 
         if prevent_hooking_direct_calls is not None:
@@ -265,20 +260,10 @@ def on_set_title_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
 
 
 def on_set_top_stat_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
-    """Capture Gearbox's Flash icon names and suppress Accuracy/Reload/Mag Size on melee cards."""
-    ov = _ACTIVE_CARDS.get(cache_key(obj))
-    if ov is None:
-        return None
-    try:
-        idx = int(getattr(args, "StatIndex", -1))
-        icon = str(getattr(args, "IconName", "") or "")
-        if idx >= 0 and icon:
-            ov.observed_icons[idx] = icon
-            if idx >= 5 and not ov.observed_elem_icon:
-                ov.observed_elem_icon = icon
-    except Exception:
-        pass
-    return Block
+    """Suppress the donor gun's Accuracy / Reload / Mag Size rows while a melee card renders."""
+    if cache_key(obj) in _ACTIVE_CARDS:
+        return Block
+    return None
 
 
 def on_set_fun_stats_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:

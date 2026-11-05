@@ -409,9 +409,24 @@ def reset() -> None:
 # Hook construction -------------------------------------------------------------------------
 
 
+_TICK_OBSERVERS: list[Callable[[], None]] = []
+
+
+def add_tick_observer(observer: Callable[[], None]) -> None:
+    """Run `observer` once per frame tick (POST). Used to latch live state while a map is loaded."""
+    if observer not in _TICK_OBSERVERS:
+        _TICK_OBSERVERS.append(observer)
+
+
 def _make_callback(group: str, hook_name: str, kind: str) -> Callable[..., Any]:
     def _callback(obj: Any, args: Any, ret: Any, func: Any) -> None:
         record(group, hook_name, kind, args, func, obj=obj, ret=ret)
+        if _TICK_OBSERVERS and kind == "POST" and group == "frame_tick":
+            for observer in _TICK_OBSERVERS:
+                try:
+                    observer()
+                except Exception:
+                    pass
         return None
 
     _callback.__name__ = f"probe_{group}_{hook_name.rsplit(':', 1)[-1]}_{kind}"

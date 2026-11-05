@@ -156,6 +156,10 @@ ALL_COMMANDS = [
 
 ALL_OPTIONS = [opt_census, opt_samples, btn_dump]
 
+# Latch `player` / `held_weapon` / `arms` / `guards` / class property lists while a map is loaded:
+# the first dump of this probe was taken from the main menu, where every one of those came back empty.
+census.add_tick_observer(live.capture_runtime_snapshot)
+
 HOOKS = census.build_hooks()
 
 

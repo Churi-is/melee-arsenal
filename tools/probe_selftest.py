@@ -532,6 +532,10 @@ def run_checks() -> None:
     check(len(mod_surface.ALL_COMMANDS) == 8, "console commands not registered")
     check(len(mod_surface.ALL_OPTIONS) == 3, "mod-menu options not registered")
     check(len(mod_surface.HOOKS) >= 1, "census hooks were not built")
+    check(
+        live.capture_runtime_snapshot in census._TICK_OBSERVERS,
+        "the live latch is not wired to a frame tick, so a menu-time dump loses the map snapshot",
+    )
 
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp)
@@ -667,6 +671,30 @@ def run_checks() -> None:
         # --- section isolation ----------------------------------------------------------------
         broken = report.run_sections(["schema"])
         check(broken["errors"] == {}, "single-section run reported errors")
+
+        # --- live latch: a map-time snapshot survives a dump from the main menu --------------
+        for _ in range(30):
+            live.capture_runtime_snapshot()
+        snapshot = live.map_snapshot()
+        check(snapshot is not None, "latch captured no snapshot while a pawn and weapon existed")
+        check(snapshot["guards"]["weapon"]["found"], "latched guard report has no held weapon")
+        check(
+            snapshot["classes"].get("weapon", {}).get("property_count"),
+            "latched class property dump is empty",
+        )
+        menu_pc = live.local_player_controller()
+        held_pawn = getattr(menu_pc, "Pawn", None)
+        menu_pc.Pawn = None
+        try:
+            menu_dump = live.probe_live()
+        finally:
+            menu_pc.Pawn = held_pawn
+        check(
+            menu_dump["player"]["map"] == "SouthernShelf_P",
+            "a menu-time dump did not fall back to the latched snapshot",
+        )
+        check(menu_dump["guards"] == snapshot["guards"], "menu-time dump dropped the latched guards")
+        check(bool(live.discovered_class_names()), "menu-time dump lost the measured class names")
 
         _ = assets, live, schema  # imported for coverage of every module
 

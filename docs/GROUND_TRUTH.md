@@ -263,3 +263,26 @@ was already right. `Weight_1_Common_RareMod`, `Weight_2_Uncommon_RareMod` and
    probe; the first dump's `entry_count` was 0 for all 345 pools because of it).
 5. `WillowGame.ItemCardGFxObject:SetBottomStat` and `WillowGame.WillowHUDMovieBase:AddTrainingText`
    confirmed absent twice. Two dead `FUNCTION_TARGETS`, nothing in the runtime.
+
+## Second run (same day): confirmations and one probe lesson
+
+The dump was taken after returning to the main menu, so `player`/`arms`/`guards` were empty — a
+probe bug, now fixed (below). Everything measured in the map survived:
+
+| finding | value | consequence |
+| --- | --- | --- |
+| `PlayerTick` / `WillowGameViewportClient:Tick` | 11,907 / 15,933 | tick picture unchanged from run 1 |
+| `Engine.GameViewportClient:Tick` | 0 (not even reported) | the hook deletion stands |
+| `WillowPlayerPawn:TakeDamage` | **5** (run 1: 0) | it *can* fire: keep the hook, do not delete as dead |
+| `SetTitle` `Rarity` | `{B: 0, G: 180, R: 255, A: 255}` | the "promote the rarity level" helper was provably a no-op (deleted) |
+| `SetTopStat` args | `LabelText="Damage"`, `ValueText="474"`, `CompareArrow=0`, `IconName="weaponDamage"` | named-argument capture works now that it resolves the UFunction |
+| icon slots 5 / 6 | `elementAmp` / `elementFire` | `element<Element>` convention confirmed on a second element (with run 1's `elementCorrosive`), so the runtime now uses literals and the self-learning code is gone |
+| `ItemPoolDefinition` entries | 3–12 per pool, weights resolve | reading `BalancedItems` works; `ItemPool` never existed |
+| Torgue splash | no `Optional Behavior_Explode setup skipped` warning; `Cached ... explosion FX=...Medium Audio=...MED` | the donor fix and the FX-path simplification both hold |
+
+**Probe lesson: latch while a map is loaded.** `probe_dump` is naturally run from the menu, where
+there is no pawn. The probe now records `player`, `held_weapon`, `arms`, `guards` and the class
+property lists on a frame tick while a map is up (`live.capture_runtime_snapshot`), refreshes them
+whenever the held weapon changes, and copies them into a menu-time dump as `map_snapshot`. The class
+property dump happens at the same moment, on the live object's own `Class`, because loot packages are
+unloaded in the menu and `find_class(name)` would find nothing there.
