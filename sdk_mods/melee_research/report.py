@@ -21,6 +21,39 @@ def _read(path: Path) -> Any:
         return json.load(f)
 
 
+def trace_object_context(traces: list[dict[str, Any]], instances: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Join trace object counts with sampled dump-time weapon definitions.
+
+    Paths can be reused and the dump may precede a map change, so this is a
+    correlation, not an assertion about the object at trace time.
+    """
+    index = {item.get("path"): item for item in instances if isinstance(item, dict) and item.get("path")}
+    results = []
+    for trace in traces:
+        data = trace.get("data") or {}
+        entries = []
+        for fn in data.get("functions") or []:
+            objects = []
+            for obj in fn.get("objects") or []:
+                path = obj.get("path")
+                item = index.get(path) or {}
+                definition = (item.get("values") or {}).get("DefinitionData") or {}
+                if not isinstance(definition, dict):
+                    definition = {}
+                def ref(name: str) -> str | None:
+                    value = definition.get(name)
+                    return value.get("$ref") if isinstance(value, dict) else None
+                objects.append({"path": path, "calls": obj.get("count"),
+                                "sampled_class": item.get("class"),
+                                "weapon_type_at_dump": ref("WeaponTypeDefinition"),
+                                "balance_at_dump": ref("BalanceDefinition")})
+            if objects:
+                entries.append({"function": fn.get("path"), "calls": fn.get("calls"),
+                                "objects_truncated": fn.get("objects_truncated"), "objects": objects})
+        results.append({"scenario": trace.get("scenario"), "functions": entries})
+    return results
+
+
 def build_report(dump: Path, traces: list[dict[str, Any]], snapshots: list[dict[str, Any]]) -> dict[str, Any]:
     manifest = _read(dump / "manifest.json")
     result: dict[str, Any] = {
@@ -54,6 +87,8 @@ def build_report(dump: Path, traces: list[dict[str, Any]], snapshots: list[dict[
             except (OSError, ValueError, KeyError, TypeError) as exc:
                 result["errors"].append({"file": str(path), "error": str(exc)})
         result["sections"][section] = {"scanned": scanned, "matched": matched, "included": len(selected), "truncated": matched > len(selected), "items": selected}
+    result["trace_object_context"] = trace_object_context(traces, result["sections"]["instances"]["items"])
+    result["caveats"].append("Trace object joins use sampled dump-time definitions; objects can change or paths be reused before tracing. Unknown means not sampled, not non-melee.")
     return result
 
 

@@ -26,6 +26,18 @@ class EvidenceTests(unittest.TestCase):
             report.write_report(out, result)
             self.assertEqual(json.loads(out.read_text())["manifest"]["status"], "complete")
 
+    def test_trace_object_context_joins_only_sampled_definitions(self):
+        instances = [{"path": "weapon-1", "class": "WillowWeapon", "values": {
+            "DefinitionData": {"WeaponTypeDefinition": {"$ref": "MeleeArsenalDev.WeaponTypes.Blade"},
+                               "BalanceDefinition": {"$ref": "MeleeArsenalDev.Balances.Blade"}}}}]
+        traces = [{"scenario": "combat", "data": {"functions": [{"path": "Weapon:Fire", "calls": 8,
+            "objects_truncated": True, "objects": [{"path": "weapon-1", "count": 3}, {"path": "unknown", "count": 5}]}]}}]
+        joined = report.trace_object_context(traces, instances)[0]["functions"][0]
+        self.assertTrue(joined["objects_truncated"])
+        self.assertEqual(joined["objects"][0]["weapon_type_at_dump"], "MeleeArsenalDev.WeaponTypes.Blade")
+        self.assertIsNone(joined["objects"][1]["weapon_type_at_dump"])
+        self.assertEqual(joined["objects"][1]["calls"], 5)
+
     def test_cap_recorded(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

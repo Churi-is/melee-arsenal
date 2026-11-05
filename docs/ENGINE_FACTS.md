@@ -151,3 +151,28 @@ callbacks even on the same native thread. A local C/pthread callback experiment
 reproduces that behavior; it does not prove the game uses exactly that path. RE
 Probe now retains bounded stacks by native thread identity and reports discarded
 and open frames. A new in-game run is needed to confirm whether this fixes drift.
+
+## Third RE Probe session: paired traces
+
+A follow-up with the revised tracer armed 28/28 combat hooks and 19/19 inventory
+hooks, with zero reported errors, stack drift, discarded frames or open frames.
+The captured sessions show these *observed* relationships:
+
+* `SharedFireAmmunition` → `ConsumeAmmo` and `InstantFire` (125 each), and
+  `InstantFire` → `FiringModeDefinitionFire` (120). The sampled weapon instances
+  show that 120 of the firing calls were a Lascaux SMG, while only 3 and 2 were
+  on sampled Bandit and Hyperion melee weapons. These are function-level object
+  counts, not per-object edge counts; the object definitions were captured at
+  dump time and could have changed. Do not infer all 125 shots were melee or
+  remove the fallback and dedup on this basis.
+* `SetItemCard` → `SetItemCardEx` (16); `SetItemCardEx` also entered from outside
+  the hooked set (430). `SetItemCardEx` → `SetCardUIStats` → `SetTopStat` and
+  `SetItemCardEx` → `SetTitle` / `SetFunStats` were observed. Both entry points
+  and nesting handling remain relevant; sampled calls include non-melee cards.
+* `InitializeFromDefinitionData` → `InitializeInternal` (19), and
+  `InitializeInternal` → `ChooseRandomNameParts` (8). This does not prove every
+  initialization path uses this chain or that any of the hooks are redundant.
+
+Trace arguments are PRE samples, capped per edge. A null caller can represent an
+unhooked or native entry point. These observations don't prove behavior in other
+maps, equipment, builds, multiplayer or throw/guard states.

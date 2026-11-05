@@ -67,6 +67,9 @@ negative engine evidence. Do not run another `reprobe start/trace` concurrently.
 
 The report embeds the manifest, raw matching records, counters and truncation
 flags, search terms, trace arm/stop/status metadata, sampled traces and snapshots.
+`trace_object_context` joins function-level object counts to sampled weapon
+definitions at dump time; it is not a per-edge count, and objects can change or
+paths be reused between the dump and trace. An unmatched object is unknown.
 It makes no automatic confirmed/refuted claims. Matching is against record
 identity, not all property text. Sections have explicit caps; raw shards remain
 available. RE Probe's default depth, array, instance, xref and property limits
