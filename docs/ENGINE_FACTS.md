@@ -136,3 +136,18 @@ The reflected `BalancedInventoryData` layout has `ItmPoolDefinition`,
 
 The captured traces had hook registration errors and stack drift; do not treat their
 call edges or unobserved functions as evidence until repeated with a corrected tracer.
+
+## Second RE Probe session
+
+All requested hooks installed without registration errors: 28 combat and 19
+inventory. Nevertheless, combat had 144 unmatched POST callbacks and inventory
+had 1,866 (equal to its PRE call count); the inventory trace had no edges. This
+is not usable call-graph evidence. Combat and UI call counts were observed, but
+neither missing calls nor reported caller/callee edges justify removing hooks.
+
+A plausible cause is Python `threading.local`: native SDK callbacks may enter
+Python with temporary thread states, so thread-local values can disappear between
+callbacks even on the same native thread. A local C/pthread callback experiment
+reproduces that behavior; it does not prove the game uses exactly that path. RE
+Probe now retains bounded stacks by native thread identity and reports discarded
+and open frames. A new in-game run is needed to confirm whether this fixes drift.

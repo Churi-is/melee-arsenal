@@ -6,7 +6,7 @@ honest way to answer "who calls this / what does it call" is to observe calls
 while the game runs.
 
 This tracer installs pyunrealsdk PRE + POST_UNCONDITIONAL hooks on a selected
-set of UFunctions.  A thread-local stack turns the hook pairs into edges:
+set of UFunctions.  A stack per native thread turns the hook pairs into edges:
 
     caller  ->  callee  (count, object, optional sampled args)
 
@@ -83,6 +83,7 @@ class CallTracer:
         self.samples = 0
         self.dropped_edges = 0
         self.stack_drift = 0
+        self.discarded_frames = 0
         self._pending: list[str] = []
         self._installed: list[tuple[str, str, str]] = []
         self._failed_hooks: list[dict[str, str]] = []
@@ -91,7 +92,7 @@ class CallTracer:
         self._hook_token = uuid.uuid4().hex
         self._edges: dict[tuple[str | None, str], _Edge] = {}
         self._functions: dict[str, _Function] = {}
-        self._local = threading.local()
+        self._stacks: dict[int, list[dict[str, Any]]] = {}
         self._lock = threading.RLock()
         self._path_cache: dict[int, str] = {}
         self._args_serializer = ValueSerializer(
@@ -121,7 +122,8 @@ class CallTracer:
         self.samples = 0
         self.dropped_edges = 0
         self.stack_drift = 0
-        self._local = threading.local()
+        self.discarded_frames = 0
+        self._stacks = {}
         self._hook_token = uuid.uuid4().hex
         self._pending = []
         self._installed = []
@@ -266,6 +268,8 @@ class CallTracer:
             "errors": self.errors,
             "dropped_edges": self.dropped_edges,
             "stack_drift": self.stack_drift,
+            "discarded_frames": self.discarded_frames,
+            "open_frames": sum(len(stack) for stack in self._stacks.values()),
             "hook_error": self._hook_error,
         }
 
@@ -303,6 +307,8 @@ class CallTracer:
                 "errors": self.errors,
                 "dropped_edges": self.dropped_edges,
                 "stack_drift": self.stack_drift,
+                "discarded_frames": self.discarded_frames,
+                "open_frames": sum(len(stack) for stack in self._stacks.values()),
             },
             "functions": [
                 {
@@ -353,6 +359,11 @@ class CallTracer:
             obj_path = api.path_of(obj) or ""
 
             stack = self._stack()
+            # Bound damage from unmatched PRE hooks or a reused native thread ID.
+            if len(stack) >= 256:
+                self.stack_drift += 1
+                self.discarded_frames += len(stack)
+                stack.clear()
             depth = len(stack)
             caller = stack[-1]["callee"] if stack else None
 
@@ -397,14 +408,22 @@ class CallTracer:
             for index in range(len(stack) - 1, max(-1, len(stack) - 9), -1):
                 if stack[index].get("callee") == callee:
                     frame = stack[index]
+                    abandoned = len(stack) - index - 1
+                    if abandoned:
+                        self.stack_drift += 1
+                        self.discarded_frames += abandoned
                     del stack[index:]
                     break
 
             if frame is None:
                 with self._lock:
                     self.stack_drift += 1
+                    self.discarded_frames += len(stack)
+                    stack.clear()
+                self._release_empty_stack(stack)
                 return None
 
+            self._release_empty_stack(stack)
             caller = frame.get("caller")
             depth = frame.get("depth", 0)
             elapsed = 0.0
@@ -452,11 +471,24 @@ class CallTracer:
     # -- internals ----------------------------------------------------------
 
     def _stack(self) -> list[dict[str, Any]]:
-        stack = getattr(self._local, "stack", None)
+        # SDK callbacks may enter Python via a fresh temporary Python thread state
+        # each time. threading.local() can therefore vanish between PRE and POST
+        # even on the same native thread. Store stacks by native thread identity.
+        ident = threading.get_ident()
+        stack = self._stacks.get(ident)
         if stack is None:
+            if len(self._stacks) >= 128:
+                oldest = next(iter(self._stacks))
+                self.discarded_frames += len(self._stacks.pop(oldest))
+                self.stack_drift += 1
             stack = []
-            self._local.stack = stack
+            self._stacks[ident] = stack
         return stack
+
+    def _release_empty_stack(self, stack: list[dict[str, Any]]) -> None:
+        ident = threading.get_ident()
+        if not stack and self._stacks.get(ident) is stack:
+            del self._stacks[ident]
 
     def _function_path(self, function: Any) -> str:
         if function is None:

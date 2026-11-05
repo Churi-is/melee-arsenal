@@ -85,3 +85,10 @@ installed function paths and registration failures. Stack drift can still occur
 when another mod blocks a call, so even a clean installation does not make an
 absent event or a call graph definitive. Please also compare item cards with a
 clearly better, worse and equal stat to check the corrected arrow mapping.
+
+If a prior report still showed large `stack_drift` despite all hooks arming,
+update RE Probe and restart the game before repeating the traces. The tracer now
+keeps bounded stacks keyed by native thread ID instead of Python thread-local
+storage. `discarded_frames` and `open_frames` in status and trace output help
+identify remaining unmatched or abandoned frames; neither is expected to stay
+high in a clean trace. This is a diagnostic change, not proof of call order.
