@@ -194,9 +194,9 @@ WANTED_CLASSES: dict[str, list[str]] = {
 # Structs whose field layout the mod relies on when constructing/cloning
 # definitions (resolver.py, definitions/balances.py, definitions/parts.py).
 WANTED_STRUCTS: list[str] = [
-    "WillowGame.WeaponDefinitionData",
-    "WillowGame.WeightedInventoryBalanceData",
-    "WillowGame.AttributeInitializationData",
+    "WillowGame.WillowWeaponTypes:WeaponDefinitionData",
+    "WillowGame.ItemPoolDefinition:BalancedInventoryData",
+    "Engine.AttributeInitializationDefinition:AttributeInitializationData",
     "WillowGame.ManufacturerCustomPartWeightData",
     "WillowGame.WeaponManufacturerGradeData",
     "Engine.Color",

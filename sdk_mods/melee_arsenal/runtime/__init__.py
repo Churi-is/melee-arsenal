@@ -30,7 +30,6 @@ from .combat import (
     on_weapon_instant_fire_pre,
     on_weapon_play_fire_effects_pre,
     on_weapon_reload_pre,
-    on_weapon_shared_fire_post,
     restore_all_arms_rest_transforms,
 )
 from .commands import (
@@ -351,7 +350,6 @@ HOOKS = [
     hook("WillowGame.WillowWeapon:FiringModeDefinitionFire", Type.PRE)(on_weapon_firing_mode_fire_pre),
     hook("WillowGame.WillowWeapon:PlayFireEffects", Type.PRE)(on_weapon_play_fire_effects_pre),
     hook("WillowGame.WillowLightProjectileManager:AddProj", Type.PRE)(on_light_projectile_add_proj_pre),
-    hook("WillowGame.WillowWeapon:SharedFireAmmunition", Type.POST)(on_weapon_shared_fire_post),
     hook("WillowGame.WillowWeapon:HasActiveAmmo", Type.PRE)(_on_has_active_ammo),
     hook("WillowGame.WillowWeapon:StartReload", Type.PRE)(on_weapon_reload_pre),
     hook("WillowGame.WillowAIPawn:TakeDamage", Type.POST)(on_ai_take_damage_post),
@@ -361,8 +359,6 @@ HOOKS = [
     hook("WillowGame.WillowWeapon:ClientStartZoom", Type.PRE)(on_melee_weapon_start_zoom_pre),
     hook("WillowGame.WillowWeapon:StopZoom", Type.PRE)(on_melee_weapon_stop_zoom_pre),
     hook("WillowGame.WillowWeapon:ClientStopZoom", Type.PRE)(on_melee_weapon_client_stop_zoom_pre),
-    hook("WillowGame.ItemCardGFxObject:SetItemCard", Type.PRE)(on_set_item_card_ex_pre),
-    hook("WillowGame.ItemCardGFxObject:SetItemCard", Type.POST)(on_set_item_card_ex_post),
     hook("WillowGame.ItemCardGFxObject:SetItemCardEx", Type.PRE)(on_set_item_card_ex_pre),
     hook("WillowGame.ItemCardGFxObject:SetTitle", Type.PRE)(on_set_title_pre),
     hook("WillowGame.ItemCardGFxObject:SetTopStat", Type.PRE)(on_set_top_stat_pre),

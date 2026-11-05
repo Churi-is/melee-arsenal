@@ -46,14 +46,18 @@ _ELEMENT_ICON: dict[Element, str] = {
 }
 
 
-# `SetTopStat`'s `CompareArrow` parameter is typed `ETopStatArrow`. That enum's value array is not
-# exposed by the SDK (`_names()` is absent on the enum object), so it cannot be read at run time;
-# the byte values below are what the card has always used and what the game accepts.
+# Stat-row IconName values are not always the same as SetTitle's ElementalIcon.
+# BL2 calls slag "Amp" in its elemental attribute presentation; elementSlag
+# is not a stat icon and can leave the previous row's movie-clip image visible.
+_STAT_ELEMENT_ICON: dict[Element, str] = {**_ELEMENT_ICON, Element.SLAG: "elementAmp"}
+
+
+# RE Probe reflected WillowGame.InventoryCardGFx:ETopStatArrow in BL2.
 _ARROW_BYTES: dict[CompareArrow, int] = {
     CompareArrow.NONE: 0,
     CompareArrow.BETTER: 1,
-    CompareArrow.EQUAL: 2,
-    CompareArrow.WORSE: 3,
+    CompareArrow.EQUAL: 3,
+    CompareArrow.WORSE: 2,
 }
 
 
@@ -113,7 +117,7 @@ def _apply_melee_card_override(gfx_obj: Any, ov: ActiveCardOverride) -> None:
 
     elem_sec = payload.elemental_section
     if elem_sec is not None:
-        e_icon = _ELEMENT_ICON.get(elem_sec.element, "")
+        e_icon = _STAT_ELEMENT_ICON.get(elem_sec.element, "")
         _call_set_top_stat(
             gfx_obj,
             3,
@@ -155,7 +159,7 @@ def _apply_melee_card_override(gfx_obj: Any, ov: ActiveCardOverride) -> None:
 # Engine Hook Callbacks
 
 def on_set_item_card_ex_pre(obj: Any, args: Any, ret: Any, func: Any) -> Any:
-    """Begin Melee Item Card override (`SetItemCard` or `SetItemCardEx`)."""
+    """Begin the override at SetItemCardEx, the shared card-rendering entry point."""
     existing = _ACTIVE_CARDS.get(cache_key(obj))
     if existing is not None:
         existing.depth += 1

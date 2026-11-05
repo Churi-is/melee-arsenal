@@ -92,10 +92,10 @@ def build_findings(dump_dir: str, trace_path: str | None = None) -> dict[str, An
                     for e in (traces_result.get("wanted") or [])
                 )
                 if bool(f and f.get("found")):
-                    status = "CONFIRMED"
-                    evidence.append("PlayerTick resolves as a UFunction")
+                    status = "PARTIAL"
+                    evidence.append("PlayerTick resolves as a UFunction; reliability and exclusivity are not established by reflection")
                     if pt_called:
-                        evidence.append(f"observed {f.get('calls')} calls in trace")
+                        evidence.append("PlayerTick was observed in the trace")
                     if gv_called:
                         status = "PARTIAL"
                         evidence.append("GameViewportClient:Tick IS called (contradicts 0-claim)")
@@ -115,8 +115,8 @@ def build_findings(dump_dir: str, trace_path: str | None = None) -> dict[str, An
                 present = all(bool(_wanted_fn(functions_result, x) and _wanted_fn(functions_result, x).get("found")) for x in fns)
                 observed = all(_trace_called(traces_result, x) for x in fns) if traces_result else False
                 if present and observed:
-                    status = "CONFIRMED"
-                    evidence.append("all four zoom functions resolve and were observed called")
+                    status = "PARTIAL"
+                    evidence.append("all four resolve and were observed; this does not establish which are necessary")
                 elif present:
                     status = "PARTIAL"
                     evidence.append("all four resolve; not all observed in this trace session")
@@ -138,10 +138,10 @@ def build_findings(dump_dir: str, trace_path: str | None = None) -> dict[str, An
                 f = _wanted_fn(functions_result, target) if target else None
                 if target and f and f.get("found"):
                     called = _trace_called(traces_result, target) if traces_result else None
-                    status = "CONFIRMED" if called else "PARTIAL"
+                    status = "PARTIAL"
                     evidence.append(f"{target} resolves: {f.get('display_signature')}")
                     if called is True:
-                        evidence.append(f"observed {f.get('calls')} calls in trace")
+                        evidence.append("observed in trace; calls may involve non-melee objects and do not establish hook necessity")
                     elif called is False:
                         evidence.append("defined but not observed in this trace session")
                 else:
@@ -189,19 +189,19 @@ def build_findings(dump_dir: str, trace_path: str | None = None) -> dict[str, An
                     status = "REFUTED"
                     evidence = [f"unexpectedly present on {class_path}: {', '.join(found_p)}"]
                 else:
-                    status = "CONFIRMED"
-                    evidence = [f"none of {props} exist on {class_path} (negative assertion confirmed)"]
+                    status = "UNVERIFIED"
+                    evidence = [f"none of {props} were found in reflected properties of {class_path}; native or unexposed members may still exist"]
 
         elif cat == "structs":
             structs_result = classes_result  # structs are inside the classes report
             target = {
-                "STRUCT-DEFINITIONDATA": "WillowGame.WeaponDefinitionData",
-                "STRUCT-WEIGHTEDROW": "WillowGame.WeightedInventoryBalanceData",
+                "STRUCT-DEFINITIONDATA": "WillowGame.WillowWeaponTypes:WeaponDefinitionData",
+                "STRUCT-WEIGHTEDROW": "WillowGame.ItemPoolDefinition:BalancedInventoryData",
             }[aid]
             found_struct = False
             present_fields: list[str] = []
             for entry in (structs_result.get("structs") or []):
-                if entry.get("path") == target:
+                if entry.get("path") == target and entry.get("found"):
                     found_struct = True
                     present_fields = [p.get("name") for p in (entry.get("properties") or [])]
                     break
@@ -209,20 +209,22 @@ def build_findings(dump_dir: str, trace_path: str | None = None) -> dict[str, An
                 want = [
                     "WeaponTypeDefinition", "BalanceDefinition", "ManufacturerDefinition",
                     "ManufacturerGradeIndex", "BodyPartDefinition", "GripPartDefinition",
-                    "BarrelPartDefinition", "ElementalPartDefinition", "Accessory1PartDefinition",
+                    "BarrelPartDefinition", "SightPartDefinition", "StockPartDefinition", "ElementalPartDefinition", "Accessory1PartDefinition",
                     "Accessory2PartDefinition", "MaterialPartDefinition", "PrefixPartDefinition",
                     "TitlePartDefinition", "GameStage", "UniqueId",
                 ]
             else:
-                want = ["InvBalanceDefinition", "ItmPoolDefinition", "Probability", "Manufacturer", "DefaultWeightIndex", "MinGameStageIndex", "MaxGameStageIndex"]
+                want = ["InvBalanceDefinition", "ItmPoolDefinition", "Probability", "bDropOnDeath"]
             if not found_struct:
-                status = "REFUTED"
+                status = "UNVERIFIED"
                 evidence.append(f"{target} struct not in dump")
             else:
                 missing = [p for p in want if p not in present_fields]
                 if not missing:
-                    status = "CONFIRMED"
-                    evidence.append(f"{target} layout confirmed: {', '.join(want)}")
+                    status = "PARTIAL" if aid == "STRUCT-WEIGHTEDROW" else "CONFIRMED"
+                    evidence.append(f"{target} layout reflected: {', '.join(want)}")
+                    if aid == "STRUCT-WEIGHTEDROW":
+                        evidence.append("Manufacturer fields and native selection behavior are not established by this layout.")
                 else:
                     status = "PARTIAL"
                     evidence.append(f"{target} partial: missing {', '.join(missing)}")
@@ -230,16 +232,16 @@ def build_findings(dump_dir: str, trace_path: str | None = None) -> dict[str, An
         elif cat == "enums":
             rec = None
             for e in (enums_result.get("enums") or []):
-                if e.get("path") == "WillowGame.ETopStatArrow":
+                if e.get("path") == "WillowGame.InventoryCardGFx:ETopStatArrow":
                     rec = e
                     break
             if not rec or not rec.get("found"):
-                status = "REFUTED"
+                status = "UNVERIFIED"
                 evidence.append("ETopStatArrow enum not in dump")
             else:
                 amap = {v["name"]: v["value"] for v in (rec.get("values") or [])}
-                expected = {"NONE": 0, "BETTER": 1, "EQUAL": 2, "WORSE": 3}
-                if amap == expected:
+                expected = {"ETSA_Blank": 0, "ETSA_Up": 1, "ETSA_Down": 2, "ETSA_Same": 3}
+                if all(amap.get(name) == value for name, value in expected.items()):
                     status = "CONFIRMED"
                     evidence.append(f"byte mapping matches mod: {amap}")
                 else:
@@ -265,21 +267,17 @@ def build_findings(dump_dir: str, trace_path: str | None = None) -> dict[str, An
                 evidence.append("none of the wanted paths found")
 
         elif cat == "values":
-            total = values_result.get("defaults_checked", 0)
-            found = values_result.get("defaults_found", 0)
-            if found == total and total:
-                status = "CONFIRMED"
-                evidence.append(f"all {total} wanted CDO defaults present")
-            elif found:
-                status = "PARTIAL"
-                evidence.append(f"{found}/{total} wanted defaults present")
-            else:
-                status = "REFUTED"
-                evidence.append("no wanted CDO defaults found (defaults section empty?)")
+            status = "UNVERIFIED"
+            evidence.append("Generic CDO coverage does not evaluate the specific pool or initialization weights; inspect sampled live values.")
 
         elif cat == "trace":
             status = "UNVERIFIED"
-            evidence.append("trace not supplied — run `reprobe trace ...` then pass trace-*.json")
+            if traces_result is None:
+                evidence.append("No trace supplied; capture focused scenarios and pass a trace file.")
+            else:
+                session = traces_result.get("session") or {}
+                evidence.append(f"Trace contains {traces_result.get('edges_total', 0)} observed edges; inspect objects, coverage, errors and drift before interpreting them.")
+                evidence.append(f"Trace errors={session.get('errors', 'unknown')}, stack_drift={session.get('stack_drift', 'unknown')}, dropped_edges={session.get('dropped_edges', 'unknown')}.")
 
         findings.append(
             {

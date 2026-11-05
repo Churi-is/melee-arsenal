@@ -12,3 +12,8 @@ build/
 /sdk_mods/melee_arsenal/upk/
 .bl2_dir
 
+
+# In-game research outputs can be very large and contain session data
+/sdk_mods/melee_research/results/
+/sdk_mods/re_probe /dumps/
+/sdk_mods/re_probe/dumps/

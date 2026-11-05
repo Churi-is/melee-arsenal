@@ -5,18 +5,20 @@ from __future__ import annotations
 from typing import Any
 
 from . import api
+from .hook_registration import install
 from .dump import DumpJob, DumpSettings
 from .trace import CallTracer, TraceSettings
 
 try:  # pragma: no cover - only outside the game
     from unrealsdk.commands import add_command, remove_command  # type: ignore[import-not-found]
-    from unrealsdk.hooks import Type, add_hook, remove_hook  # type: ignore[import-not-found]
+    from unrealsdk.hooks import Type, add_hook, has_hook, remove_hook  # type: ignore[import-not-found]
 except Exception:  # pragma: no cover
     add_command = None  # type: ignore[assignment]
     remove_command = None  # type: ignore[assignment]
     Type = None  # type: ignore[assignment]
     add_hook = None  # type: ignore[assignment]
     remove_hook = None  # type: ignore[assignment]
+    has_hook = None  # type: ignore[assignment]
 
 TICK_HOOKS: tuple[str, ...] = (
     # PlayerTick is the cheapest reliable tick driver in BL2 (the mod guide in
@@ -46,11 +48,11 @@ class ProbeState:
             return
         self.enabled = True
 
-        if Type is not None and add_hook is not None:
+        if Type is not None and add_hook is not None and has_hook is not None and remove_hook is not None:
             for index, path in enumerate(TICK_HOOKS):
                 identifier = f"re_probe.tick.{index}"
                 try:
-                    if add_hook(path, Type.POST_UNCONDITIONAL, identifier, self._on_tick):
+                    if install(add_hook, has_hook, remove_hook, path, Type.POST_UNCONDITIONAL, identifier, self._on_tick):
                         self._tick_ids.append((path, identifier))
                 except Exception as exc:
                     api.exception(f"could not install tick hook {path}", exc)

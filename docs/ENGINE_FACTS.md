@@ -35,8 +35,9 @@ Rarity, TypeIcon, ElementalIcon, bIsReadied)`.
 
 * `SetTitle`'s **`Rarity` is a `Color` struct** (`{B: 0, G: 180, R: 255, A: 255}`), not a 1-based
   level. Nothing can turn it into an integer, so the mod renders the engine's colour unchanged.
-* `CompareArrow` is typed **`ETopStatArrow`**, and that enum's value array is not exposed by the SDK
-  (no `_names()`), so the byte mapping is the literal `0/1/2/3`.
+* `CompareArrow` is typed **`ETopStatArrow`**. RE Probe reflected
+  `WillowGame.InventoryCardGFx:ETopStatArrow`: blank=0, up=1, down=2, same=3.
+  An earlier guess had down and same reversed; the item-card mapping now uses the reflected values.
 * `TypeIcon` values are capitalised: `Pistol`.
 * Stat icons, by card slot: `0 weaponDamage`, `1 weaponAccuracy`, `2 weaponFireRate`,
   `3 weaponsReloadSpeed`, `4 weaponClipSize`, `5/6 element<Element>` — `elementCorrosive` and
@@ -75,7 +76,7 @@ Two consequences that are easy to get wrong:
 
 ## Pool entries and weights
 
-`ItemPoolDefinition.BalancedItems` holds `WeightedInventoryBalanceData` rows whose payload fields are
+`ItemPoolDefinition.BalancedItems` holds `WillowGame.ItemPoolDefinition:BalancedInventoryData` rows whose payload fields are
 `InvBalanceDefinition` (a balance or an item definition) and `ItmPoolDefinition` (a nested pool) —
 not `Item`. Each row's `Probability` is an `AttributeInitializationData` with exactly
 `BaseValueConstant`, `BaseValueAttribute`, `BaseValueScaleConstant`, `InitializationDefinition`.
@@ -114,8 +115,78 @@ Measured facts do not make the mod brave everywhere. These are genuinely variabl
 * **Save/sidecar restore** — the item you get back was written by an older build of the mod.
 * **Map-load ordering** — packages finish loading at unpredictable times, which is why the pool sync
   is idempotent and re-runs on map change.
-* **Field writes on structs** (`WeightedInventoryBalanceData` rows, manufacturer weight rows,
-  `ManufacturerCustomPartWeightData`) — those layouts were not dumped field by field, so the guards
-  around them stay until they are.
+* **Field writes on structs** (`BalancedInventoryData` rows, manufacturer weight rows,
+  `ManufacturerCustomPartWeightData`) — reflection confirms the pool row layout, but not
+  safe writes or native behavior. Manufacturer layouts and behavior need more evidence.
 * **`load_package` for the damage-type packages.** Those packages being loaded is a *consequence* of
   this call, not an independent fact, so it stays.
+
+## RE Probe follow-up (2026-11-05)
+
+A full dump with Melee Arsenal enabled captured five `Pool_Weapons_All_*` objects. Each
+contained six class entries with weights 100, 80, 80, 80, 55 and 20 (total **415**).
+Four also contained an injected melee entry of about 63.846. These are live, possibly
+hotfixed values, not proof of every pool or its pristine state. The mod retains 520 as
+the slider reference denominator, while measuring each pool separately; changing that
+constant would change the slider behavior.
+
+The reflected `BalancedInventoryData` layout has `ItmPoolDefinition`,
+`InvBalanceDefinition`, `Probability` and `bDropOnDeath`; the previously used name
+`WeightedInventoryBalanceData` was incorrect for these rows.
+
+The captured traces had hook registration errors and stack drift; do not treat their
+call edges or unobserved functions as evidence until repeated with a corrected tracer.
+
+## Second RE Probe session
+
+All requested hooks installed without registration errors: 28 combat and 19
+inventory. Nevertheless, combat had 144 unmatched POST callbacks and inventory
+had 1,866 (equal to its PRE call count); the inventory trace had no edges. This
+is not usable call-graph evidence. Combat and UI call counts were observed, but
+neither missing calls nor reported caller/callee edges justify removing hooks.
+
+A plausible cause is Python `threading.local`: native SDK callbacks may enter
+Python with temporary thread states, so thread-local values can disappear between
+callbacks even on the same native thread. A local C/pthread callback experiment
+reproduces that behavior; it does not prove the game uses exactly that path. RE
+Probe now retains bounded stacks by native thread identity and reports discarded
+and open frames. A new in-game run is needed to confirm whether this fixes drift.
+
+## Third RE Probe session: paired traces
+
+A follow-up with the revised tracer armed 28/28 combat hooks and 19/19 inventory
+hooks, with zero reported errors, stack drift, discarded frames or open frames.
+The captured sessions show these *observed* relationships:
+
+* `SharedFireAmmunition` → `ConsumeAmmo` and `InstantFire` (125 each), and
+  `InstantFire` → `FiringModeDefinitionFire` (120). The sampled weapon instances
+  show that 120 of the firing calls were a Lascaux SMG, while only 3 and 2 were
+  on sampled Bandit and Hyperion melee weapons. These are function-level object
+  counts, not per-object edge counts; the object definitions were captured at
+  dump time and could have changed. Do not infer all 125 shots were melee. In the sampled objects, both melee weapons
+  took the same shared-fire → instant-fire path. The separate shared-fire POST
+  fallback and shot-sequence dedup have now been removed; untested alternate
+  firing paths are a regression risk and should be checked in game.
+* `SetItemCard` → `SetItemCardEx` (16); `SetItemCardEx` also entered from outside
+  the hooked set (430). `SetItemCardEx` → `SetCardUIStats` → `SetTopStat` and
+  `SetItemCardEx` → `SetTitle` / `SetFunStats` were observed. Both direct and nested `SetItemCardEx` calls enter the same rendering pipeline;
+  the mod now hooks only that entry point and keeps a depth guard for reentrant
+  `SetItemCardEx` calls. Sampled calls include non-melee cards.
+* `InitializeFromDefinitionData` → `InitializeInternal` (19), and
+  `InitializeInternal` → `ChooseRandomNameParts` (8). This does not prove every
+  initialization path uses this chain or that any of the hooks are redundant.
+
+Trace arguments are PRE samples, capped per edge. A null caller can represent an
+unhooked or native entry point. These observations don't prove behavior in other
+maps, equipment, builds, multiplayer or throw/guard states.
+
+## Runtime simplifications based on the paired trace
+
+The melee primary attack now runs only from `InstantFire` PRE; the backup
+`SharedFireAmmunition` POST hook, global shot counter and dedup state are gone.
+`ConsumeAmmo` still refills the magazine and clears semi-auto pending fire, and
+`InstantFire` still blocks firing while a thrown blade is airborne. The item-card
+override now starts/finishes at `SetItemCardEx` rather than also hooking its
+observed wrapper `SetItemCard`. Check equipped and pickup cards, both guard and
+throw weapons, semi-auto and automatic swings, and attacking during/after a
+throw. Native/other mod paths absent from this trace could still differ.
