@@ -57,7 +57,7 @@ a catchable Python exception. Function existence is checked with `find_object` /
 | `probe_dump` | everything below, one JSON + one review sheet |
 | `probe_schema` | which UFunctions exist, their real parameter names, class/struct/enum layouts, class-default values (no gameplay needed) |
 | `probe_assets` | every loaded `ParticleSystem` / `AkEvent` / `CameraAnim` / `ImpactDefinition` / `DamageTypeDefinition` path, firing-mode behaviour graphs, loot pools with weights, `AttributeInitializationDefinition` constants |
-| `probe_live` | current pawn, held weapon, `Pawn.Arms` mesh, `AnimNodeSlot` node names, melee animation sequences, material-array shape, victim class names, Tediore `Behavior_SpawnProjectile` providers |
+| `probe_live` | current pawn, held weapon, `Pawn.Arms` mesh, per-name `hasattr` results on the live definitions (measured class names), `AnimNodeSlot` node names, melee animation sequences, material-array shape, victim class names, Tediore `Behavior_SpawnProjectile` providers |
 | `probe_census` | per-hook call counts, call order, first-call argument dumps, frame cadence, and per-group verdicts |
 | `probe_reset` | clear the counters and measure again |
 | `probe_plan` | which census hooks resolve on this build, and which are already known-dead |
@@ -71,7 +71,7 @@ a catchable Python exception. Function existence is checked with `find_object` /
 | probe section | runtime code it lets you delete or flatten |
 | --- | --- |
 | `schema.functions` / `census.groups` | duplicate hooks for one intent (`Engine.GameViewportClient:Tick` + `PlayerTick`, `StartZoom` + `ClientStartZoom`, `SetItemCard` + `SetItemCardEx`), the per-frame de-duplication guard, `getattr(args, …)` parameter probing |
-| `schema.classes` | the ~890 lines of `if hasattr(obj, "X"): try: setattr(...) except: pass` in `definitions/`, plus `_clear_array_prop` / `_zero_vector_struct` guessers |
+| `schema.classes` (`name_source=measured`) | the class-name *guesses* that make those dumps empty (`WillowWeaponTypeDefinition`, `WillowWeaponBalanceDefinition` are not the real names), then the ~890 lines of `if hasattr(obj, "X"): try: setattr(...) except: pass` in `definitions/`, plus `_clear_array_prop` / `_zero_vector_struct` guessers |
 | `schema.enums` | `ui_item_card._discover_compare_enum` reflection + substring matching |
 | `schema.structs` | `loot_pools` `AttributeInitializationData` field probing, `resolver` struct-name reflection |
 | `assets.catalogues` | `resources._score_explosion_ps_path` / `_score_explosion_ak_path` / `_cache_torgue_explosion_assets` (141 lines) and the `or _safe_find(…)` candidate chains |
@@ -80,6 +80,7 @@ a catchable Python exception. Function existence is checked with `find_object` /
 | `live.arms` | `_get_arms_anim_slots` global scan, the `("Bladed_Melee", "Melee")` retry loop, `_POSE_KIND` fallback branching |
 | `live.held_weapon.mesh` | `secondary_vfx._material_of` / `_fallback_material` entry-shape guessing |
 | `live.world_actors` | `attacks.is_target_dummy` path matching, `is_valid_melee_victim` substring class checks |
+| `live.guards` | anything guarded on an object the runtime actually holds: `pose.py`'s `hasattr(sm, "RotOrigin")`, the `weapon_types.py` / `balances.py` preview blocks, part/name-part clearing |
 | `live.item_card_observed` | `observed_icons` / `observed_elem_icon` learning and `_ELEMENT_ICON_FALLBACK` |
 | `live.frame_cadence` | `_DEFERRED_STEP_TICKS`, `_MISSION_RESTORE_TICKS`, `% 30` / `% 60` / `>= 90` magic numbers, replaced by real milliseconds |
 

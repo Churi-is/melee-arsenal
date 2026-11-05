@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import common
+from . import common, live
 from .common import (
     describe_value,
     enum_names,
@@ -172,13 +172,31 @@ def probe_functions() -> dict[str, Any]:
     return result
 
 
+def class_targets() -> dict[str, str]:
+    """`CLASS_TARGETS`, overridden with the class names measured on live objects.
+
+    Guessed names are the weak link here: `WillowWeaponTypeDefinition` and
+    `WillowWeaponBalanceDefinition` do not exist, so those two dumps were empty while the runtime
+    guards dozens of names on them. Whatever the game reports for `obj.Class` is the truth.
+    """
+    targets = dict(CLASS_TARGETS)
+    for logical, cls_name in live.discovered_class_names().items():
+        targets[logical] = cls_name
+    return targets
+
+
 def probe_classes() -> dict[str, Any]:
     """Property list + class-default values for every class the runtime touches."""
     result: dict[str, Any] = {}
-    for logical, cls_name in CLASS_TARGETS.items():
+    measured = live.discovered_class_names()
+    for logical, cls_name in class_targets().items():
         cls_obj = find_class(cls_name)
 
-        record: dict[str, Any] = {"class": cls_name, "found": cls_obj is not None}
+        record: dict[str, Any] = {
+            "class": cls_name,
+            "found": cls_obj is not None,
+            "name_source": "measured" if measured.get(logical) == cls_name else "declared",
+        }
         if cls_obj is None:
             result[logical] = record
             continue

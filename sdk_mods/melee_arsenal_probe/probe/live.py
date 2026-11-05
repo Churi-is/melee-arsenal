@@ -316,6 +316,111 @@ def _spawn_projectile_behaviour_providers() -> dict[str, Any]:
     return {"count": len(providers), "providers": providers}
 
 
+# Names the runtime wraps in `hasattr(obj, ...)` / `getattr(obj, name, default)`. A class's
+# declared property list is not the same thing as "readable on this object": inherited members
+# (`Arms` is declared on `WillowPlayerPawn`, not `WillowPawn`) and native ones (`RotOrigin`,
+# `PlayAkEvent`) never show up there even though reading them works. So each name is tested
+# directly against the live object the runtime would touch.
+GUARDED_NAMES: dict[str, tuple[str, ...]] = {
+    "pawn": ("Arms", "Weapon", "Mesh", "PendingWeapon", "PlayAkEvent", "Location"),
+    "arms_component": (
+        "RotOrigin", "Origin", "Rotation", "Translation", "ForceUpdate", "PlayAkEvent",
+        "Materials", "SkeletalMesh", "AnimSets",
+    ),
+    "weapon": (
+        "Mesh", "DefinitionData", "WeaponTypeDefinition", "CurrentFiringModeDefinition",
+        "PlayAkEvent", "bCanBeUsed", "InstantHitDamage", "ProjectilesPerShot", "ClipSize",
+    ),
+    "weapon_type": (
+        "Presentation", "UIMeshRotation", "bUIMeshRotationNeedsTransformFixup", "FocusRadius",
+        "MinimumVerticalPercentage", "MinimumHorizontalPercentage", "ThirdPersonMeshScale",
+        "FireShake", "WeaponMesh", "LeftHandSocketName", "RightHandSocketName", "WeaponCardType",
+    ),
+    "weapon_balance": (
+        "MinGameStageIndex", "MaxGameStageIndex", "GameStageRequirement", "Rarity",
+        "AttributeStartingValues", "CustomPresentations",
+    ),
+    "weapon_part": (
+        "WeaponAttributeEffects", "ExternalAttributeEffects", "AttributeSlotEffects",
+        "AttributeSlotUpgrades", "ZoomFirstPersonHandsIdleAnimations", "CustomFiringModeDefinition",
+        "Material", "GestaltModeSkeletalMeshName", "AdditionalGestaltModeSkeletalMeshNames",
+        "ManufacturerDefinitionForScopeMovie", "CustomDamageTypeDefinition",
+    ),
+    "weapon_name_part": ("PartName", "bNameIsUnique", "CustomPresentations", "CustomFiringModeDefinition"),
+}
+
+_MISSING = object()
+
+
+def _class_name(obj: Any) -> str:
+    return str(safe_get(safe_get(obj, "Class", None), "Name", "") or "")
+
+
+def runtime_objects() -> dict[str, Any]:
+    """The live definitions the runtime reaches for, keyed like `GUARDED_NAMES`."""
+    pc = local_player_controller()
+    pawn = safe_get(pc, "Pawn", None) if pc is not None else None
+    weapon = safe_get(pawn, "Weapon", None) if pawn is not None else None
+    definition_data = safe_get(weapon, "DefinitionData", None) if weapon is not None else None
+    weapon_type = safe_get(definition_data, "WeaponTypeDefinition", None) if definition_data is not None else None
+    return {
+        "player_controller": pc,
+        "pawn": pawn,
+        "arms_component": safe_get(pawn, "Arms", None) if pawn is not None else None,
+        "weapon": weapon,
+        "weapon_type": weapon_type,
+        "weapon_balance": safe_get(definition_data, "BalanceDefinition", None) if definition_data is not None else None,
+        "weapon_part": safe_get(definition_data, "BarrelPartDefinition", None) if definition_data is not None else None,
+        "weapon_name_part": (
+            safe_get(definition_data, "PrefixPartDefinition", None)
+            or safe_get(definition_data, "TitlePartDefinition", None)
+        ) if definition_data is not None else None,
+        "card_presentation": safe_get(weapon_type, "Presentation", None) if weapon_type is not None else None,
+    }
+
+
+def discovered_class_names() -> dict[str, str]:
+    """Real class names, read off live objects instead of guessed.
+
+    Guessing (`WillowWeaponTypeDefinition`, `WillowWeaponBalanceDefinition`) is why the property
+    dumps for the two files that need them most (`definitions/weapon_types.py`,
+    `definitions/balances.py`) came back empty: BL2 names those classes differently.
+    """
+    out: dict[str, str] = {}
+    for logical, obj in runtime_objects().items():
+        name = _class_name(obj) if obj is not None else ""
+        if name:
+            out[logical] = name
+    return out
+
+
+def guard_report() -> dict[str, Any]:
+    """`hasattr` per guarded name, answered on the live object rather than the class."""
+    objects = runtime_objects()
+    out: dict[str, Any] = {}
+    for logical, names in GUARDED_NAMES.items():
+        obj = objects.get(logical)
+        if obj is None:
+            out[logical] = {"found": False}
+            continue
+        present: list[str] = []
+        missing: list[str] = []
+        for name in names:
+            try:
+                value = getattr(obj, name, _MISSING)
+            except Exception:
+                value = _MISSING
+            (missing if value is _MISSING else present).append(name)
+        out[logical] = {
+            "found": True,
+            "class": _class_name(obj),
+            "path": obj_path(obj),
+            "present": present,
+            "missing": missing,
+        }
+    return out
+
+
 # Entry point -------------------------------------------------------------------------------
 
 
@@ -331,6 +436,8 @@ def probe_live() -> dict[str, Any]:
         "world_actors": _world_actors(),
         "spawn_projectile_providers": _spawn_projectile_behaviour_providers(),
         "item_card_observed": census.snapshot().get("item_card", {}),
+        "guards": guard_report(),
+        "discovered_classes": discovered_class_names(),
     }
     if not live["player"].get("found"):
         live["note"] = "Not in a map (or no local player yet): load a character and run again."

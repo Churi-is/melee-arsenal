@@ -144,8 +144,29 @@ TARGETS: list[dict[str, Any]] = [
         "saves": 70,
         "resolves": [
             "runtime/ui_item_card.py observed_icons / observed_elem_icon dynamic learning",
+            "runtime/ui_item_card.py element icons for slots 5/6 (`item_card.icon_by_slot`)",
             "runtime/ui_item_card.py _ELEMENT_ICON_FALLBACK table",
             "runtime/ui_item_card.py `or \"pistol\"` / `or \"\"` argument defaults",
+        ],
+    },
+    {
+        "section": "live.guards",
+        "question": "Is `<name>` readable on the live object, or is that `hasattr` guard load-bearing?",
+        "saves": 400,
+        "resolves": [
+            "runtime/definitions/weapon_types.py `apply_ui_preview_settings_to_all_wts` guard block",
+            "runtime/definitions/balances.py guard block",
+            "runtime/combat/pose.py `hasattr(sm, \"RotOrigin\")` / `hasattr(sm, \"Origin\")` guards",
+            "runtime/definitions/name_parts.py preview / part-clearing guards",
+        ],
+    },
+    {
+        "section": "schema.classes (name_source=measured)",
+        "question": "What are the real class names of the definitions the runtime patches?",
+        "saves": 120,
+        "resolves": [
+            "runtime/definitions/weapon_types.py and balances.py class-name guesses",
+            "probe schema.CLASS_TARGETS entries that resolve to nothing",
         ],
     },
     {
