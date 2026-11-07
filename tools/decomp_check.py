@@ -1,0 +1,471 @@
+#!/usr/bin/env python3
+"""Read a decom_bl2 output tree and answer melee-arsenal's static-only questions.
+
+Stdlib only. Point it at the decom_bl2 `out/` directory (or straight at the
+Ghidra `index.csv`) and it will:
+
+  pseudo  list the functions whose pseudocode matters to this mod, grouped by
+          why they matter, with the file each one lives in
+  show    dump the pseudocode for one function (or a group of them)
+  uc      pull the facts that only the recovered UnrealScript knows:
+          exact function signatures, which functions are native, status-effect
+          attribute names, rarity weight constants, part-selection entry points
+  find    just report where index.csv / pseudocode / script live
+
+Covers the gaps in tools/re_probe_parse that a live reflection dump cannot
+close:
+
+  HOOK-SHAREDFIRE       does SharedFireAmmunition reach InstantFire?
+  HOOK-ZOOM-QUAD        are all four zoom entry points real?
+  HOOK-SAVE-AND-MISSION what does ValidateWeaponDefinition actually skip?
+  STRUCT-WEIGHTEDROW    native ChooseRandomParts weight rule
+  PROP-POOL / VALUE-*   real pool weights and rarity constants
+  damage.py             the true TakeDamage parameter name (replaces the
+                        five-name guess in _TAKE_DAMAGE_AMOUNT_FIELDS) and the
+                        four-name guess in _STATUS_CHANCE_FIELDS
+
+Usage:
+  python3 decomp_check.py find   ~/Downloads/decom_bl2-1.3.2/out
+  python3 decomp_check.py pseudo ~/Downloads/decom_bl2-1.3.2/out
+  python3 decomp_check.py show   ~/Downloads/decom_bl2-1.3.2/out TakeDamage
+  python3 decomp_check.py uc     ~/Downloads/decom_bl2-1.3.2/out signature TakeDamage
+  python3 decomp_check.py uc     ~/Downloads/decom_bl2-1.3.2/out native WillowWeapon
+"""
+from __future__ import annotations
+
+import argparse
+import csv
+import os
+import re
+import sys
+from pathlib import Path
+
+MAX_ROWS = 40
+MAX_SHOW_LINES = 300
+
+# Why do we care? Group -> function-name substrings (case-insensitive).
+GROUPS: dict[str, tuple[str, ...]] = {
+    # The block-and-recall in runtime/combat/damage.py: is re-entering
+    # TakeDamage safe, and where is the cleaner interception point?
+    "damage": (
+        "TakeDamage",
+        "DisplayRecentDamage",
+        "CauseDamage",
+        "AdjustDamage",
+        "ModifyDamage",
+        "ApplyDamage",
+    ),
+    # STRUCT-WEIGHTEDROW: "native ChooseRandomParts substitutes flat weight 100
+    # when Manufacturers is empty" -- and the out-of-range grade path.
+    "parts": (
+        "ChooseRandomParts",
+        "ChooseParts",
+        "InitializeParts",
+        "BuildParts",
+        "ApplyPartList",
+    ),
+    # core/stats.py apply_bl2_modifiers reimplements PreAdd -> Scale -> PostAdd,
+    # and GUN_DAMAGE_L0_CONSTANT / BL2_LEVEL_GROWTH are guesses.
+    "attributes": (
+        "EvaluateExpression",
+        "AttributeInit",
+        "AttributeExpression",
+        "EvaluateAttribute",
+        "GetAttributeValue",
+        "ApplyAttribute",
+    ),
+    "hooks": (
+        "InstantFire",
+        "SharedFireAmmunition",
+        "ConsumeAmmo",
+        "HasActiveAmmo",
+        "StartZoom",
+        "StopZoom",
+        "ValidateWeaponDefinition",
+        "ApplyWeaponSaveGameData",
+        "ServerGrantMissionRewards",
+        "SetItemCard",
+        "SetBottomStat",
+        "PlaceSpawnedItems",
+        "ResetInventory",
+    ),
+}
+
+# Facts the .uc tree can answer directly. name -> regex over the script tree.
+UC_CHECKS: dict[str, str] = {
+    # kills the five-name guess in damage.py:_TAKE_DAMAGE_AMOUNT_FIELDS
+    # prefix match: "TakeDamage" also finds TakeDamageInternal, which is usually
+    # where the real work (and the clean interception point) lives
+    "signature": r"function\s+{pat}[A-Za-z0-9_]*\s*\(",
+    # which hooked functions are native (pseudocode) vs script (.uc body)?
+    "native": (
+        r"(?:\b(?:final|simulated|static|private|protected|public)\s+)*"
+        r"\bnative\s+(?:\b(?:final|simulated|static)\s+)*function\s+{pat}"
+    ),
+    # kills the four-name guess in damage.py:_STATUS_CHANCE_FIELDS
+    "status-chance": r"\b{pat}[A-Za-z]*",
+    "weights": r"\b{pat}\b",
+    "parts": r"{pat}",
+    # substring match: StartZoom and ClientStartZoom both matter (HOOK-ZOOM-QUAD)
+    "zoom": r"function\s+[A-Za-z0-9_]*{pat}[A-Za-z0-9_]*\s*\(",
+    "itemcard": r"function\s+[A-Za-z0-9_]*{pat}[A-Za-z0-9_]*\s*\(",
+}
+
+STATUS_CHANCE_NAMES = (
+    "BaseStatusEffectChanceModifier",
+    "StatusEffectChanceModifier",
+    "StatusEffectDamage",
+    "InstigatedMeleeDamageAdded",
+    "MeleeDamage",
+    "MeleeModifier",
+)
+
+WEIGHT_NAMES = (
+    "Weight_0_VeryCommon",
+    "Weight_1_Common",
+    "Weight_2_Uncommon",
+    "Weight_3_Uncommoner",
+    "Weight_4_Rare",
+    "Weight_5_VeryRare",
+    "Weight_6_Legendary",
+)
+
+
+# --------------------------------------------------------------------------- #
+# locating the artifacts
+# --------------------------------------------------------------------------- #
+def _walk(root: Path, pattern: str) -> list[Path]:
+    hits: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in {"__pycache__", ".git"}]
+        for fn in filenames:
+            if fn == pattern or fn.endswith(pattern):
+                hits.append(Path(dirpath) / fn)
+    return sorted(hits)
+
+
+def find_artifacts(root: Path) -> dict[str, object]:
+    csvs = [p for p in _walk(root, "index.csv")]
+    pseudo_dirs = sorted({p.parent for p in _walk(root, ".c")})
+    if not pseudo_dirs:
+        pseudo_dirs = sorted({p.parent for p in _walk(root, ".c.txt")})
+    return {
+        "root": str(root),
+        "index_csv": [str(p) for p in csvs],
+        "pseudocode_dirs": [str(p) for p in pseudo_dirs],
+        "script_dir": str(root / "script") if (root / "script").is_dir() else None,
+        "json_dir": str(root / "json") if (root / "json").is_dir() else None,
+        "index_db": str(root / "index.db") if (root / "index.db").is_file() else None,
+    }
+
+
+def _pick_index_csv(root: Path) -> Path | None:
+    csvs = [p for p in _walk(root, "index.csv")]
+    if not csvs:
+        return None
+    for p in csvs:
+        if "ghidra" in str(p).lower():
+            return p
+    # prefer the one with the most rows
+    return max(csvs, key=lambda p: sum(1 for _ in p.open("r", errors="replace")))
+
+
+# --------------------------------------------------------------------------- #
+# index.csv reading
+# --------------------------------------------------------------------------- #
+_NAME_KEYS = ("name", "symbol", "function", "label")
+_FILE_KEYS = ("file", "path", "output", "pseudo")
+_ADDR_KEYS = ("address", "addr", "va", "ea", "entry", "offset")
+
+
+def _col(fields: list[str], keys: tuple[str, ...]) -> str | None:
+    for f in fields:
+        low = f.strip().lower()
+        if any(k in low for k in keys):
+            return f
+    return None
+
+
+def read_index(csv_path: Path) -> list[dict[str, str]]:
+    with csv_path.open("r", newline="", errors="replace") as fh:
+        sample = fh.read(8192)
+        fh.seek(0)
+        has_header = csv.Sniffer().has_header(sample) if sample.strip() else False
+        fh.seek(0)
+        if has_header:
+            reader = csv.DictReader(fh)
+            fields = [f for f in (reader.fieldnames or [])]
+            c_name = _col(fields, _NAME_KEYS)
+            c_file = _col(fields, _FILE_KEYS)
+            c_addr = _col(fields, _ADDR_KEYS)
+            rows = []
+            for row in reader:
+                rows.append(
+                    {
+                        "name": (row.get(c_name) or "").strip() if c_name else "",
+                        "file": (row.get(c_file) or "").strip() if c_file else "",
+                        "addr": (row.get(c_addr) or "").strip() if c_addr else "",
+                    }
+                )
+            return [r for r in rows if r["name"]]
+        # headerless: assume name,addr,file (the order the export script writes)
+        rows = []
+        for parts in csv.reader(fh):
+            if not parts:
+                continue
+            rows.append(
+                {
+                    "name": parts[0].strip(),
+                    "addr": parts[1].strip() if len(parts) > 1 else "",
+                    "file": parts[2].strip() if len(parts) > 2 else "",
+                }
+            )
+        return [r for r in rows if r["name"]]
+
+
+def _resolve_file(row: dict[str, str], csv_path: Path) -> Path | None:
+    raw = row["file"]
+    if not raw:
+        return None
+    cand = Path(raw)
+    if cand.is_file():
+        return cand
+    for base in (csv_path.parent, csv_path.parent.parent, Path.cwd()):
+        alt = base / raw
+        if alt.is_file():
+            return alt
+    # last resort: match by basename anywhere under the csv's parent
+    for p in _walk(csv_path.parent, cand.name):
+        return p
+    return None
+
+
+def _matches(name: str, patterns: tuple[str, ...]) -> bool:
+    low = name.lower()
+    return any(p.lower() in low for p in patterns)
+
+
+# --------------------------------------------------------------------------- #
+# commands
+# --------------------------------------------------------------------------- #
+def cmd_find(args: argparse.Namespace) -> int:
+    info = find_artifacts(args.out)
+    print(f"root: {info['root']}")
+    for key in ("index_db", "index_csv", "pseudocode_dirs", "script_dir", "json_dir"):
+        val = info[key]
+        if not val:
+            print(f"{key:16} (none found)")
+        elif isinstance(val, list):
+            print(f"{key:16} {len(val)} found")
+            for v in val[:5]:
+                print(f"{'':16}   {v}")
+        else:
+            print(f"{key:16} {val}")
+    return 0
+
+
+def cmd_pseudo(args: argparse.Namespace) -> int:
+    csv_path = _pick_index_csv(args.out)
+    if csv_path is None:
+        print("no index.csv under that path -- run `find` first, or point me at the file", file=sys.stderr)
+        return 2
+    rows = read_index(csv_path)
+    groups = [args.group] if args.group else list(GROUPS)
+    total = 0
+    for g in groups:
+        pats = GROUPS.get(g, (args.group,))
+        hits = [r for r in rows if _matches(r["name"], pats)]
+        if not hits and args.group:
+            hits = [r for r in rows if _matches(r["name"], (args.group,))]
+        print(f"\n== {g} ({len(hits)} hit(s)) ==")
+        for r in hits[:MAX_ROWS]:
+            resolved = _resolve_file(r, csv_path)
+            where = str(resolved) if resolved else (r["file"] or "(no file column)")
+            print(f"  {r['addr']:>12}  {r['name']:<44} {where}")
+            total += 1
+        if len(hits) > MAX_ROWS:
+            print(f"  ... {len(hits) - MAX_ROWS} more")
+    print(f"\n{csv_path}  ({len(rows)} rows, {total} listed)")
+    return 0
+
+
+def cmd_show(args: argparse.Namespace) -> int:
+    csv_path = _pick_index_csv(args.out)
+    if csv_path is None:
+        print("no index.csv under that path", file=sys.stderr)
+        return 2
+    rows = read_index(csv_path)
+    pats = GROUPS.get(args.pattern, (args.pattern,))
+    hits = [r for r in rows if _matches(r["name"], pats)]
+    if not hits:
+        print(f"nothing matched {args.pattern!r}")
+        return 1
+    for r in hits[: args.limit]:
+        path = _resolve_file(r, csv_path)
+        print(f"\n===== {r['name']}  @ {r['addr']}  ({path or 'file not found'}) =====")
+        if path is None:
+            continue
+        try:
+            text = path.read_text(errors="replace")
+        except OSError as exc:
+            print(f"  cannot read: {exc}")
+            continue
+        lines = text.splitlines()
+        for line in lines[:MAX_SHOW_LINES]:
+            print(line)
+        if len(lines) > MAX_SHOW_LINES:
+            print(f"  ... {len(lines) - MAX_SHOW_LINES} more lines (truncated)")
+    return 0
+
+
+def _extract_body(lines: list[str], start_idx: int, max_lines: int) -> list[str]:
+    """Return a function body starting at `start_idx`, brace-balanced."""
+    depth = 0
+    opened = False
+    out: list[str] = []
+    for line in lines[start_idx : start_idx + max_lines]:
+        out.append(line)
+        depth += line.count("{") - line.count("}")
+        if "{" in line:
+            opened = True
+        if opened and depth <= 0:
+            break
+    if opened and depth > 0:
+        out.append(f"    // ... unbalanced at {max_lines}-line cap")
+    return out
+
+
+def cmd_body(args: argparse.Namespace) -> int:
+    """Print the recovered UnrealScript body of a function, from every .uc that declares it.
+
+    This is the static counterpart to `reprobe trace`: where the trace can only show
+    edges that happened to fire, the body shows every branch that *can* fire.
+    """
+    script_root = args.out / "script"
+    if not script_root.is_dir():
+        script_root = args.out
+    # [^()]*? covers the optional return type: `function bool SharedFireAmmunition(`
+    rx = re.compile(
+        r"function\s+[^()]*?\b" + re.escape(args.pattern) + r"[A-Za-z0-9_]*\s*\(", re.I
+    )
+    found = 0
+    for path in _walk(script_root, ".uc"):
+        try:
+            lines = path.read_text(errors="replace").splitlines()
+        except OSError:
+            continue
+        for i, line in enumerate(lines):
+            if not rx.search(line):
+                continue
+            found += 1
+            if found > args.limit:
+                print(f"  ... more matches suppressed (--limit {args.limit})")
+                return 0
+            print(f"\n===== {path}:{i + 1} =====")
+            for bl in _extract_body(lines, i, args.max_lines):
+                print(bl)
+    if not found:
+        print(f"no function matching {args.pattern!r} in {script_root}")
+        return 1
+    return 0
+
+
+def _grep(root: Path, pattern: str, limit: int) -> list[tuple[str, int, str]]:
+    rx = re.compile(pattern)
+    out: list[tuple[str, int, str]] = []
+    for path in _walk(root, ".uc"):
+        try:
+            for i, line in enumerate(path.read_text(errors="replace").splitlines(), 1):
+                if rx.search(line):
+                    out.append((str(path), i, line.strip()))
+                    if len(out) >= limit:
+                        return out
+        except OSError:
+            continue
+    return out
+
+
+def cmd_uc(args: argparse.Namespace) -> int:
+    script_root = args.out / "script"
+    if not script_root.is_dir():
+        script_root = args.out
+    if not any(_walk(script_root, ".uc")):
+        print(f"no .uc files under {script_root}", file=sys.stderr)
+        return 2
+
+    if args.what == "status-chance":
+        for name in STATUS_CHANCE_NAMES:
+            hits = _grep(script_root, UC_CHECKS["status-chance"].format(pat=re.escape(name)), args.limit)
+            print(f"\n-- {name} ({len(hits)} hit(s)) --")
+            for f, i, line in hits:
+                print(f"  {f}:{i}: {line}")
+        return 0
+
+    if args.what == "weights":
+        for name in WEIGHT_NAMES:
+            hits = _grep(script_root, UC_CHECKS["weights"].format(pat=re.escape(name)), args.limit)
+            print(f"\n-- {name} ({len(hits)} hit(s)) --")
+            for f, i, line in hits:
+                print(f"  {f}:{i}: {line}")
+        return 0
+
+    if args.what == "native":
+        hits = _grep(script_root, r"native\s+(?:final\s+)?function\s+\w+", limit=args.limit)
+        print(f"\n-- native functions mentioning {args.pattern!r} --")
+        rx = re.compile(re.escape(args.pattern), re.I)
+        for f, i, line in hits:
+            if rx.search(f) or rx.search(line):
+                print(f"  {f}:{i}: {line}")
+        return 0
+
+    pattern = UC_CHECKS.get(args.what, r"{pat}").format(pat=re.escape(args.pattern))
+    hits = _grep(script_root, pattern, args.limit)
+    print(f"-- {args.what} / {args.pattern!r} ({len(hits)} hit(s)) --")
+    for f, i, line in hits:
+        print(f"  {f}:{i}: {line}")
+    return 0
+
+
+# --------------------------------------------------------------------------- #
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(prog="decomp_check", description=__doc__.splitlines()[0])
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    p = sub.add_parser("find", help="locate index.csv / pseudocode / script in a decom_bl2 out/")
+    p.add_argument("out", type=Path)
+    p.set_defaults(func=cmd_find)
+
+    p = sub.add_parser("pseudo", help="list pseudocode that matters, grouped by why")
+    p.add_argument("out", type=Path)
+    p.add_argument("group", nargs="?", help="one group or a bare function-name substring")
+    p.set_defaults(func=cmd_pseudo)
+
+    p = sub.add_parser("show", help="dump pseudocode for a function or group")
+    p.add_argument("out", type=Path)
+    p.add_argument("pattern", help="function name substring, or a group name")
+    p.add_argument("--limit", type=int, default=4)
+    p.set_defaults(func=cmd_show)
+
+    p = sub.add_parser("uc", help="grep facts out of the recovered UnrealScript")
+    p.add_argument("out", type=Path)
+    p.add_argument("what", choices=sorted(UC_CHECKS))
+    p.add_argument("pattern", nargs="?", default="", help="function/property name to look for")
+    p.add_argument("--limit", type=int, default=40)
+    p.set_defaults(func=cmd_uc)
+
+    p = sub.add_parser("body", help="print a function's recovered UnrealScript body")
+    p.add_argument("out", type=Path)
+    p.add_argument("pattern", help="function name (substring), e.g. SharedFireAmmunition")
+    p.add_argument("--limit", type=int, default=6, help="max declarations to print")
+    p.add_argument("--max-lines", type=int, default=150, help="max lines per body")
+    p.set_defaults(func=cmd_body)
+
+    args = ap.parse_args(argv)
+    if not args.out.is_dir():
+        print(f"not a directory: {args.out}", file=sys.stderr)
+        return 2
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
