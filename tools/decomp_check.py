@@ -10,6 +10,7 @@ Ghidra `index.csv`) and it will:
   uc      pull the facts that only the recovered UnrealScript knows:
           exact function signatures, which functions are native, status-effect
           attribute names, rarity weight constants, part-selection entry points
+  verify  re-run the evidence behind every recorded STATIC_FACTS entry
   find    just report where index.csv / pseudocode / script live
 
 Covers the gaps in tools/re_probe_parse that a live reflection dump cannot
@@ -97,11 +98,11 @@ UC_CHECKS: dict[str, str] = {
     # prefix match: "TakeDamage" also finds TakeDamageInternal, which is usually
     # where the real work (and the clean interception point) lives
     "signature": r"function\s+{pat}[A-Za-z0-9_]*\s*\(",
-    # which hooked functions are native (pseudocode) vs script (.uc body)?
-    "native": (
-        r"(?:\b(?:final|simulated|static|private|protected|public)\s+)*"
-        r"\bnative\s+(?:\b(?:final|simulated|static)\s+)*function\s+{pat}"
-    ),
+    # Which hooked functions are native (pseudocode) vs script (.uc body)?
+    # decom_bl2 marks natives with a trailing comment, e.g.
+    #   function bool ValidateWeaponDefinition(WeaponDefinitionData DefinitionData)  // native
+    # not with a leading `native` keyword.
+    "native": r"function\s+[^()=]*?\b{pat}[A-Za-z0-9_]*\s*\([^)]*\)\s*//\s*native",
     # kills the four-name guess in damage.py:_STATUS_CHANCE_FIELDS
     "status-chance": r"\b{pat}[A-Za-z]*",
     "weights": r"\b{pat}\b",
@@ -110,6 +111,165 @@ UC_CHECKS: dict[str, str] = {
     "zoom": r"function\s+[A-Za-z0-9_]*{pat}[A-Za-z0-9_]*\s*\(",
     "itemcard": r"function\s+[A-Za-z0-9_]*{pat}[A-Za-z0-9_]*\s*\(",
 }
+
+# --------------------------------------------------------------------------- #
+# Static findings: what the decom_bl2 corpus settled about melee-arsenal.
+#
+# Same shape as tools/re_probe_parse/assumptions.py so the two can be merged
+# into one FINDINGS report later. `status` is the conclusion; `check` records
+# the evidence, and `verify` re-runs it so a stale conclusion is caught when
+# the decomp is rebuilt against a different install.
+#
+# check kinds:
+#   {"cmd": "uc",    "what": <UC_CHECKS key>, "pattern": str, "expect": present|absent}
+#   {"cmd": "raw",   "pattern": <regex>,                      "expect": present|absent}
+#   {"cmd": "file",  "file": <basename>, "pattern": <regex>,  "expect": present|absent}
+#   {"cmd": "body",  "pattern": str,                          "expect": present|absent}
+#   None  -> informational, no mechanical check possible
+# --------------------------------------------------------------------------- #
+STATIC_FACTS: list[dict[str, object]] = [
+    {
+        "id": "STATIC-ROID-PATH",
+        "category": "properties",
+        "mod": "runtime/resources.py ATTR_ROID_BUFF",
+        "assumption": "D_Attributes.DamageSourceModifiers.InstigatedMeleeDamageAddedBuff exists.",
+        "status": "REFUTED",
+        "evidence": (
+            "No property named *InstigatedMeleeDamageAddedBuff* in 2,029 packages. "
+            "WillowPawn.uc:187-189 declares InstigatedMeleeDamageAdded with the "
+            "ModifierStack/BaseValue/value attribute triple."
+        ),
+        "action": (
+            "Rename to ...InstigatedMeleeDamageAdded. Roid currently works only "
+            "because _safe_find returns None and damage.py:124 falls back to "
+            "reading that property off the pawn."
+        ),
+        "check": {"cmd": "uc", "what": "parts", "pattern": "InstigatedMeleeDamageAddedBuff",
+                  "expect": "absent"},
+    },
+    {
+        "id": "STATIC-TAKEDAMAGE-PARAM",
+        "category": "properties",
+        "mod": "runtime/combat/damage.py _TAKE_DAMAGE_AMOUNT_FIELDS",
+        "assumption": "The incoming-damage float is called Damage on the pawn classes we hook.",
+        "status": "CONFIRMED",
+        "evidence": (
+            "WillowPlayerPawn.uc:3268 and WillowPawn.uc:5284 both declare "
+            "'float Damage'. DamageAmount/RawDamage belong to other classes; "
+            "InDamage and BaseDamage appear nowhere in the game."
+        ),
+        "action": "Drop InDamage and BaseDamage from the five-name guess.",
+        "check": {"cmd": "file", "file": "WillowPlayerPawn.uc",
+                  "pattern": r"function TakeDamage\(.*float Damage\)", "expect": "present"},
+    },
+    {
+        "id": "STATIC-HOOK-SHAREDFIRE",
+        "category": "hooks",
+        "mod": "assumptions.py HOOK-SHAREDFIRE",
+        "assumption": "SharedFireAmmunition reaches InstantFire.",
+        "status": "CONFIRMED",
+        "evidence": (
+            "WillowWeapon.uc:4287 SharedFireAmmunition() calls "
+            "ConsumeAmmo(CurrentFireMode) then InstantFire() -- in that order."
+        ),
+        "action": (
+            "Assumption held. ConsumeAmmo runs before InstantFire, so the POST "
+            "refill lands before the (blocked) swing."
+        ),
+        "check": {"cmd": "body", "pattern": "SharedFireAmmunition", "expect": "present"},
+    },
+    {
+        "id": "STATIC-HOOK-ITEMCARD",
+        "category": "hooks",
+        "mod": "assumptions.py HOOK-ITEMCARD",
+        "assumption": "SetItemCard/SetItemCardEx/SetTitle/SetTopStat/SetFunStats resolve; SetBottomStat does not.",
+        "status": "CONFIRMED",
+        "evidence": "ItemCardGFxObject.uc declares 14 Set* functions; SetBottomStat is not among them.",
+        "action": "Hook set is exactly right.",
+        "check": {"cmd": "file", "file": "ItemCardGFxObject.uc",
+                  "pattern": r"function SetBottomStat", "expect": "absent"},
+    },
+    {
+        "id": "STATIC-PROP-WEAPONWRITES",
+        "category": "properties",
+        "mod": "runtime/resolver.py sync_live_weapon_properties",
+        "assumption": "All 16 written properties exist (declared or inherited).",
+        "status": "CONFIRMED",
+        "evidence": (
+            "StatusEffect*/StatusEffectChance* (WillowWeapon.uc:117-128), ReloadCnt/ClipSize*/"
+            "ShotCost* (WillowWeapon.uc:180-193), and InstantHitDamage*/Spread*/FireInterval* "
+            "on Engine.Weapon.uc:37-45."
+        ),
+        "action": "hasattr guards always pass and can be dropped (the try/except already covers failures).",
+        "check": {"cmd": "file", "file": "Weapon.uc",
+                  "pattern": r"var floatattribute FireInterval;", "expect": "present"},
+    },
+    {
+        "id": "STATIC-FFYL-TAKEDAMAGE",
+        "category": "hooks",
+        "mod": "runtime/combat/damage.py on_player_take_damage_pre",
+        "assumption": "TakeDamage fires while the player is in state injured (FFYL).",
+        "status": "NO-IMPACT",
+        "evidence": (
+            "WillowPlayerPawn.uc:3500 overrides TakeDamage inside state injured. It never "
+            "calls super and never touches health -- it only calls ClientDamageShake(Damage). "
+            "No damage is applied in FFYL."
+        ),
+        "action": (
+            "Withdrawn: nothing to reduce, and guard cannot be active (no RMB while downed). "
+            "Residual: if the mod's hook binds to the state function, camera shake while "
+            "downed is scaled by the blade's DR percentage -- cosmetic only."
+        ),
+        "check": None,
+    },
+    {
+        "id": "STATIC-ATTR-CONTEXT",
+        "category": "values",
+        "mod": "runtime/combat/damage.py _eval_attr",
+        "assumption": "attr_obj.GetValue(pawn) resolves for the four D_Attributes.DamageSourceModifiers paths.",
+        "status": "UNVERIFIED",
+        "evidence": (
+            "All four attributes are declared on Engine.Controller (Controller.uc:86-118), "
+            "not on any Pawn. StatusEffectChanceModifierResolver::GetAttributeContext and "
+            "WillowPawn::GetAttributeContextSource are both native, so the .uc cannot say "
+            "whether the resolver walks Pawn -> Controller."
+        ),
+        "action": (
+            "Settle in game, not in Ghidra: take a known melee-damage bonus, enable Log Swing "
+            "Damage Breakdown, swing, and read melee_damage_scale. A flat 1.0 means the read is broken."
+        ),
+        "check": {"cmd": "uc", "what": "native", "pattern": "GetAttributeContextSource",
+                  "expect": "present"},
+    },
+    {
+        "id": "STATIC-WEIGHTS-NEED-JSON",
+        "category": "values",
+        "mod": "runtime/loot_pools.py _KNOWN_WEIGHT_INIT_DEFS, VANILLA_WEAPON_CLASS_SUM",
+        "assumption": "The .uc corpus can confirm the rarity weights and pool weight totals.",
+        "status": "UNVERIFIED",
+        "evidence": (
+            "grep for 'GD_Balance.Weighting' across out/script returns nothing: probabilities "
+            "live in nested BalancedItems[] arrays, which decom_bl2 leaves as hex without JSON."
+        ),
+        "action": (
+            "Either re-run the affected packages with --emit json, or read them live with "
+            "'reprobe dump GD_Itempools.WeaponPools.Pool_Weapons_All 2' (minutes, not hours)."
+        ),
+        "check": {"cmd": "raw", "pattern": r"GD_Balance\.Weighting", "expect": "absent"},
+    },
+    {
+        "id": "STATIC-DAMAGEADJUSTER-DEAD",
+        "category": "hooks",
+        "mod": "runtime/combat/damage.py (possible no-hook DR route)",
+        "assumption": "Engine.DamageAdjuster is a pluggable damage-modifier chain the mod could register into.",
+        "status": "REFUTED",
+        "evidence": "Two hits in 2,029 packages, both in its own class file. Nothing constructs or iterates it.",
+        "action": "Dead end -- DR stays a hook.",
+        # only self-references: the class file mentions it twice, nothing else does
+        "check": {"cmd": "raw", "pattern": r"DamageAdjuster", "expect": "present", "max": 4},
+    },
+]
+
 
 STATUS_CHANCE_NAMES = (
     "BaseStatusEffectChanceModifier",
@@ -344,10 +504,7 @@ def cmd_body(args: argparse.Namespace) -> int:
     script_root = args.out / "script"
     if not script_root.is_dir():
         script_root = args.out
-    # [^()]*? covers the optional return type: `function bool SharedFireAmmunition(`
-    rx = re.compile(
-        r"function\s+[^()]*?\b" + re.escape(args.pattern) + r"[A-Za-z0-9_]*\s*\(", re.I
-    )
+    rx = _body_decl_rx(args.pattern)
     found = 0
     for path in _walk(script_root, ".uc"):
         try:
@@ -368,6 +525,89 @@ def cmd_body(args: argparse.Namespace) -> int:
         print(f"no function matching {args.pattern!r} in {script_root}")
         return 1
     return 0
+
+
+def _script_root(out: Path) -> Path:
+    return out / "script" if (out / "script").is_dir() else out
+
+
+def _body_decl_rx(pattern: str) -> re.Pattern:
+    # [^()]*? covers the optional return type: `function bool SharedFireAmmunition(`
+    return re.compile(r"function\s+[^()]*?\b" + re.escape(pattern) + r"[A-Za-z0-9_]*\s*\(", re.I)
+
+
+def _count_check(out: Path, check: dict[str, object] | None) -> int | None:
+    """Re-run one fact's check; return the hit count, or None if uncheckable."""
+    if not check:
+        return None
+    root = _script_root(out)
+    cmd = check.get("cmd")
+    if cmd == "uc":
+        what = str(check.get("what", "parts"))
+        rx = UC_CHECKS.get(what, r"{pat}").format(pat=re.escape(str(check.get("pattern", ""))))
+        return len(_grep(root, rx, 5000))
+    if cmd == "raw":
+        return len(_grep(root, str(check.get("pattern", "")), 5000))
+    if cmd == "file":
+        want = str(check.get("file", ""))
+        rx = re.compile(str(check.get("pattern", "")))
+        hits = 0
+        for path in _walk(root, ".uc"):
+            if path.name != want:
+                continue
+            try:
+                hits += sum(1 for line in path.read_text(errors="replace").splitlines() if rx.search(line))
+            except OSError:
+                continue
+        return hits
+    if cmd == "body":
+        rx = _body_decl_rx(str(check.get("pattern", "")))
+        hits = 0
+        for path in _walk(root, ".uc"):
+            try:
+                hits += sum(
+                    1 for line in path.read_text(errors="replace").splitlines() if rx.search(line)
+                )
+            except OSError:
+                continue
+        return hits
+    return None
+
+
+def cmd_verify(args: argparse.Namespace) -> int:
+    """Re-run every static fact's evidence against this decomp tree.
+
+    Reports whether the recorded evidence still holds -- a conclusion is only as
+    good as the evidence behind it, and the decomp gets rebuilt.
+    """
+    if not any(_walk(_script_root(args.out), ".uc")):
+        print(f"no .uc files under {_script_root(args.out)}", file=sys.stderr)
+        return 2
+    stale = 0
+    for fact in STATIC_FACTS:
+        check = fact.get("check")
+        count = _count_check(args.out, check)  # type: ignore[arg-type]
+        status = str(fact["status"])
+        if count is None:
+            verdict = "no mechanical check"
+        else:
+            expect = str((check or {}).get("expect", "present"))
+            cap = (check or {}).get("max")
+            if cap is not None:
+                holds = count <= int(cap)
+            elif expect == "absent":
+                holds = count == 0
+            else:
+                holds = count > 0
+            verdict = f"evidence holds ({count} hit(s))" if holds else f"STALE ({count} hit(s))"
+            stale += 0 if holds else 1
+        print(f"{fact['id']:<32} {status:<12} {verdict}")
+        if args.verbose:
+            print(f"    mod: {fact['mod']}")
+            print(f"    {fact['evidence']}")
+            print(f"    -> {fact['action']}")
+    print(f"\n{len(STATIC_FACTS)} static facts, {stale} with stale evidence")
+    return 1 if stale else 0
 
 
 def _grep(root: Path, pattern: str, limit: int) -> list[tuple[str, int, str]]:
@@ -410,12 +650,10 @@ def cmd_uc(args: argparse.Namespace) -> int:
         return 0
 
     if args.what == "native":
-        hits = _grep(script_root, r"native\s+(?:final\s+)?function\s+\w+", limit=args.limit)
-        print(f"\n-- native functions mentioning {args.pattern!r} --")
-        rx = re.compile(re.escape(args.pattern), re.I)
+        hits = _grep(script_root, UC_CHECKS["native"].format(pat=re.escape(args.pattern)), args.limit)
+        print(f"\n-- native functions matching {args.pattern!r} --")
         for f, i, line in hits:
-            if rx.search(f) or rx.search(line):
-                print(f"  {f}:{i}: {line}")
+            print(f"  {f}:{i}: {line.strip()}")
         return 0
 
     pattern = UC_CHECKS.get(args.what, r"{pat}").format(pat=re.escape(args.pattern))
@@ -452,6 +690,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("pattern", nargs="?", default="", help="function/property name to look for")
     p.add_argument("--limit", type=int, default=40)
     p.set_defaults(func=cmd_uc)
+
+    p = sub.add_parser("verify", help="re-check the recorded static findings against this tree")
+    p.add_argument("out", type=Path)
+    p.add_argument("-v", "--verbose", action="store_true", help="print evidence and action per fact")
+    p.set_defaults(func=cmd_verify)
 
     p = sub.add_parser("body", help="print a function's recovered UnrealScript body")
     p.add_argument("out", type=Path)
