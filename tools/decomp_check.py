@@ -11,6 +11,10 @@ Ghidra `index.csv`) and it will:
           exact function signatures, which functions are native, status-effect
           attribute names, rarity weight constants, part-selection entry points
   verify  re-run the evidence behind every recorded STATIC_FACTS entry
+  schema  class/struct/enum layouts out of index.db (no JSON corpus needed)
+          e.g. schema out TopStatData --body
+               schema out WeaponDefinitionData
+               schema out AttributeInitializationData
   find    just report where index.csv / pseudocode / script live
 
 Covers the gaps in tools/re_probe_parse that a live reflection dump cannot
@@ -36,8 +40,10 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import os
 import re
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -574,6 +580,65 @@ def _count_check(out: Path, check: dict[str, object] | None) -> int | None:
     return None
 
 
+def _schema_rows(db_path: Path, pattern: str, kind: str | None, limit: int) -> list[dict[str, object]]:
+    """Read class/struct/enum layouts straight out of the pass-1 index.
+
+    index.db is built regardless of --emit, so this answers the struct and enum
+    assumptions without the multi-GB JSON corpus.
+    """
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    cols = [r[1] for r in conn.execute("pragma table_info(schemas)")]
+    like = f"%{pattern}%"
+    sql = f"select {', '.join(cols)} from schemas where (path like ? or name like ?)"
+    params: list[object] = [like, like]
+    if kind:
+        sql += " and kind = ?"
+        params.append(kind)
+    sql += " order by kind, path limit ?"
+    params.append(limit)
+    out: list[dict[str, object]] = []
+    for row in conn.execute(sql, params):
+        d = dict(zip(cols, row))
+        d["_raw_fields"] = d.get("fields")
+        try:
+            d["fields"] = json.loads(d.get("fields") or "[]")
+        except Exception:
+            d["fields"] = []
+        out.append(d)
+    conn.close()
+    return out
+
+
+def cmd_schema(args: argparse.Namespace) -> int:
+    db_path = args.out / "index.db"
+    if not db_path.is_file():
+        found = _walk(args.out, "index.db")
+        if not found:
+            print(f"no index.db under {args.out} -- run the index pass first", file=sys.stderr)
+            return 2
+        db_path = found[0]
+    rows = _schema_rows(db_path, args.pattern, args.kind, args.limit)
+    if not rows:
+        print(f"no schema matching {args.pattern!r}" + (f" (kind={args.kind})" if args.kind else ""))
+        return 1
+    for d in rows:
+        print(f"\n{d['kind']} {d['path']}   (package={d['package']}, super={d['super']})")
+        for f in d["fields"] or []:
+            if not isinstance(f, dict):
+                print(f"    {f}")
+                continue
+            extra = f"  enum={f['enum']}" if f.get("enum") else ""
+            flags = ",".join(f.get("flag_names") or []) if f.get("flag_names") else ""
+            print(f"    {str(f.get('name')):<38} {str(f.get('type'))}{extra}{'  [' + flags + ']' if flags else ''}")
+        body = (d.get("body") or "").strip()
+        if body and args.body:
+            print(f"    --- body ({len(body)} chars) ---")
+            for line in body.splitlines()[:60]:
+                print(f"    {line}")
+    print(f"\n{len(rows)} row(s) from {db_path}")
+    return 0
+
+
 def cmd_verify(args: argparse.Namespace) -> int:
     """Re-run every static fact's evidence against this decomp tree.
 
@@ -690,6 +755,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("pattern", nargs="?", default="", help="function/property name to look for")
     p.add_argument("--limit", type=int, default=40)
     p.set_defaults(func=cmd_uc)
+
+    p = sub.add_parser("schema", help="class/struct/enum layouts from out/index.db")
+    p.add_argument("out", type=Path)
+    p.add_argument("pattern", help="path or name substring, e.g. TopStatData, WeaponDefinitionData")
+    p.add_argument("--kind", choices=("Class", "ScriptStruct", "Enum", "State"))
+    p.add_argument("--limit", type=int, default=20)
+    p.add_argument("--body", action="store_true", help="also print the body column (enum members?)")
+    p.set_defaults(func=cmd_schema)
 
     p = sub.add_parser("verify", help="re-check the recorded static findings against this tree")
     p.add_argument("out", type=Path)
