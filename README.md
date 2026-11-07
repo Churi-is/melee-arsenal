@@ -135,11 +135,6 @@ For deeper diagnostics, enable **Log Swing Damage Breakdown** and tail the log:
 ./melee check              # byte-compile sdk_mods/ and tools/
 ```
 
-**Why the engine calls in this mod look the way they do.** Class layouts, which hooks fire, the item
-card's real parameter names and icon strings, loot weights and the exact effect paths were measured
-in game rather than guessed; the results — and the code they justify — are recorded in
-[docs/ENGINE_FACTS.md](docs/ENGINE_FACTS.md).
-
 ---
 
 ## Dependencies

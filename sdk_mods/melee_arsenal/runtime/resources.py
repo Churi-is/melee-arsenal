@@ -16,16 +16,27 @@ from ..core.parts import ELEMENTS
 from .log import log_debug, log_debug_once, log_info
 
 
+# Live attribute paths, cross-checked against a real BL2 player-controller dump and the
+# clean-room RE notes in zuhuHix/BL2_ReBased (see docs/ENGINE_FACTS.md, "Status-effect attributes").
 ATTR_MELEE_MODIFIER = "D_Attributes.DamageSourceModifiers.InstigatedMeleeDamageModifier"
 
 
 ATTR_ROID_BUFF = "D_Attributes.DamageSourceModifiers.InstigatedMeleeDamageAddedBuff"
 
 
+# `InstigatedStatusEffectDamageModifier` is the *damage-source* modifier the pipeline applies to a
+# `WillowDmgSource_StatusEffect` hit. The separate `InstigatedStatusEffectStatusDamageModifier` is the
+# DoT-DPS multiplier the engine already applies itself when it builds the effect, so we deliberately
+# do not bake that one in here (it would double-count). Kept as-is pending live verification.
 ATTR_STATUS_DMG_MOD = "D_Attributes.DamageSourceModifiers.InstigatedStatusEffectDamageModifier"
 
 
-ATTR_STATUS_CHANCE_MOD = "D_Attributes.DamageSourceModifiers.InstigatedStatusEffectChanceModifier"
+# The chance attribute is `InstigatedStatusEffectStatusChanceModifier` (note the doubled "Status").
+# The old `InstigatedStatusEffectChanceModifier` does not exist in the game, so `_safe_find` returned
+# None and player status-chance bonuses (Flicker, elemental relics, BAR) were silently ignored. We do
+# our own proc roll and force the weapon's native chance, so reading the real attribute is the only
+# place those bonuses can enter. Confirmed in BLCM/BLCMods CharactorData.txt + BL2_ReBased NATIVE_WEAPON_FIRING.
+ATTR_STATUS_CHANCE_MOD = "D_Attributes.DamageSourceModifiers.InstigatedStatusEffectStatusChanceModifier"
 
 
 ELEM_DMG_TYPE_PROC_PATHS: dict[Element, str] = {
