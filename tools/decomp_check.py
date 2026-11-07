@@ -11,6 +11,10 @@ Ghidra `index.csv`) and it will:
           exact function signatures, which functions are native, status-effect
           attribute names, rarity weight constants, part-selection entry points
   verify  re-run the evidence behind every recorded STATIC_FACTS entry
+  summarize  one big greppable digest: object paths, class/struct/enum layouts,
+             every function signature, defaultproperties blocks, then function
+             bodies appended until the file clears --target-mb (default 25)
+             e.g. summarize out --output ~/bl2-summary.md --target-mb 25
   schema  class/struct/enum layouts out of index.db (no JSON corpus needed)
           e.g. schema out TopStatData --body
                schema out WeaponDefinitionData
@@ -668,6 +672,190 @@ def _count_check(out: Path, check: dict[str, object] | None) -> int | None:
     return None
 
 
+SUMMARY_SECTIONS = ("objects", "classes", "structs", "enums", "functions", "defaults")
+
+
+def _iter_uc(root: Path):
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in {"__pycache__", ".git"}]
+        for fn in sorted(filenames):
+            if fn.endswith(".uc"):
+                yield Path(dirpath) / fn
+
+
+def _emit_schema_sections(fh, db_path: Path, wanted: tuple[str, ...], counts: dict[str, int]) -> None:
+    """Stream class/struct/enum layouts out of index.db."""
+    for kind, heading, section in (
+        ("Class", "CLASS", "classes"),
+        ("ScriptStruct", "STRUCT", "structs"),
+        ("Enum", "ENUM", "enums"),
+    ):
+        if section not in wanted:
+            continue
+        for d in _schema_rows(db_path, "", kind, 200000):
+            fields = d.get("fields") or []
+            fh.write(f"\n## {heading} {d['path']}  (package={d['package']}, super={d['super']})\n")
+            for f in fields or []:
+                if isinstance(f, dict):
+                    extra = f"  enum={f['enum']}" if f.get("enum") else ""
+                    fh.write(f"#   {f.get('name')} : {f.get('type')}{extra}\n")
+                else:
+                    fh.write(f"#   {f}\n")
+            body = (d.get("body") or "").strip()
+            if body:
+                fh.write(f"#   body: {body}\n")
+            counts[section] += 1
+
+
+def _emit_script_sections(
+    fh,
+    script_root: Path,
+    wanted: tuple[str, ...],
+    counts: dict[str, int],
+    want_objects: bool,
+    want_functions: bool,
+    want_defaults: bool,
+    limit_bytes: int,
+    tell,
+) -> bool:
+    """Stream object paths, function signatures and defaultproperties out of the .uc corpus.
+
+    Returns True if the byte limit was reached mid-way.
+    """
+    func_rx = re.compile(r"^\s*(?:simulated\s+|final\s+|static\s+|private\s+|protected\s+|public\s+)*function\s")
+    obj_rx = re.compile(r"^//\s*object:\s*(.+?)\s*$")
+    class_rx = re.compile(r"^\s*class\s+(\w+)\s+extends\s+([\w.]+)")
+    for path in _iter_uc(script_root):
+        try:
+            lines = path.read_text(errors="replace").splitlines()
+        except OSError:
+            continue
+        current_class = ""
+        for i, line in enumerate(lines):
+            m = obj_rx.match(line)
+            if m and want_objects:
+                fh.write(f"\n## OBJECT {m.group(1)}\n#   file: {path}\n")
+                counts["objects"] += 1
+                continue
+            m = class_rx.match(line)
+            if m:
+                current_class = m.group(1)
+                continue
+            if func_rx.match(line):
+                if want_functions:
+                    fh.write(f"\n## FUNC {current_class} :: {line.strip()}\n#   {path}:{i + 1}\n")
+                    counts["functions"] += 1
+                continue
+            if line.strip().startswith("defaultproperties") and want_defaults:
+                depth = 0
+                block = []
+                for bl in lines[i:]:
+                    block.append(bl)
+                    depth += bl.count("{") - bl.count("}")
+                    if "{" in bl and depth <= 0:
+                        break
+                    if len(block) > 2000:
+                        break
+                if block:
+                    fh.write(f"\n## DEFAULTS {current_class}\n#   {path}:{i + 1}\n")
+                    fh.write("\n".join(block) + "\n")
+                    counts["defaults"] += 1
+        if limit_bytes and tell() >= limit_bytes:
+            return True
+    return False
+
+
+def _emit_bodies(fh, script_root: Path, counts: dict[str, int], limit_bytes: int, tell) -> bool:
+    """Append recovered function bodies until the byte limit is reached."""
+    rx = re.compile(
+        r"^\s*(?:simulated\s+|final\s+|static\s+|private\s+|protected\s+|public\s+)*"
+        r"function\s+([^()]*?\b(\w+)\s*\()"
+    )
+    for path in _iter_uc(script_root):
+        try:
+            lines = path.read_text(errors="replace").splitlines()
+        except OSError:
+            continue
+        for i, line in enumerate(lines):
+            m = rx.match(line)
+            if not m:
+                continue
+            fh.write(f"\n## BODY {m.group(2)}\n#   {path}:{i + 1}\n")
+            for bl in _extract_body(lines, i, 400):
+                fh.write(bl + "\n")
+            counts["bodies"] += 1
+        if limit_bytes and tell() >= limit_bytes:
+            return True
+    return False
+
+
+def cmd_summarize(args: argparse.Namespace) -> int:
+    """One big greppable digest: object paths, class/struct/enum layouts, function signatures, defaults.
+
+    Streams index.db plus the whole .uc corpus into a single file. Sections are written in a
+    fixed order and, if the file is still under --target-mb afterwards, function bodies are
+    appended until it clears the target (they are what makes this big).
+    """
+    script_root = _script_root(args.out)
+    db_path = args.out / "index.db"
+    if not db_path.is_file():
+        found = _walk(args.out, "index.db")
+        if not found:
+            print(f"no index.db under {args.out}", file=sys.stderr)
+            return 2
+        db_path = found[0]
+
+    wanted = tuple(s.strip() for s in args.sections.split(",") if s.strip())
+    unknown = [s for s in wanted if s not in SUMMARY_SECTIONS]
+    if unknown:
+        print(f"unknown section(s): {', '.join(unknown)} (have: {', '.join(SUMMARY_SECTIONS)})",
+              file=sys.stderr)
+        return 2
+
+    target = int(args.target_mb * 1024 * 1024)
+    cap = int(args.max_mb * 1024 * 1024)
+    counts = dict.fromkeys(SUMMARY_SECTIONS + ("bodies",), 0)
+
+    if args.output is None:
+        args.output = args.out / "SUMMARY.md"
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    with args.output.open("w", encoding="utf-8", errors="replace") as fh:
+        def tell() -> int:
+            return fh.tell()
+
+        fh.write("# decom_bl2 general summary\n")
+        fh.write(f"# out      : {args.out}\n")
+        fh.write(f"# index    : {db_path}\n")
+        fh.write(f"# script   : {script_root}\n")
+        fh.write(f"# sections : {','.join(wanted)}\n")
+        fh.write(f"# target   : {args.target_mb} MB\n")
+        fh.write("#\n# Record markers: ## OBJECT / ## CLASS / ## STRUCT / ## ENUM / ## FUNC /\n")
+        fh.write("#                 ## DEFAULTS (defaultproperties block) / ## BODY (full body)\n")
+
+        _emit_schema_sections(fh, db_path, wanted, counts)
+        print(f"  schemas done: {tell() / 1e6:.1f} MB", file=sys.stderr)
+        stopped = _emit_script_sections(
+            fh, script_root, wanted, counts,
+            "objects" in wanted, "functions" in wanted, "defaults" in wanted,
+            cap, tell,
+        )
+        print(f"  scripts done: {tell() / 1e6:.1f} MB", file=sys.stderr)
+
+        if not stopped and tell() < target:
+            fh.write(f"\n# --- function bodies appended to clear the {args.target_mb} MB target ---\n")
+            _emit_bodies(fh, script_root, counts, target, tell)
+
+    size = args.output.stat().st_size
+    print(f"\nwrote {args.output}  ({size / 1048576:.1f} MB)")
+    for k in SUMMARY_SECTIONS + ("bodies",):
+        if counts[k]:
+            print(f"  {k:<10} {counts[k]}")
+    if size < target:
+        print(f"\nunder target ({size / 1048576:.1f} < {args.target_mb} MB): the corpus ran out "
+              f"before the target was reached")
+    return 0
+
+
 def _schema_rows(db_path: Path, pattern: str, kind: str | None, limit: int) -> list[dict[str, object]]:
     """Read class/struct/enum layouts straight out of the pass-1 index.
 
@@ -843,6 +1031,19 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("pattern", nargs="?", default="", help="function/property name to look for")
     p.add_argument("--limit", type=int, default=40)
     p.set_defaults(func=cmd_uc)
+
+    p = sub.add_parser(
+        "summarize",
+        help="one big greppable digest of objects, scripts and data",
+    )
+    p.add_argument("out", type=Path)
+    p.add_argument("--output", type=Path, default=None, help="default <out>/SUMMARY.md")
+    p.add_argument("--sections", default=",".join(SUMMARY_SECTIONS),
+                   help="comma-separated subset of " + ",".join(SUMMARY_SECTIONS))
+    p.add_argument("--target-mb", type=float, default=25.0,
+                   help="append function bodies until the file clears this size (default 25)")
+    p.add_argument("--max-mb", type=float, default=1024.0, help="hard cap, default 1024 MB")
+    p.set_defaults(func=cmd_summarize)
 
     p = sub.add_parser("schema", help="class/struct/enum layouts from out/index.db")
     p.add_argument("out", type=Path)
