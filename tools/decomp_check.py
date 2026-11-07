@@ -248,6 +248,82 @@ STATIC_FACTS: list[dict[str, object]] = [
                   "expect": "present"},
     },
     {
+        "id": "STATIC-ENUM-ARROW",
+        "category": "enums",
+        "mod": "runtime/ui_item_card.py _ARROW_BYTES / core/item_card.py CompareArrow",
+        "assumption": "ETopStatArrow is ETSA_Blank=0, ETSA_Up=1, ETSA_Down=2, ETSA_Same=3.",
+        "status": "CONFIRMED",
+        "evidence": (
+            "index.db schemas body for WillowGame.InventoryCardGFx.ETopStatArrow: "
+            '{"values": ["ETSA_Blank", "ETSA_Up", "ETSA_Down", "ETSA_Same", "ETSA_MAX"]} '
+            "-- so 0/1/2/3, with ETSA_MAX=4 as the sentinel."
+        ),
+        "action": "Byte mapping is exact; no change.",
+        "check": {"cmd": "db", "pattern": "ETopStatArrow", "kind": "Enum", "expect": "present"},
+    },
+    {
+        "id": "STATIC-STRUCT-DEFINITIONDATA",
+        "category": "structs",
+        "mod": "runtime/resolver.py apply_instance_to_definition_data",
+        "assumption": (
+            "WeaponDefinitionData has all 17 named fields: WeaponTypeDefinition, BalanceDefinition, "
+            "ManufacturerDefinition, ManufacturerGradeIndex, BodyPartDefinition, GripPartDefinition, "
+            "BarrelPartDefinition, SightPartDefinition, StockPartDefinition, ElementalPartDefinition, "
+            "Accessory1PartDefinition, Accessory2PartDefinition, MaterialPartDefinition, "
+            "PrefixPartDefinition, TitlePartDefinition, GameStage, UniqueId."
+        ),
+        "status": "CONFIRMED",
+        "evidence": (
+            "index.db WillowGame.WillowWeaponTypes.WeaponDefinitionData lists exactly those 17 names. "
+            "The index order is the serialized order (reverse of the assumption's) and the code writes "
+            "by name, so order is irrelevant."
+        ),
+        "action": "No change; the setattr chain is safe.",
+        "check": {"cmd": "db", "pattern": "WeaponDefinitionData", "kind": "ScriptStruct",
+                  "expect": "present"},
+    },
+    {
+        "id": "STATIC-STRUCT-WEIGHTEDROW-NAME",
+        "category": "structs",
+        "mod": "runtime/definitions/balances.py:135 unrealsdk.make_struct",
+        "assumption": "The manufacturer-weight struct is named ManufacturerCustomPartWeightData.",
+        "status": "REFUTED",
+        "evidence": (
+            "No schema named *ManufacturerCustomPartWeightData* in index.db (3,338 classes, 1,338 "
+            "structs, 792 enums searched). make_struct with that name raises, is swallowed by the "
+            "except, and leaves mfr_weight_one = None."
+        ),
+        "action": (
+            "Latent, not live: the copy-from-donor-template path above it normally succeeds. But when "
+            "the template is missing, row.Manufacturers ends up empty -- which is precisely the case "
+            "where native ChooseRandomParts substitutes flat weight 100, the failure this code exists "
+            "to prevent. Find the real struct name and fix make_struct."
+        ),
+        "check": {"cmd": "db", "pattern": "ManufacturerCustomPartWeightData", "expect": "absent"},
+    },
+    {
+        "id": "STATIC-PROP-POOL",
+        "category": "properties",
+        "mod": "runtime/loot_pools.py",
+        "assumption": (
+            "ItemPoolDefinition declares BalancedItems/Quantity/MinGameStageRequirement/"
+            "MaxGameStageRequirement/bAutoReadyItems/bShopsHaveInfiniteQuantity and no ItemPool property."
+        ),
+        "status": "CONFIRMED",
+        "evidence": (
+            "index.db WillowGame.ItemPoolDefinition declares all six plus four more "
+            "(bEligibleForUncommonWeightMultiplier, bSupportsGameStageVariance, bDisablePhysicsDrop, "
+            "CheatSpawnLevel). Min/MaxGameStageRequirement are ObjectProperty, not ints -- and "
+            "loot_pools.py:204-205 sets them to None, which is correct for an object reference."
+        ),
+        "action": (
+            "No change. Note CrossDLCItemPoolDefinition extends it and stores pool references as "
+            "strings (BalancedInventoryDataMirror.ObjectPath), so check whether DLC maps route drops "
+            "through that class -- object-reference injection would not reach it."
+        ),
+        "check": {"cmd": "db", "pattern": "ItemPoolDefinition", "kind": "Class", "expect": "present"},
+    },
+    {
         "id": "STATIC-WEIGHTS-NEED-JSON",
         "category": "values",
         "mod": "runtime/loot_pools.py _KNOWN_WEIGHT_INIT_DEFS, VANILLA_WEAPON_CLASS_SUM",
@@ -566,6 +642,18 @@ def _count_check(out: Path, check: dict[str, object] | None) -> int | None:
             except OSError:
                 continue
         return hits
+    if cmd == "db":
+        db_path = out / "index.db"
+        if not db_path.is_file():
+            found = _walk(out, "index.db")
+            if not found:
+                return None
+            db_path = found[0]
+        rows = _schema_rows(
+            db_path, str(check.get("pattern", "")), check.get("kind"),  # type: ignore[arg-type]
+            int(check.get("limit", 50)),
+        )
+        return len(rows)
     if cmd == "body":
         rx = _body_decl_rx(str(check.get("pattern", "")))
         hits = 0
